@@ -15,6 +15,50 @@ Do not refactor unrelated code.
 
 ## Changelog
 
+### 2026-08-05 — STEP 3: Tree graph data model
+
+New `src/engine/tree/` module (pure TS, no React), re-exported from
+`src/engine/index.ts`:
+
+- `treeTypes.ts` — `NodeType` (`trunk`/`branch`/`twig`/`leafCluster`/`blossom`/
+  `rootSegment`/`rootTip`), the `TreeNode` shape (all JSON-primitive fields:
+  `id`, `type`, `parentId`, `childIds`, `speciesId`, `level`, `angle` [radians,
+  relative to parent], `length`, `thickness`, `createdAtTick`), and the
+  **data-driven** `NODE_RULES` table (`domain`, `direction`, `allowedChildren`,
+  `maxChildren`, `maxAngleFromParent`, base length/thickness). Canopy nodes splay
+  ±70° of the parent; roots ±55°. `baseDirection()` + `UP_ANGLE`/`DOWN_ANGLE`
+  fix the world convention (screen coords, +y **down**: canopy → -y, roots → +y).
+- `rng.ts` — `SeededRng` (mulberry32) with serializable single-integer state, so
+  replaying an action log yields byte-identical geometry and growth resumes
+  deterministically after load.
+- `treeGraph.ts` — `TreeGraph`: `create(seed, speciesId, tick?)` seeds a lone
+  trunk; `getValidGrowthOptions(id)` (allowed children, or `[]` at the child
+  cap); `grow(id, childType, speciesId)` returns the new node, placing its angle
+  as an even fan across the allowed range + small seeded jitter (clamped);
+  `prune(id)` removes the whole subtree (subtree-root first) and detaches it,
+  refusing the trunk; `serialize()`/`static deserialize()` for full JSON
+  round-trips (versioned, carries `rngState`/`nextId`/`currentTick`).
+  `computeWorldPositions(graph, origin?)` is a **pure** walk deriving per-node
+  `NodeGeometry` (start/end/worldAngle); positions are never stored on the graph.
+  Domain switches (a root off the trunk) reset direction to the domain base.
+- Tests: `tree/treeGraph.test.ts` (18) — growth constraints (allowed types, child
+  caps, terminals, unknown-id throws, parent/level/tick recording), angle bounds
+  + hemisphere/spread geometry, subtree pruning (+ trunk refusal), determinism
+  (same seed identical, different seeds diverge, continuity across a
+  serialize/deserialize boundary), and serialization round-trips. 60 tests pass;
+  lint + build clean.
+
+**Open TODOs**
+
+- [ ] Wire `TreeGraph` into `Simulation`/`GameState` (own the player's tree,
+      stamp real `createdAtTick` via `setTick`, include it in snapshots/saves).
+- [ ] Render the graph on the canvas via `computeWorldPositions` (thickness →
+      stroke width, node type → color/shape); anchor `origin` at the trunk base.
+- [ ] Gate `grow`/`prune` behind resource costs + refunds (Sap to grow, Deadwood
+      + partial refund on prune) once the economy is connected.
+- [ ] Species-driven geometry (per-species length/thickness/angle overrides,
+      hybrids from grafting) rather than the single shared `NODE_RULES` table.
+
 ### 2026-08-05 — STEP 2: Economy foundation (resources, producers, modifiers)
 
 - `src/engine/resourceRegistry.ts` — `ResourceRegistry` holding, per resource,

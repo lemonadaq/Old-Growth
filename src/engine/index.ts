@@ -12,6 +12,22 @@ export {
   type ModifierTargetKind,
 } from './modifiers';
 export { computeProduction, type Producer } from './economy';
+export {
+  TreeGraph,
+  computeWorldPositions,
+  SeededRng,
+  NODE_RULES,
+  UP_ANGLE,
+  DOWN_ANGLE,
+  baseDirection,
+  type NodeType,
+  type GrowthDomain,
+  type GrowthDirection,
+  type TreeNode,
+  type NodeTypeRule,
+  type SerializedTreeGraph,
+  type NodeGeometry,
+} from './tree';
 export { enableTestProducers, disableTestProducers } from './debugProducers';
 export {
   createInitialState,

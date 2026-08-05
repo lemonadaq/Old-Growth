@@ -16,6 +16,30 @@
   gap: 12px;
 }
 
+.hud-header__right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hud-toggle {
+  pointer-events: auto; /* the HUD ignores pointer events by default */
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  color: var(--hud-text);
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  backdrop-filter: blur(4px);
+}
+
+.hud-toggle[aria-pressed='true'] {
+  color: var(--hud-accent);
+  border-color: var(--hud-accent);
+}
+
 .hud-title {
   margin: 0;
   font-size: 20px;
@@ -68,4 +92,10 @@
 .hud-resource__value {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
+}
+
+.hud-resource__rate {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--hud-muted);
 }

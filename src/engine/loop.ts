@@ -1,0 +1,121 @@
+/**
+ * Fixed-timestep game loop with an accumulator, decoupled from rendering.
+ *
+ * The simulation advances in fixed {@link MS_PER_TICK} steps ({@link TICK_RATE}
+ * ticks/sec) so game logic is deterministic and framerate-independent. Rendering
+ * happens once per animation frame regardless of how many ticks ran, and receives
+ * an interpolation `alpha` in `[0, 1)` describing progress toward the next tick.
+ *
+ * This class contains no React or DOM-rendering code. `advance()` is pure with
+ * respect to timing input, which makes the stepping logic unit-testable without
+ * a real `requestAnimationFrame`.
+ */
+
+/** Simulation ticks per second. */
+export const TICK_RATE = 10;
+
+/** Milliseconds of simulated time per fixed tick. */
+export const MS_PER_TICK = 1000 / TICK_RATE;
+
+/**
+ * Largest frame delta we will process in one call. Longer gaps (tab was
+ * backgrounded, breakpoint hit) are clamped so we never try to catch up with an
+ * unbounded number of ticks — the classic "spiral of death".
+ */
+export const MAX_FRAME_MS = 250;
+
+export interface LoopCallbacks {
+  /** Advance the simulation by one fixed step. `dtSeconds` is constant. */
+  update(dtSeconds: number): void;
+  /** Draw a frame. `alpha` is progress toward the next tick, in `[0, 1)`. */
+  render(alpha: number): void;
+  /** Called ~once per second with sampled FPS/TPS. */
+  onStats?(stats: { fps: number; tps: number }): void;
+}
+
+export class GameLoop {
+  private accumulatorMs = 0;
+  private running = false;
+  private rafId: number | null = null;
+  private lastTimeMs = 0;
+
+  // Stat sampling.
+  private ticksThisWindow = 0;
+  private framesThisWindow = 0;
+  private windowMs = 0;
+
+  constructor(private readonly cb: LoopCallbacks) {}
+
+  /**
+   * Feed one frame's elapsed time into the loop. Runs zero or more fixed
+   * simulation steps, then renders once. Returns the number of ticks executed.
+   *
+   * Called by the internal rAF loop, and directly by tests.
+   */
+  advance(frameDtMs: number): number {
+    const clamped = Math.min(Math.max(frameDtMs, 0), MAX_FRAME_MS);
+    this.accumulatorMs += clamped;
+
+    let ticks = 0;
+    while (this.accumulatorMs >= MS_PER_TICK) {
+      this.cb.update(MS_PER_TICK / 1000);
+      this.accumulatorMs -= MS_PER_TICK;
+      ticks += 1;
+    }
+
+    const alpha = this.accumulatorMs / MS_PER_TICK;
+    this.cb.render(alpha);
+
+    this.sampleStats(clamped, ticks);
+    return ticks;
+  }
+
+  private sampleStats(frameDtMs: number, ticks: number): void {
+    this.ticksThisWindow += ticks;
+    this.framesThisWindow += 1;
+    this.windowMs += frameDtMs;
+
+    if (this.windowMs >= 1000) {
+      const seconds = this.windowMs / 1000;
+      const fps = Math.round(this.framesThisWindow / seconds);
+      const tps = Math.round(this.ticksThisWindow / seconds);
+      this.cb.onStats?.({ fps, tps });
+      this.ticksThisWindow = 0;
+      this.framesThisWindow = 0;
+      this.windowMs = 0;
+    }
+  }
+
+  /** Begin the requestAnimationFrame-driven loop. No-op if already running. */
+  start(): void {
+    if (this.running) return;
+    this.running = true;
+    this.lastTimeMs = performance.now();
+
+    const frame = (now: number): void => {
+      if (!this.running) return;
+      const dt = now - this.lastTimeMs;
+      this.lastTimeMs = now;
+      this.advance(dt);
+      this.rafId = requestAnimationFrame(frame);
+    };
+
+    this.rafId = requestAnimationFrame(frame);
+  }
+
+  /** Stop the loop and reset stat sampling. Safe to call when not running. */
+  stop(): void {
+    this.running = false;
+    if (this.rafId !== null) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
+    this.ticksThisWindow = 0;
+    this.framesThisWindow = 0;
+    this.windowMs = 0;
+  }
+
+  get isRunning(): boolean {
+    return this.running;
+  }
+}

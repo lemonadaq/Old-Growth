@@ -3,6 +3,16 @@ export { GameLoop, TICK_RATE, MS_PER_TICK, MAX_FRAME_MS, type LoopCallbacks } fr
 export { Simulation } from './simulation';
 export { gameStore, type GameStoreState } from './store';
 export { formatNumber } from './format';
+export { ResourceRegistry, type ResourceEntry } from './resourceRegistry';
+export {
+  ModifierSet,
+  applyModifiers,
+  type Modifier,
+  type ModifierType,
+  type ModifierTargetKind,
+} from './modifiers';
+export { computeProduction, type Producer } from './economy';
+export { enableTestProducers, disableTestProducers } from './debugProducers';
 export {
   createInitialState,
   type GameState,

@@ -15,6 +15,47 @@ Do not refactor unrelated code.
 
 ## Changelog
 
+### 2026-08-05 — STEP 2: Economy foundation (resources, producers, modifiers)
+
+- `src/engine/resourceRegistry.ts` — `ResourceRegistry` holding, per resource,
+  `amount` / lifetime `total` / cached `perSecond`. `add()` accrues the lifetime
+  total on positive deltas only (spending never lowers it).
+- `src/engine/modifiers.ts` — `Modifier` (`type: 'add' | 'mul' | 'pow'`, `'pow'`
+  reserved & ignored for now; `targetKind: 'tag' | 'resource'`; `source` id for
+  clean removal). `ModifierSet` (add / `removeBySource` / `matching`) and pure
+  `applyModifiers()` with the fixed stacking order **(base + Σadds) × Πmuls**.
+- `src/engine/economy.ts` — `Producer` `{ id, resource, baseRate, tags }` and
+  pure `computeProduction()` that sums each producer's modified rate per
+  resource. Modifiers apply when they target the producer's resource or a tag.
+- `src/engine/simulation.ts` — `Simulation` now owns producers + modifiers.
+  `tick()` recomputes the pipeline, caches `perSecond` on the registry, and
+  advances amounts by `rate × dt`. `snapshot()` now also carries `totals` and
+  `perSecond`. Added `addProducer` / `removeProducer` / `addModifier` /
+  `removeModifiersBySource`.
+- `src/engine/format.ts` — reworked to spec: plain to 999, `K/M/B/T`, scientific
+  from `1e15`, max 2 decimals (trailing zeros trimmed).
+- `src/engine/debugProducers.ts` — **temporary** `enable/disableTestProducers()`
+  registering a `+1/s` producer per resource (source-tagged `debug`).
+- `src/ui/App.tsx` — snapshots are now pushed to the store **once per render
+  frame** (in `render`), not per tick; `update` only advances the sim. Added a
+  ref + effect to toggle the debug producers live.
+- `src/ui/Hud.tsx` / `Hud.css` — resource rows now show a live `/s` rate, plus a
+  "Start/Stop test producer" toggle button.
+- Tests: `format.test.ts` (13 incl. the 10 canonical cases), `modifiers.test.ts`
+  (stacking order, insertion-order independence, add/remove by source, tag vs
+  resource matching, pow ignored), `economy.test.ts` (summation + tag/resource
+  modifiers), extended `simulation.test.ts` (production, rate cache, producer
+  removal, all-seven-resources debug tick). 42 tests pass; lint + build clean.
+
+**Open TODOs**
+
+- [ ] Remove `debugProducers.ts` + the HUD toggle once real production systems
+      (Sap clicks, canopy Light, root Water/Minerals) exist.
+- [ ] Wire the `'pow'` modifier type into `applyModifiers` when late-game
+      content needs it.
+- [ ] Modifier ordering across producers is currently commutative; revisit if
+      order-dependent stacking (e.g. additive-after-multiplicative) is needed.
+
 ### 2026-08-05 — STEP 1: Project scaffold & design spec
 
 - Initialized Vite + React 18 + TypeScript (strict) project.

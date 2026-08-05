@@ -1,0 +1,71 @@
+.hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none; /* clicks pass through to the canvas by default */
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  color: var(--hud-text);
+}
+
+.hud-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hud-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.hud-debug {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--hud-muted);
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  backdrop-filter: blur(4px);
+}
+
+.hud-debug b {
+  color: var(--hud-accent);
+}
+
+.hud-resources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hud-resource {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-left-width: 3px;
+  border-radius: 8px;
+  padding: 6px 10px;
+  backdrop-filter: blur(4px);
+}
+
+.hud-resource__label {
+  color: var(--hud-muted);
+}
+
+.hud-resource__value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}

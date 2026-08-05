@@ -1,17 +1,36 @@
 import type { GameSnapshot } from '../engine/types';
-import { HORIZON_RATIO, PALETTE } from './palette';
+import type { TreeGraph } from '../engine/treeGraph';
+import { TICK_RATE } from '../engine/loop';
+import { Camera } from './camera';
+import { CameraController } from './cameraController';
+import { sampleKeyframes } from './color';
+import { mixSky, SKY_TRACK, type SkyPalette } from './palette';
+import { SceneRenderer } from './scene';
+import { TreePainter } from './tree';
 
 /**
- * Canvas 2D renderer. STEP 1 draws the sky-to-soil scene the game lives in; the
- * procedural tree, roots, and creatures are layered on in later steps.
+ * Canvas 2D renderer.
  *
- * The renderer reads snapshots and never mutates game state. It owns
- * devicePixelRatio handling so drawing code can work in CSS pixels.
+ * Owns the canvas, the {@link Camera}, and the input controller that drives it.
+ * Each frame it reads the latest snapshot and the tree graph, and paints back to
+ * front: sky gradient (lerped by the engine's time of day), distant hills, the
+ * soil cross-section, then the tree itself.
+ *
+ * The renderer never mutates game state. `devicePixelRatio` is handled once here
+ * — the base transform scales device pixels — so every drawing routine
+ * downstream works in CSS pixels or world units.
  */
 export class Renderer {
   private readonly ctx: CanvasRenderingContext2D;
+  private readonly camera = new Camera();
+  private readonly controller: CameraController;
+  private readonly scene = new SceneRenderer();
+  private readonly treePainter = new TreePainter();
+
   private cssWidth = 0;
   private cssHeight = 0;
+  private dpr = 1;
+  private tree: TreeGraph | null = null;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext('2d');
@@ -19,7 +38,23 @@ export class Renderer {
       throw new Error('Failed to acquire 2D canvas context');
     }
     this.ctx = ctx;
+    this.controller = new CameraController(canvas, this.camera);
     this.resize();
+  }
+
+  /** The camera, exposed for the UI (reset buttons, focus-on-node, tests). */
+  get view(): Camera {
+    return this.camera;
+  }
+
+  /** Nodes drawn in the last frame, after viewport culling. */
+  get drawnNodes(): number {
+    return this.treePainter.drawnNodes;
+  }
+
+  /** Swap in the tree to draw. Passing `null` renders the empty landscape. */
+  setTree(tree: TreeGraph | null): void {
+    this.tree = tree;
   }
 
   /** Match the backing store to the element's CSS size × devicePixelRatio. */
@@ -29,40 +64,56 @@ export class Renderer {
     const cssWidth = Math.max(1, Math.round(rect.width));
     const cssHeight = Math.max(1, Math.round(rect.height));
 
+    this.dpr = dpr;
     this.cssWidth = cssWidth;
     this.cssHeight = cssHeight;
     this.canvas.width = Math.round(cssWidth * dpr);
     this.canvas.height = Math.round(cssHeight * dpr);
-    // Draw in CSS pixels; the transform scales to device pixels.
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    this.camera.setViewport(cssWidth, cssHeight);
+    this.controller.refresh();
+  }
+
+  /** Detach input listeners. Call when the canvas goes away. */
+  dispose(): void {
+    this.controller.dispose();
   }
 
   /**
    * Draw one frame.
    *
-   * @param _snapshot latest game snapshot (unused in STEP 1's static scene).
-   * @param _alpha    interpolation factor in `[0, 1)` for smooth motion later.
+   * @param snapshot latest game snapshot; supplies the time of day.
+   * @param alpha    interpolation factor in `[0, 1)` toward the next tick, used
+   *                 so sway advances smoothly between fixed simulation steps.
    */
-  draw(_snapshot: GameSnapshot, _alpha: number): void {
-    const { ctx, cssWidth: w, cssHeight: h } = this;
-    const horizonY = Math.round(h * HORIZON_RATIO);
+  draw(snapshot: GameSnapshot, alpha: number): void {
+    const { ctx } = this;
+    // Interpolated simulated time: smooth motion at any frame rate.
+    const time = snapshot.elapsedSeconds + alpha / TICK_RATE;
+    const sky = sampleKeyframes<SkyPalette>(SKY_TRACK, snapshot.dayPhase, mixSky);
 
-    // Sky.
-    const sky = ctx.createLinearGradient(0, 0, 0, horizonY);
-    sky.addColorStop(0, PALETTE.skyTop);
-    sky.addColorStop(1, PALETTE.skyBottom);
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, w, horizonY);
+    // Base transform: CSS pixels → device pixels.
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.clearRect(0, 0, this.cssWidth, this.cssHeight);
 
-    // Soil.
-    const soil = ctx.createLinearGradient(0, horizonY, 0, h);
-    soil.addColorStop(0, PALETTE.soilTop);
-    soil.addColorStop(1, PALETTE.soilBottom);
-    ctx.fillStyle = soil;
-    ctx.fillRect(0, horizonY, w, h - horizonY);
+    // Backdrop, in screen space.
+    this.scene.drawSky(ctx, this.camera, sky, snapshot.dayPhase);
+    this.scene.drawHills(ctx, this.camera, sky);
 
-    // Horizon line where canopy air meets the ground.
-    ctx.fillStyle = PALETTE.horizon;
-    ctx.fillRect(0, horizonY - 1, w, 2);
+    // Ground and tree, in world space (y-up, origin at the trunk base).
+    ctx.save();
+    this.camera.applyTransform(ctx);
+    this.scene.drawSoil(ctx, this.camera, sky.ambient);
+    if (this.tree) {
+      this.treePainter.draw(ctx, this.tree, {
+        time,
+        zoom: this.camera.zoom,
+        pixelScale: this.camera.zoom * this.dpr,
+        // A margin keeps limbs whose sway carries them on-screen from popping in.
+        viewport: this.camera.visibleWorldRect(48),
+        ambient: sky.ambient,
+      });
+    }
+    ctx.restore();
   }
 }

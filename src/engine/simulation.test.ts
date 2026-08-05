@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { Simulation } from './simulation';
 import { createInitialState } from './types';
 import { disableTestProducers, enableTestProducers } from './debugProducers';
+import { dayPhase } from './timeOfDay';
 import { RESOURCE_IDS } from '../content/resources';
 
 describe('Simulation', () => {
@@ -24,6 +25,14 @@ describe('Simulation', () => {
     const snap = sim.snapshot();
     expect(snap.tick).toBe(3);
     expect(snap.elapsedSeconds).toBeCloseTo(0.3, 5);
+  });
+
+  it('carries the time of day on every snapshot', () => {
+    const sim = new Simulation();
+    expect(sim.snapshot().dayPhase).toBeCloseTo(dayPhase(0));
+
+    for (let i = 0; i < 100; i += 1) sim.tick(0.1);
+    expect(sim.snapshot().dayPhase).toBeCloseTo(dayPhase(10));
   });
 
   it('produces snapshots that do not alias live engine Decimals', () => {

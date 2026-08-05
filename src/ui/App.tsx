@@ -3,6 +3,8 @@ import { GameLoop } from '../engine/loop';
 import { Simulation } from '../engine/simulation';
 import { gameStore } from '../engine/store';
 import { enableTestProducers, disableTestProducers } from '../engine/debugProducers';
+import { buildTreeGraph } from '../engine/treeGraph';
+import { DEMO_TREE } from '../content/demoTree';
 import { Renderer } from '../render/canvas';
 import { Hud } from './Hud';
 import './App.css';
@@ -19,6 +21,8 @@ export function App() {
     const sim = new Simulation();
     simRef.current = sim;
     const renderer = new Renderer(canvas);
+    // Placeholder canopy until growth mechanics build the graph from game state.
+    renderer.setTree(buildTreeGraph(DEMO_TREE));
 
     const loop = new GameLoop({
       // Fixed-timestep simulation: advance state only, no store writes here.
@@ -44,6 +48,7 @@ export function App() {
     return () => {
       loop.stop();
       window.removeEventListener('resize', handleResize);
+      renderer.dispose();
       simRef.current = null;
     };
   }, []);

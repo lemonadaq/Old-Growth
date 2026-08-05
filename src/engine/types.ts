@@ -36,6 +36,8 @@ export interface GameSnapshot {
   readonly perSecond: Readonly<Resources>;
   readonly tick: number;
   readonly elapsedSeconds: number;
+  /** Time of day as a fraction of the cycle in `[0, 1)`. See `timeOfDay.ts`. */
+  readonly dayPhase: number;
 }
 
 /** Debug counters sampled by the loop once per second. */

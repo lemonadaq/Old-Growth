@@ -2,6 +2,7 @@ import Decimal from 'break_infinity.js';
 import { RESOURCE_IDS } from '../content/resources';
 import { computeProduction, type Producer } from './economy';
 import type { Modifier } from './modifiers';
+import { dayPhase } from './timeOfDay';
 import { createInitialState, type GameSnapshot, type GameState, type Resources } from './types';
 
 /**
@@ -73,6 +74,7 @@ export class Simulation {
       perSecond,
       tick: this.state.tick,
       elapsedSeconds: this.state.elapsedSeconds,
+      dayPhase: dayPhase(this.state.elapsedSeconds),
     };
   }
 }

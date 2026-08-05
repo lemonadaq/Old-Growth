@@ -15,6 +15,102 @@ Do not refactor unrelated code.
 
 ## Changelog
 
+### 2026-08-05 — STEP 4: Canvas tree renderer + camera
+
+**World space.** `y` is **up**, origin at the trunk base on the soil line: `y > 0`
+is canopy, `y < 0` is roots. One world unit = one CSS pixel at zoom 1. The camera
+performs the y flip once, so nothing upstream of it deals with canvas y-down.
+
+- `src/engine/geometry.ts` — `Vec2` / `Rect`, quadratic Bézier point + tangent,
+  angle ↔ direction (`0` = up, `180` = down), rect union/intersect/expand.
+- `src/engine/rng.ts` — seeded mulberry32 `Rng` + `hashString`, so procedural
+  decoration is identical across reloads and machines.
+- `src/engine/treeGraph.ts` — **`TreeGraph`**, the structure the renderer reads
+  each frame. `buildTreeGraph(spec)` resolves authored relative angles/lengths
+  into world curves: each limb gets `start` / `control` / `end`, `baseWidth` →
+  `tipWidth` taper, `depth`, `attach` (parameter along the parent), sway params,
+  and a per-node AABB. Children attach at the exact point on the parent curve and
+  inherit width from the parent's _local_ width there. `collectVisibleNodes()`
+  culls against a viewport rect into a caller-owned array (no per-frame garbage);
+  `visibleNodes()` is the allocating convenience form. Nodes come out in draw
+  order — roots, branches by depth, leaves — which also guarantees parents
+  precede children for the sway pass.
+- `src/engine/timeOfDay.ts` — `dayPhase()` (`0` midnight, `0.25` sunrise, `0.5`
+  noon, `0.75` sunset) over a 240 s cycle starting mid-morning, plus `dayPeriod()`
+  and `daylight()`. `GameSnapshot` now carries `dayPhase`.
+- `src/content/species.ts` — `SpeciesDef` per species: bark, leaf, and a
+  desaturated earth `root` palette. `src/content/treeSpec.ts` — the authored
+  `TreeSpec` / `LimbSpec` / `LeafClusterSpec` format. `src/content/demoTree.ts` —
+  the acceptance demo: **12 branches (trunk + 11 limbs), 20 leaf clusters, 8 roots**.
+- `src/render/camera.ts` — `Camera` (pure math, no DOM): centre + zoom +
+  CSS-pixel viewport, `worldToScreen` / `screenToWorld` / `visibleWorldRect` /
+  `applyTransform`. Zoom clamps to 0.5×–2.0× and `zoomAt()` keeps the world point
+  under the cursor anchored. Panning clamps the _visible rect_ between cloud
+  level (`y = 900`) and bedrock (`y = -640`), centring instead of jittering when
+  the viewport is taller than the world; horizontal travel is clamped to ±700.
+- `src/render/cameraController.ts` — Pointer Events (one path for mouse, pen, and
+  touch): drag to pan, wheel/two-finger scroll to pan, ctrl+wheel (trackpad
+  pinch) and two-finger pinch to zoom on the cursor. `normaliseWheel()` converts
+  line/page deltas to pixels.
+- `src/render/color.ts` — memoised hex parsing, RGB mixing, and `sampleKeyframes()`
+  over a **cyclic** track (wraps last → first, so midnight → dawn is seamless).
+- `src/render/palette.ts` — 8-keyframe `SKY_TRACK` (top/bottom/haze/two hill
+  tones/ambient) sampled by `dayPhase`, soil strata down to bedrock, world
+  extents, zoom limits, hill bands.
+- `src/render/scene.ts` — sky gradient anchored cloud-level → soil line, sun/moon
+  arcing over the horizon, horizon haze, parallax hill bands (clipped to the sky
+  and clamped so panning up cannot lift a ridge into a wall — reserved for the
+  future Old Growth forest), and the world-space soil cross-section with strata,
+  scattered grit, and a turf lip.
+- `src/render/sway.ts` — `SwayField` accumulates sway down the graph: a node's
+  base offset is its parent's offset at the attachment point, its tip adds its own
+  oscillation, so twigs and leaf clusters never detach from their branch. Roots
+  have `swayAmount === 0`, which makes the underground still for free.
+- `src/render/tree.ts` — `TreePainter`. Limbs are sampled along the curve, offset
+  by half the local width along the normal, and filled as one polygon (that is
+  what tapers them); a lit and a shaded band are filled on top once a limb is ≥ 4
+  px wide. Leaf clusters are 3–5 overlapping soft-circle sprites in the species
+  hue. Species colors are tinted by the sky's ambient and memoised.
+- `src/render/leafSprite.ts` — soft-circle sprite cache with a small mip chain
+  (32/64/128/256) so blobs are not resampled from an oversized sprite every
+  frame, plus a size cap with oldest-first eviction as the ambient drifts.
+- `src/render/canvas.ts` — `Renderer` owns the canvas, camera, and controller.
+  Draw order per frame: sky → sun/moon → hills → soil → tree. `devicePixelRatio`
+  is applied once as the base transform; `resize()` is safe to call at any time
+  and re-clamps the camera. Sway advances on `elapsedSeconds + alpha / TICK_RATE`,
+  so motion is smooth between fixed ticks.
+- `src/ui/App.tsx` — builds the demo graph, hands it to the renderer, disposes
+  input listeners on unmount.
+- Tests: `geometry` (9), `treeGraph` (14, incl. the 12/20/8 acceptance shape and
+  culling), `timeOfDay` (5), `camera` (16, incl. cursor-anchored zoom and the
+  cloud/bedrock clamp), `color` (13, incl. cyclic wrap), `sway` (7). 107 tests
+  pass; lint + build clean.
+
+**Verified in a real browser** (headless Chromium, dpr 2): the demo tree renders
+and sways, drag/wheel/pinch pan and zoom between canopy and roots, and the sky
+lerps through morning → noon → sunset → night with the moon rising. Measured
+`draw()` cost on a synthetic **500-node** tree at 1000×700 CSS / dpr 2: median
+**2.0–2.3 ms**, p95 3.8 ms (0.5 ms in the root view, where culling draws 117 of
+500 nodes) — comfortably inside a 16.7 ms frame. Note the container rasterises in
+software, so its end-to-end frame rate is fill-rate bound (background alone
+~55 fps) and is not representative of GPU-composited hardware.
+
+**Open TODOs**
+
+- [ ] Move the `TreeGraph` into `GameState` and onto the snapshot; the demo spec
+      in `content/demoTree.ts` is a placeholder until growth mechanics author
+      limbs. Rebuild (or incrementally patch) the graph when the spec changes.
+- [ ] Hit-testing: map a click back to a node (trunk clicks for Sap, selecting a
+      limb to prune/graft). `Camera.screenToWorld` + node bounds are the hooks.
+- [ ] Populate the hill bands with the real Old Growth forest silhouette at
+      prestige; they are deliberately plain crests for now.
+- [ ] Seasons/weather should drive the leaf palette and gust strength; `SwayField`
+      already takes a per-frame gust envelope.
+- [ ] Leaf clusters draw back-to-front by build order only. If canopies get dense,
+      sort by depth or bake a cluster into a single sprite.
+- [ ] An exception thrown inside `draw()` kills the rAF chain (the loop does not
+      re-arm). Consider guarding the render callback in `GameLoop`.
+
 ### 2026-08-05 — STEP 2: Economy foundation (resources, producers, modifiers)
 
 - `src/engine/resourceRegistry.ts` — `ResourceRegistry` holding, per resource,

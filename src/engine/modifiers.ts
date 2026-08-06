@@ -59,6 +59,15 @@ export class ModifierSet {
   }
 
   /**
+   * Modifiers targeting exactly one tag. Used for engine *stats* (click power,
+   * crit chance…) which are not producers and so must never pick up the
+   * resource-targeted modifiers that {@link matching} also returns.
+   */
+  matchingTag(tag: string): Modifier[] {
+    return this.list.filter((m) => m.targetKind === 'tag' && m.target === tag);
+  }
+
+  /**
    * Modifiers that apply to a producer of `resource` carrying `tags`: either a
    * resource-target matching the resource, or a tag-target the producer carries.
    */

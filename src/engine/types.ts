@@ -1,8 +1,12 @@
 import Decimal from 'break_infinity.js';
 import type { ResourceId } from '../content/resources';
+import type { ClickStats } from './clicker';
+import { createComboState, type ComboState } from './combo';
 import type { Producer } from './economy';
 import { ModifierSet } from './modifiers';
 import { ResourceRegistry } from './resourceRegistry';
+import { generateTree, type TreeSegment } from './tree';
+import { UpgradeLedger } from './upgrades';
 
 /** A plain per-resource record of `Decimal`s (used for immutable snapshots). */
 export type Resources = Record<ResourceId, Decimal>;
@@ -15,12 +19,42 @@ export interface GameState {
   producers: Map<string, Producer>;
   /** Active modifiers, removable by source id. */
   modifiers: ModifierSet;
+  /** The clickable tree skeleton, in canonical tree space. */
+  tree: readonly TreeSegment[];
+  /** Click combo meter. */
+  combo: ComboState;
+  /** Levels owned per upgrade. */
+  upgrades: UpgradeLedger;
+  /** Lifetime count of successful taps on the tree. */
+  clicks: number;
   /** Total number of fixed simulation ticks executed. */
   tick: number;
   /** Total simulated time in seconds. */
   elapsedSeconds: number;
   /** Wall-clock timestamp (ms) of the last update; used later for offline calc. */
   lastUpdatedAt: number;
+}
+
+/** Combo meter state as read by the UI and renderer. */
+export interface ComboSnapshot {
+  /** Effective (decayed) stacks at snapshot time. */
+  readonly stacks: number;
+  /** Stacks the meter can currently hold. */
+  readonly cap: number;
+  /** Click power multiplier those stacks are worth (1 = no bonus). */
+  readonly multiplier: number;
+  /** Meter fullness in `[0, 1]`, for drawing. */
+  readonly fill: number;
+}
+
+/** One upgrade's purchase state, resolved against the player's balance. */
+export interface UpgradeSnapshot {
+  readonly id: string;
+  readonly level: number;
+  /** Cost of the next level. */
+  readonly cost: Decimal;
+  readonly affordable: boolean;
+  readonly maxed: boolean;
 }
 
 /**
@@ -34,6 +68,12 @@ export interface GameSnapshot {
   readonly totals: Readonly<Resources>;
   /** Net production rate per resource, in units per second. */
   readonly perSecond: Readonly<Resources>;
+  /** Current click stats after modifiers. */
+  readonly clickStats: ClickStats;
+  readonly combo: ComboSnapshot;
+  readonly upgrades: readonly UpgradeSnapshot[];
+  /** Lifetime count of successful taps on the tree. */
+  readonly clicks: number;
   readonly tick: number;
   readonly elapsedSeconds: number;
 }
@@ -50,6 +90,10 @@ export function createInitialState(now: number = Date.now()): GameState {
     resources: new ResourceRegistry(),
     producers: new Map(),
     modifiers: new ModifierSet(),
+    tree: generateTree(),
+    combo: createComboState(),
+    upgrades: new UpgradeLedger(),
+    clicks: 0,
     tick: 0,
     elapsedSeconds: 0,
     lastUpdatedAt: now,

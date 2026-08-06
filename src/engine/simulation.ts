@@ -1,11 +1,20 @@
 import Decimal from 'break_infinity.js';
+import { GROWTH_RULE_BY_TYPE, type TreeNodeType } from '../content/growth';
 import { RESOURCE_IDS } from '../content/resources';
 import { UPGRADES, UPGRADE_BY_ID } from '../content/upgrades';
 import { resolveClick, resolveClickStats, type ClickResult } from './clicker';
 import { comboFill, comboMultiplier, comboStacksAt, registerComboClick } from './combo';
 import { computeProduction, type Producer } from './economy';
+import {
+  partCost,
+  partProducer,
+  partProducerId,
+  priceGrowthOptions,
+  type PricedGrowthOption,
+} from './growth';
 import type { Modifier } from './modifiers';
 import type { RandomSource } from './rng';
+import { DEFAULT_SPECIES_ID, type TreeNode } from './treeGraph';
 import { isMaxed, upgradeCost, upgradeModifiers, upgradeSource } from './upgrades';
 import {
   createInitialState,
@@ -32,6 +41,7 @@ export class Simulation {
 
   constructor(initial: GameState = createInitialState()) {
     this.state = initial;
+    this.syncPartProducers();
   }
 
   /** Register (or replace) a producer by its id. */
@@ -76,6 +86,74 @@ export class Simulation {
     this.state.resources.add('sap', result.gain);
     this.state.clicks += 1;
     return result;
+  }
+
+  /**
+   * Everything growable on `nodeId` right now, priced against the player's
+   * balances. This is what the radial grow menu renders.
+   */
+  growthOptions(nodeId: string): PricedGrowthOption[] {
+    return priceGrowthOptions(this.state.tree, nodeId, this.state.resources, this.state.modifiers);
+  }
+
+  /**
+   * Grow a new part on an existing node, paying for it.
+   *
+   * Returns the new node, or `null` when the purchase cannot go through — the
+   * growth rules forbid that child there, or the player cannot afford it.
+   * Nothing is spent on a failed call.
+   */
+  growPart(
+    nodeId: string,
+    childType: TreeNodeType,
+    speciesId: string = DEFAULT_SPECIES_ID,
+  ): TreeNode | null {
+    const tree = this.state.tree;
+    if (!tree.getValidGrowthOptions(nodeId).some((option) => option.type === childType)) {
+      return null;
+    }
+
+    const rule = GROWTH_RULE_BY_TYPE[childType];
+    const cost = partCost(childType, tree.countOfType(childType));
+    if (this.state.resources.amount(rule.costResource).lt(cost)) return null;
+
+    const node = tree.grow(nodeId, childType, speciesId, this.state.tick);
+    if (!node) return null;
+
+    this.state.resources.add(rule.costResource, cost.neg());
+
+    const producer = partProducer(node);
+    if (producer) this.addProducer(producer);
+    return node;
+  }
+
+  /**
+   * Cut a limb (or root) and everything hanging off it, dropping the production
+   * it carried. Refunds and Deadwood are STEP 9's business; this is the graph
+   * surgery the renderer and economy need to stay consistent.
+   */
+  prunePart(nodeId: string): TreeNode[] {
+    const removed = this.state.tree.prune(nodeId);
+    for (const node of removed) {
+      this.removeProducer(partProducerId(node.id));
+    }
+    return removed;
+  }
+
+  /**
+   * Rebuild every part producer from the tree graph.
+   *
+   * Growth and pruning keep producers in step incrementally; this is the
+   * from-scratch path, used at construction and (later) after loading a save.
+   */
+  syncPartProducers(): void {
+    for (const id of [...this.state.producers.keys()]) {
+      if (id.startsWith('part:')) this.state.producers.delete(id);
+    }
+    for (const node of this.state.tree.allNodes()) {
+      const producer = partProducer(node);
+      if (producer) this.addProducer(producer);
+    }
   }
 
   /**
@@ -166,6 +244,8 @@ export class Simulation {
       },
       upgrades,
       clicks: this.state.clicks,
+      treeRevision: this.state.tree.revision,
+      treeSize: this.state.tree.size,
       tick: this.state.tick,
       elapsedSeconds: this.state.elapsedSeconds,
     };

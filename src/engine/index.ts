@@ -22,13 +22,39 @@ export {
   type Vec2,
 } from './geometry';
 export {
-  generateTree,
+  projectPoint,
   projectSegment,
   projectTree,
+  treeBounds,
   type ScreenSegment,
+  type TreeBounds,
   type TreeLayout,
   type TreeSegment,
 } from './tree';
+export {
+  TreeGraph,
+  computePlacements,
+  placeChild,
+  placeOption,
+  DEFAULT_SPECIES_ID,
+  DEFAULT_TREE_SEED,
+  ROOT_DIRECTION,
+  TRUNK_DIRECTION,
+  type GrowthOption,
+  type NodePlacement,
+  type TreeGraphData,
+  type TreeNode,
+} from './treeGraph';
+export {
+  partCost,
+  partProducer,
+  partProducerId,
+  partProductionDelta,
+  priceGrowthOption,
+  priceGrowthOptions,
+  type PricedGrowthOption,
+  type ProductionDelta,
+} from './growth';
 export {
   COMBO_BONUS_AT_FULL,
   COMBO_BONUS_PER_STACK,

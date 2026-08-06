@@ -3,7 +3,8 @@ import { CLICK_TOLERANCE_PX } from '../engine/clicker';
 import { COMBO_FULL_STACKS } from '../engine/combo';
 import { hitTestSegments, type Vec2 } from '../engine/geometry';
 import { Simulation } from '../engine/simulation';
-import { generateTree, projectTree, treeBounds } from '../engine/tree';
+import { projectTree, treeBounds } from '../engine/tree';
+import { TreeGraph } from '../engine/treeGraph';
 import { EffectPool } from '../render/effects';
 import { computeTreeLayout } from '../render/tree';
 import {
@@ -66,7 +67,7 @@ class FakeSurface implements PointerSurface {
 
 const CANVAS_W = 800;
 const CANVAS_H = 600;
-const TREE = generateTree();
+const TREE = TreeGraph.seedling().toSegments();
 const SCREEN_TREE = projectTree(TREE, computeTreeLayout(CANVAS_W, CANVAS_H, treeBounds(TREE)));
 
 /** A point that is definitely on the trunk, just above the ground line. */

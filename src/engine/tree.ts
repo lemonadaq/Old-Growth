@@ -1,23 +1,25 @@
-import { DEFAULT_TREE, type TreeBlueprint } from '../content/tree';
-import type { Segment, Vec2 } from './geometry';
-import { createSeededRandom, type RandomSource } from './rng';
+import type { TreeNodeType } from '../content/growth';
+import type { Segment } from './geometry';
 
 /**
- * The procedural tree skeleton: an ordered list of straight segments that make
- * up the trunk and its branches.
+ * Projection between canonical tree space and the screen.
  *
- * Segments live in **canonical tree space**: the trunk base sits at the origin,
- * `+x` points right and `+y` points *up*. One unit is roughly the tree's own
- * height, which keeps the geometry resolution-independent — the renderer
- * projects it into screen pixels via {@link projectTree}.
+ * The tree itself lives in `src/engine/treeGraph.ts`; this module only carries
+ * its flattened geometry across into pixels. Segments are in **canonical tree
+ * space**: the trunk base sits at the origin, `+x` points right and `+y` points
+ * *up*, with 1 unit ≈ a mature tree's height. Keeping the graph
+ * resolution-independent means a resize re-projects rather than regrows.
  */
+
+/** One node of the tree flattened into a drawable, hit-testable segment. */
 export interface TreeSegment extends Segment {
-  /** Stable id, unique within a generated tree. */
+  /** The id of the node this segment came from. */
   readonly id: string;
-  readonly kind: 'trunk' | 'branch';
-  /** 0 for the trunk, incrementing once per branch generation. */
+  /** The node's part type; decides how the renderer draws it. */
+  readonly kind: TreeNodeType;
+  /** Depth from the trunk (the trunk is 0). */
   readonly depth: number;
-  /** Stroke width in canonical units. */
+  /** Stroke width — or blob radius, for leaf clusters and blossoms. */
   readonly width: number;
 }
 
@@ -42,122 +44,12 @@ export interface TreeBounds {
   readonly maxY: number;
 }
 
-const DEG = Math.PI / 180;
-
-function advance(from: Vec2, angleRad: number, length: number): Vec2 {
-  return {
-    x: from.x + Math.cos(angleRad) * length,
-    y: from.y + Math.sin(angleRad) * length,
-  };
-}
-
-/**
- * Recursively grow one branch and its children, appending to `out`.
- *
- * Children fan out evenly across `spreadDegrees` centred on the parent's
- * heading, with a per-branch random wobble so no two forks look identical.
- */
-function growBranch(
-  out: TreeSegment[],
-  id: string,
-  from: Vec2,
-  angleRad: number,
-  length: number,
-  width: number,
-  depth: number,
-  bp: TreeBlueprint,
-  rng: RandomSource,
-): void {
-  const to = advance(from, angleRad, length);
-  out.push({ id, kind: 'branch', depth: bp.depth - depth, a: from, b: to, width });
-
-  if (depth <= 0) return;
-
-  const spread = bp.spreadDegrees * DEG;
-  const jitter = bp.angleJitterDegrees * DEG;
-  const count = bp.branchesPerNode;
-
-  for (let i = 0; i < count; i += 1) {
-    // Evenly spaced across the spread; a lone child continues straight on.
-    const offset = count === 1 ? 0 : (i / (count - 1) - 0.5) * spread;
-    const childAngle = angleRad + offset + (rng() - 0.5) * 2 * jitter;
-    growBranch(
-      out,
-      `${id}.${i}`,
-      to,
-      childAngle,
-      length * bp.lengthFalloff,
-      width * bp.widthFalloff,
-      depth - 1,
-      bp,
-      rng,
-    );
-  }
-}
-
-/**
- * Build the tree skeleton from a blueprint.
- *
- * The trunk is a slightly curving chain of segments that tapers as it rises;
- * its upper segments sprout alternating side limbs, and the top forks into the
- * crown. Deterministic for a given `blueprint.seed`.
- */
-export function generateTree(blueprint: TreeBlueprint = DEFAULT_TREE): TreeSegment[] {
-  const bp = blueprint;
-  const rng = createSeededRandom(bp.seed);
-  const out: TreeSegment[] = [];
-
-  const segmentLength = bp.trunkLength / bp.trunkSegments;
-  const curvePerSegment = (bp.trunkCurveDegrees * DEG) / bp.trunkSegments;
-
-  let cursor: Vec2 = { x: 0, y: 0 };
-  let angle = Math.PI / 2; // straight up
-
-  for (let i = 0; i < bp.trunkSegments; i += 1) {
-    angle += (rng() - 0.5) * 2 * curvePerSegment;
-    // Taper toward the crown so the base reads as the heaviest part.
-    const width = bp.trunkWidth * (1 - 0.45 * (i / bp.trunkSegments));
-    const next = advance(cursor, angle, segmentLength);
-    out.push({ id: `trunk.${i}`, kind: 'trunk', depth: 0, a: cursor, b: next, width });
-
-    if (i >= bp.sideBranchFromSegment) {
-      // Alternate sides so the limbs do not all lean the same way.
-      const side = i % 2 === 0 ? 1 : -1;
-      growBranch(
-        out,
-        `limb.${i}`,
-        next,
-        angle + side * bp.spreadDegrees * DEG,
-        segmentLength * 1.1,
-        width * bp.widthFalloff,
-        bp.depth - 1,
-        bp,
-        rng,
-      );
-    }
-
-    cursor = next;
-  }
-
-  // The crown: the trunk's own continuation, forking to full depth.
-  growBranch(
-    out,
-    'crown',
-    cursor,
-    angle,
-    bp.trunkLength * bp.lengthFalloff,
-    bp.trunkWidth * bp.widthFalloff,
-    bp.depth,
-    bp,
-    rng,
-  );
-
-  return out;
-}
-
 /**
  * Extents of the tree's centre-lines, so the renderer can fit it to the canvas
  * instead of guessing at a scale. An empty tree collapses to the origin.
+ *
+ * `minY` goes negative once roots exist — the underground half is measured the
+ * same way as the canopy.
  *
  * Stroke width is deliberately ignored: half a trunk width is small next to the
  * margin the fit already leaves, and including it would make the fit depend on
@@ -185,14 +77,21 @@ export function treeBounds(segments: readonly TreeSegment[]): TreeBounds {
   return { minX, maxX, minY, maxY };
 }
 
-/** Project one canonical segment into screen space (y is flipped). */
+/** Project one canonical point into screen space (y is flipped). */
+export function projectPoint(point: { x: number; y: number }, layout: TreeLayout) {
+  return {
+    x: layout.originX + point.x * layout.scale,
+    y: layout.originY - point.y * layout.scale,
+  };
+}
+
+/** Project one canonical segment into screen space. */
 export function projectSegment(segment: TreeSegment, layout: TreeLayout): ScreenSegment {
-  const { originX, originY, scale } = layout;
   return {
     ...segment,
-    a: { x: originX + segment.a.x * scale, y: originY - segment.a.y * scale },
-    b: { x: originX + segment.b.x * scale, y: originY - segment.b.y * scale },
-    width: segment.width * scale,
+    a: projectPoint(segment.a, layout),
+    b: projectPoint(segment.b, layout),
+    width: segment.width * layout.scale,
   };
 }
 

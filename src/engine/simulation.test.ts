@@ -173,3 +173,137 @@ describe('Simulation.click', () => {
     expect(snap.clicks).toBe(0);
   });
 });
+
+describe('growing the tree', () => {
+  /** Tap the trunk until there is enough Sap to buy anything in reach. */
+  function withSap(sim: Simulation, amount: number): Simulation {
+    sim.state.resources.add('sap', new Decimal(amount));
+    return sim;
+  }
+
+  it('starts as a lone seedling with nothing producing', () => {
+    const sim = new Simulation();
+    expect(sim.state.tree.size).toBe(1);
+    expect(sim.snapshot(0).treeSize).toBe(1);
+    expect(sim.state.producers.size).toBe(0);
+  });
+
+  it('offers the trunk’s options priced against the player’s Sap', () => {
+    const sim = withSap(new Simulation(), 20);
+    const options = sim.growthOptions(sim.state.tree.rootId);
+
+    const branch = options.find((o) => o.option.type === 'branch');
+    const root = options.find((o) => o.option.type === 'rootSegment');
+    expect(branch?.affordable).toBe(true); // 15 Sap
+    expect(root?.affordable).toBe(true); // 12 Sap
+    expect(options.every((o) => o.costResource === 'sap')).toBe(true);
+  });
+
+  it('spends the Sap and adds the part', () => {
+    const sim = withSap(new Simulation(), 100);
+    const before = sim.state.resources.amount('sap').toNumber();
+
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+    expect(branch).not.toBeNull();
+    expect(sim.state.tree.size).toBe(2);
+    expect(sim.state.resources.amount('sap').toNumber()).toBeCloseTo(before - 15, 9);
+  });
+
+  it('refuses a purchase there is not enough Sap for, and spends nothing', () => {
+    const sim = withSap(new Simulation(), 5);
+    expect(sim.growPart(sim.state.tree.rootId, 'branch')).toBeNull();
+    expect(sim.state.tree.size).toBe(1);
+    expect(sim.state.resources.amount('sap').toNumber()).toBe(5);
+  });
+
+  it('refuses a part the growth rules forbid there, and spends nothing', () => {
+    const sim = withSap(new Simulation(), 1000);
+    expect(sim.growPart(sim.state.tree.rootId, 'leafCluster')).toBeNull();
+    expect(sim.state.resources.amount('sap').toNumber()).toBe(1000);
+  });
+
+  it('charges ×1.15 more for each further part of the same type', () => {
+    const sim = withSap(new Simulation(), 1000);
+    const first = sim.state.resources.amount('sap').toNumber();
+    sim.growPart(sim.state.tree.rootId, 'branch');
+    const afterFirst = sim.state.resources.amount('sap').toNumber();
+    sim.growPart(sim.state.tree.rootId, 'branch');
+    const afterSecond = sim.state.resources.amount('sap').toNumber();
+
+    expect(first - afterFirst).toBeCloseTo(15, 9);
+    expect(afterFirst - afterSecond).toBeCloseTo(15 * 1.15, 9);
+  });
+
+  it('runs the full loop: tap for Sap, grow a branch, grow a leaf, gain Light/s', () => {
+    const sim = new Simulation();
+
+    // Tap the trunk until the first branch is affordable.
+    for (let i = 0; i < 40; i += 1) sim.click(i * 100, NEVER_CRIT);
+    expect(sim.state.resources.amount('sap').toNumber()).toBeGreaterThan(15);
+
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+    expect(branch).not.toBeNull();
+
+    // No canopy yet, so no Light.
+    sim.tick(1);
+    expect(sim.state.resources.perSecond('light').toNumber()).toBe(0);
+
+    const leaf = sim.growPart(branch?.id ?? '', 'leafCluster');
+    expect(leaf).not.toBeNull();
+
+    sim.tick(1);
+    const snap = sim.snapshot(0);
+    expect(snap.perSecond.light.toNumber()).toBeCloseTo(0.4, 9);
+    expect(snap.resources.light.toNumber()).toBeCloseTo(0.4, 9);
+  });
+
+  it('accumulates production across parts', () => {
+    const sim = withSap(new Simulation(), 1000);
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+    sim.growPart(branch?.id ?? '', 'leafCluster');
+    sim.growPart(branch?.id ?? '', 'leafCluster');
+    sim.growPart(sim.state.tree.rootId, 'rootSegment');
+
+    sim.tick(1);
+    expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(0.8, 9);
+    expect(sim.state.resources.perSecond('water').toNumber()).toBeCloseTo(0.3, 9);
+  });
+
+  it('drops the production of everything a prune removes', () => {
+    const sim = withSap(new Simulation(), 1000);
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+    sim.growPart(branch?.id ?? '', 'leafCluster');
+    sim.tick(1);
+    expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(0.4, 9);
+
+    sim.prunePart(branch?.id ?? '');
+    sim.tick(1);
+    expect(sim.state.resources.perSecond('light').toNumber()).toBe(0);
+    expect(sim.state.producers.size).toBe(0);
+  });
+
+  it('rebuilds part producers from the graph on construction', () => {
+    const state = createInitialState();
+    const branch = state.tree.grow(state.tree.rootId, 'branch');
+    state.tree.grow(branch?.id ?? '', 'leafCluster');
+
+    const sim = new Simulation(state);
+    sim.tick(1);
+    expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(0.4, 9);
+  });
+
+  it('advances the tree revision so the renderer knows to re-project', () => {
+    const sim = withSap(new Simulation(), 1000);
+    const before = sim.snapshot(0).treeRevision;
+    sim.growPart(sim.state.tree.rootId, 'branch');
+    expect(sim.snapshot(0).treeRevision).toBe(before + 1);
+  });
+
+  it('stamps parts with the tick they were grown at', () => {
+    const sim = withSap(new Simulation(), 1000);
+    sim.tick(0.1);
+    sim.tick(0.1);
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+    expect(branch?.createdAtTick).toBe(2);
+  });
+});

@@ -5,7 +5,7 @@ import { createComboState, type ComboState } from './combo';
 import type { Producer } from './economy';
 import { ModifierSet } from './modifiers';
 import { ResourceRegistry } from './resourceRegistry';
-import { generateTree, type TreeSegment } from './tree';
+import { TreeGraph } from './treeGraph';
 import { UpgradeLedger } from './upgrades';
 
 /** A plain per-resource record of `Decimal`s (used for immutable snapshots). */
@@ -19,8 +19,8 @@ export interface GameState {
   producers: Map<string, Producer>;
   /** Active modifiers, removable by source id. */
   modifiers: ModifierSet;
-  /** The clickable tree skeleton, in canonical tree space. */
-  tree: readonly TreeSegment[];
+  /** The player's tree: the growth graph that is also the skill tree. */
+  tree: TreeGraph;
   /** Click combo meter. */
   combo: ComboState;
   /** Levels owned per upgrade. */
@@ -74,6 +74,14 @@ export interface GameSnapshot {
   readonly upgrades: readonly UpgradeSnapshot[];
   /** Lifetime count of successful taps on the tree. */
   readonly clicks: number;
+  /**
+   * Structural revision of the tree graph. Consumers that cache derived tree
+   * geometry (the renderer projects it only on change) compare this instead of
+   * diffing the graph.
+   */
+  readonly treeRevision: number;
+  /** Node count of the tree, trunk included. */
+  readonly treeSize: number;
   readonly tick: number;
   readonly elapsedSeconds: number;
 }
@@ -90,7 +98,7 @@ export function createInitialState(now: number = Date.now()): GameState {
     resources: new ResourceRegistry(),
     producers: new Map(),
     modifiers: new ModifierSet(),
-    tree: generateTree(),
+    tree: TreeGraph.seedling(),
     combo: createComboState(),
     upgrades: new UpgradeLedger(),
     clicks: 0,

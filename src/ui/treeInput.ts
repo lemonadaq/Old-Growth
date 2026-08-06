@@ -42,10 +42,18 @@ export interface PointerSurface {
 }
 
 export interface TreeInputHandlers {
+  /**
+   * First refusal on a press, before the tree ever sees it. Return `true` to
+   * consume the event — the radial grow menu uses this so that tapping a dial
+   * buys a part instead of also paying out Sap underneath it.
+   */
+  onPress?(point: Vec2): boolean;
   /** Does this CSS-pixel point land on the tree? */
   hitTest(point: Vec2): boolean;
   /** A tap that struck wood, at the hit point in CSS pixels. */
   onHit(point: Vec2): void;
+  /** A press that struck neither an overlay nor the tree. */
+  onMiss?(point: Vec2): void;
   /** The pointer moved to (or pressed at) a known position. */
   onPointerMove?(point: Vec2): void;
   /** The last pointer left the surface. */
@@ -73,8 +81,12 @@ export function attachTreeInput(surface: PointerSurface, handlers: TreeInputHand
 
     const point = toLocal(event);
     handlers.onPointerMove?.(point);
+
+    if (handlers.onPress?.(point)) return;
     if (handlers.hitTest(point)) {
       handlers.onHit(point);
+    } else {
+      handlers.onMiss?.(point);
     }
   };
 

@@ -1,0 +1,55 @@
+.tooltip {
+  position: fixed;
+  z-index: 40;
+  max-width: 240px;
+  padding: 8px 10px;
+  border: 1px solid rgba(200, 176, 106, 0.5);
+  border-radius: 8px;
+  background: rgba(28, 20, 12, 0.94);
+  color: #fdf3e0;
+  font-size: 12px;
+  line-height: 1.45;
+  pointer-events: none;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.tooltip__title {
+  margin: 0 0 2px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.tooltip__desc {
+  margin: 0 0 6px;
+  opacity: 0.8;
+}
+
+.tooltip__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tooltip__row dt {
+  opacity: 0.7;
+}
+
+.tooltip__row dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.tooltip__gain {
+  color: #a9c46c;
+}
+
+.tooltip__short {
+  color: #e0a458;
+}
+
+.tooltip__hint {
+  margin: 6px 0 0;
+  opacity: 0.6;
+  font-style: italic;
+}

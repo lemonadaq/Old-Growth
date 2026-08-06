@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { GameLoop } from '../engine/loop';
 import { Simulation } from '../engine/simulation';
 import { gameStore } from '../engine/store';
+import { formatNumber } from '../engine/format';
 import { enableTestProducers, disableTestProducers } from '../engine/debugProducers';
 import { Renderer } from '../render/canvas';
 import { Hud } from './Hud';
+import { UpgradePanel } from './UpgradePanel';
+import { attachTreeInput } from './treeInput';
 import './App.css';
 
 export function App() {
@@ -19,6 +22,26 @@ export function App() {
     const sim = new Simulation();
     simRef.current = sim;
     const renderer = new Renderer(canvas);
+    renderer.setTree(sim.state.tree);
+
+    // Taps resolve here, straight off pointerdown — outside the frame loop and
+    // outside React state — so nothing can coalesce or defer them.
+    const detachInput = attachTreeInput(canvas, {
+      hitTest: (point) => renderer.hitTest(point) !== null,
+      onHit: (point) => {
+        const now = Date.now();
+        const result = sim.click(now);
+        renderer.effects.spawnHit(
+          point.x,
+          point.y,
+          `+${formatNumber(result.gain)}`,
+          result.crit,
+          now,
+        );
+      },
+      onPointerMove: (point) => renderer.setPointer(point),
+      onPointerLeave: () => renderer.setPointer(null),
+    });
 
     const loop = new GameLoop({
       // Fixed-timestep simulation: advance state only, no store writes here.
@@ -27,9 +50,10 @@ export function App() {
       },
       // Once per render frame: snapshot, push to the store, and draw.
       render: (alpha) => {
-        const snapshot = sim.snapshot();
+        const now = Date.now();
+        const snapshot = sim.snapshot(now);
         gameStore.getState().setSnapshot(snapshot);
-        renderer.draw(snapshot, alpha);
+        renderer.draw(snapshot, alpha, now);
       },
       onStats: (stats) => {
         gameStore.getState().setStats(stats);
@@ -43,6 +67,7 @@ export function App() {
 
     return () => {
       loop.stop();
+      detachInput();
       window.removeEventListener('resize', handleResize);
       simRef.current = null;
     };
@@ -59,6 +84,10 @@ export function App() {
     }
   }, [testProducers]);
 
+  const handleBuy = useCallback((id: string) => {
+    simRef.current?.buyUpgrade(id);
+  }, []);
+
   return (
     <div className="app">
       <canvas ref={canvasRef} className="app-canvas" />
@@ -66,6 +95,7 @@ export function App() {
         testProducers={testProducers}
         onToggleTestProducers={() => setTestProducers((on) => !on)}
       />
+      <UpgradePanel onBuy={handleBuy} />
     </div>
   );
 }

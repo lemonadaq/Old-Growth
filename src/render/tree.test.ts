@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { projectTree, treeBounds, type TreeBounds } from '../engine/tree';
+import { projectTree, treeBounds, type ScreenSegment, type TreeBounds } from '../engine/tree';
 import { TreeGraph } from '../engine/treeGraph';
 import { HORIZON_RATIO } from './palette';
-import { computeTreeLayout, growProgress, GROW_ANIM_MS } from './tree';
+import {
+  computeTreeLayout,
+  cullSegments,
+  growProgress,
+  isSegmentVisible,
+  swayOffset,
+  GROW_ANIM_MS,
+} from './tree';
 
 /** A grown tree with canopy and roots, so the layout has both halves to fit. */
 function demoTree() {
@@ -138,5 +145,82 @@ describe('growProgress', () => {
 
   it('clamps rather than overshooting once the animation is over', () => {
     expect(growProgress(9999, 1000)).toBe(1);
+  });
+});
+
+describe('swayOffset', () => {
+  it('is deterministic per node and moment', () => {
+    expect(swayOffset('leaf-3', 5000, 20)).toEqual(swayOffset('leaf-3', 5000, 20));
+  });
+
+  it('gives neighbouring clusters different phases', () => {
+    // A canopy that swayed in lockstep would read as one moving slab.
+    const a = swayOffset('leaf-a', 5000, 20).dx;
+    const b = swayOffset('leaf-b', 5000, 20).dx;
+    expect(a).not.toBeCloseTo(b);
+  });
+
+  it('stays within a fraction of the cluster radius', () => {
+    for (let now = 0; now < 8000; now += 97) {
+      const { dx, dy } = swayOffset('leaf-7', now, 20);
+      expect(Math.abs(dx)).toBeLessThanOrEqual(20 * 0.25);
+      expect(Math.abs(dy)).toBeLessThanOrEqual(20 * 0.25);
+    }
+  });
+
+  it('actually moves over time', () => {
+    const still = swayOffset('leaf-7', 0, 20);
+    const later = swayOffset('leaf-7', 850, 20);
+    expect(later.dx).not.toBeCloseTo(still.dx);
+  });
+
+  it('scales with the cluster it belongs to', () => {
+    expect(swayOffset('leaf-7', 1200, 40).dx).toBeCloseTo(swayOffset('leaf-7', 1200, 20).dx * 2);
+  });
+});
+
+describe('culling', () => {
+  const VIEWPORT = { width: 800, height: 600 };
+
+  /** A segment from `a` to `b` with a modest width. */
+  const seg = (ax: number, ay: number, bx: number, by: number): ScreenSegment => ({
+    id: `${ax},${ay}-${bx},${by}`,
+    kind: 'branch',
+    depth: 1,
+    a: { x: ax, y: ay },
+    b: { x: bx, y: by },
+    width: 4,
+  });
+
+  it('keeps what is on screen', () => {
+    expect(isSegmentVisible(seg(100, 100, 200, 300), VIEWPORT)).toBe(true);
+  });
+
+  it('keeps a segment that merely crosses the viewport', () => {
+    expect(isSegmentVisible(seg(-500, 300, 1500, 300), VIEWPORT)).toBe(true);
+  });
+
+  it('drops what is well outside on every side', () => {
+    expect(isSegmentVisible(seg(-900, 300, -820, 300), VIEWPORT)).toBe(false);
+    expect(isSegmentVisible(seg(1600, 300, 1700, 300), VIEWPORT)).toBe(false);
+    expect(isSegmentVisible(seg(400, -900, 400, -820), VIEWPORT)).toBe(false);
+    expect(isSegmentVisible(seg(400, 1400, 400, 1480), VIEWPORT)).toBe(false);
+  });
+
+  it('keeps a segment just off the edge, whose foliage would still show', () => {
+    expect(isSegmentVisible(seg(-6, 300, -4, 300), VIEWPORT, 12)).toBe(true);
+  });
+
+  it('filters a mixed set and preserves order', () => {
+    const kept = cullSegments(
+      [seg(0, 0, 50, 50), seg(-9000, 0, -8900, 0), seg(400, 300, 420, 320)],
+      VIEWPORT,
+    );
+    expect(kept.map((s) => s.id)).toEqual(['0,0-50,50', '400,300-420,320']);
+  });
+
+  it('leaves an on-screen tree untouched', () => {
+    const projected = projectTree(TREE, computeTreeLayout(800, 600, treeBounds(TREE)));
+    expect(cullSegments(projected, VIEWPORT)).toHaveLength(projected.length);
   });
 });

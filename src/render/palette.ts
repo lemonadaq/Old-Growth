@@ -46,7 +46,41 @@ export const PALETTE = {
   /** Translucent preview of a part that has not been bought yet. */
   ghost: 'rgba(253, 243, 224, 0.42)',
   ghostLeaf: 'rgba(147, 189, 99, 0.45)',
+  /**
+   * Distant hills. Two bands, far and near, and the colour each is dragged
+   * toward once the sun is down. They are the ground the Old Growth forest will
+   * eventually stand on, so they are deliberately flat and low-contrast — the
+   * tree in front has to stay the thing you look at.
+   */
+  hillFar: '#9fb7a0',
+  hillNear: '#7f9c7e',
+  hillFarNight: '#2c3a4a',
+  hillNearNight: '#232f3d',
 } as const;
 
 /** Fraction of the canvas height occupied by sky (above the soil line). */
 export const HORIZON_RATIO = 0.62;
+
+/** Sky gradient at one moment of the day. */
+export interface SkyColors {
+  readonly top: string;
+  readonly bottom: string;
+}
+
+/**
+ * Sky keyframes through one day, keyed by day fraction.
+ *
+ * Interpolating between these is what gives the sky its hour: the warm band low
+ * on the horizon at dawn and dusk, the pale green-blue of midday, the cold near
+ * blacks of deep night. The last entry repeats the first at `1` so the day
+ * wraps without a seam at midnight.
+ */
+export const SKY_KEYFRAMES: readonly (SkyColors & { readonly at: number })[] = [
+  { at: 0, top: '#2b3a63', bottom: '#8a6473' },
+  { at: 0.1, top: '#7fb0d8', bottom: '#f6d9b0' },
+  { at: 0.31, top: '#8fc6e8', bottom: '#e7f0d8' },
+  { at: 0.52, top: '#83a9d0', bottom: '#f2c89a' },
+  { at: 0.62, top: '#3a4a72', bottom: '#8a6a7a' },
+  { at: 0.8, top: '#18213f', bottom: '#2c3352' },
+  { at: 1, top: '#2b3a63', bottom: '#8a6473' },
+] as const;

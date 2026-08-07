@@ -1,4 +1,16 @@
+import {
+  cameraFromLayout,
+  cameraLayout,
+  clampCamera,
+  panCamera,
+  refitCamera,
+  scrollCamera,
+  zoomCameraAt,
+  type Camera,
+  type Viewport,
+} from '../engine/camera';
 import { CLICK_TOLERANCE_PX } from '../engine/clicker';
+import { dayCycle } from '../engine/daylight';
 import { hitTestSegments, type Vec2 } from '../engine/geometry';
 import type { PricedGrowthOption } from '../engine/growth';
 import {
@@ -14,7 +26,6 @@ import { placeOption, type NodePlacement } from '../engine/treeGraph';
 import type { GameSnapshot } from '../engine/types';
 import { drawComboMeter } from './comboMeter';
 import { EffectPool } from './effects';
-import { HORIZON_RATIO, PALETTE } from './palette';
 import {
   drawRadialMenu,
   hitTestRadialMenu,
@@ -22,6 +33,7 @@ import {
   layoutRadialMenu,
   type RadialMenuState,
 } from './radialMenu';
+import { drawBackdrop } from './sky';
 import { computeTreeLayout, drawGhostPart, drawTree } from './tree';
 
 /**
@@ -34,13 +46,22 @@ import { computeTreeLayout, drawGhostPart, drawTree } from './tree';
  * It also owns the **screen-space projection** of the tree, which is why
  * hit-testing lives here: the click tolerance is specified in pixels, so taps
  * are tested against the same projected geometry the player can actually see.
- * The projection is recomputed on resize and whenever the tree's structure
- * changes, never per frame.
+ * The projection is recomputed on resize, on camera moves, and whenever the
+ * tree's structure changes — never per frame.
+ *
+ * The camera follows the auto-fit until the player first touches it. From then
+ * on it is theirs: growing a branch no longer yanks the framing out from under
+ * someone who has deliberately panned down to inspect their roots.
  */
 export class Renderer {
   private readonly ctx: CanvasRenderingContext2D;
   private cssWidth = 0;
   private cssHeight = 0;
+
+  private camera: Camera = { x: 0, y: 0, zoom: 1, baseScale: 1 };
+
+  /** Has the player moved the camera themselves? See the class comment. */
+  private engaged = false;
 
   /** Click feedback pool, driven by the input layer. */
   readonly effects = new EffectPool();
@@ -56,6 +77,8 @@ export class Renderer {
   private seeded = false;
 
   private menu: RadialMenuState | null = null;
+  /** Kept alongside the menu so it can be re-laid-out when the camera moves. */
+  private menuOptions: readonly PricedGrowthOption[] = [];
   private hoveredItem: number | null = null;
   private ghost: PricedGrowthOption | null = null;
 
@@ -111,6 +134,7 @@ export class Renderer {
       this.closeMenu();
       return;
     }
+    this.menuOptions = options;
     this.menu = {
       nodeId,
       center: anchor,
@@ -126,8 +150,30 @@ export class Renderer {
   /** Close the grow menu and drop any preview. */
   closeMenu(): void {
     this.menu = null;
+    this.menuOptions = [];
     this.hoveredItem = null;
     this.ghost = null;
+  }
+
+  /**
+   * Re-hang an open menu on its node after the projection changed.
+   *
+   * Panning while the menu is open would otherwise leave the dials floating in
+   * space, disconnected from the limb they belong to — and still clickable
+   * there, which is worse than merely looking wrong.
+   */
+  private reanchorMenu(): void {
+    if (!this.menu) return;
+    const anchor = this.nodeAnchor(this.menu.nodeId);
+    if (!anchor) {
+      this.closeMenu();
+      return;
+    }
+    this.menu = {
+      ...this.menu,
+      center: anchor,
+      items: layoutRadialMenu(anchor, this.menuOptions),
+    };
   }
 
   /** The open menu, if any. */
@@ -185,15 +231,81 @@ export class Renderer {
     // Draw in CSS pixels; the transform scales to device pixels.
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
+    if (this.engaged) {
+      // Keep the player's zoom and their place in the world, but re-derive what
+      // "fits" means for the new canvas — a phone rotating should reframe, not
+      // strand the tree off-screen.
+      this.camera = refitCamera(this.camera, this.fitScale(), this.viewport);
+    }
     this.projectTreeToScreen();
 
     // A resize moves every node, so an open menu would be anchored to nothing.
     this.closeMenu();
   }
 
+  /** The canvas size in CSS pixels. */
+  private get viewport(): Viewport {
+    return { width: this.cssWidth, height: this.cssHeight };
+  }
+
+  /** Scale at which the whole tree fits the canvas — the camera's zoom-1. */
+  private fitScale(): number {
+    return computeTreeLayout(this.cssWidth, this.cssHeight, this.bounds).scale;
+  }
+
   private projectTreeToScreen(): void {
-    this.layout = computeTreeLayout(this.cssWidth, this.cssHeight, this.bounds);
+    if (!this.engaged) {
+      // Track the auto-fit: the early game reframes itself as the tree grows.
+      this.camera = clampCamera(
+        cameraFromLayout(
+          computeTreeLayout(this.cssWidth, this.cssHeight, this.bounds),
+          this.viewport,
+        ),
+        this.viewport,
+      );
+    }
+    this.layout = cameraLayout(this.camera, this.viewport);
     this.screenTree = projectTree(this.tree, this.layout);
+  }
+
+  /** Apply a camera change: the player now owns the framing. */
+  private moveCamera(next: Camera): void {
+    this.engaged = true;
+    this.camera = next;
+    this.projectTreeToScreen();
+    this.reanchorMenu();
+  }
+
+  /** Drag the world by a screen-space delta (pointer drag). */
+  panBy(dx: number, dy: number): void {
+    this.moveCamera(panCamera(this.camera, dx, dy, this.viewport));
+  }
+
+  /** Scroll the view by a wheel/trackpad delta. */
+  scrollBy(deltaX: number, deltaY: number): void {
+    this.moveCamera(scrollCamera(this.camera, deltaX, deltaY, this.viewport));
+  }
+
+  /** Zoom by `factor`, holding the world point under `cursor` still. */
+  zoomAt(cursor: Vec2, factor: number): void {
+    this.moveCamera(zoomCameraAt(this.camera, cursor, factor, this.viewport));
+  }
+
+  /** Zoom about the middle of the canvas, for keyboard and button zoom. */
+  zoomBy(factor: number): void {
+    this.zoomAt({ x: this.cssWidth / 2, y: this.cssHeight / 2 }, factor);
+  }
+
+  /** Hand the framing back to the auto-fit. */
+  resetCamera(): void {
+    this.engaged = false;
+    this.projectTreeToScreen();
+    this.reanchorMenu();
+  }
+
+  /** Current zoom factor, for the HUD. */
+  get zoom(): number {
+    return this.camera.zoom;
   }
 
   /** Screen-space point the grow menu hangs off for a node: its far end. */
@@ -230,28 +342,14 @@ export class Renderer {
    * @param now      timestamp (ms) driving the time-based click effects.
    */
   draw(snapshot: GameSnapshot, _alpha: number, now: number = Date.now()): void {
-    const { ctx, cssWidth: w, cssHeight: h } = this;
-    const horizonY = Math.round(h * HORIZON_RATIO);
+    const { ctx } = this;
+    const viewport = this.viewport;
 
-    // Sky.
-    const sky = ctx.createLinearGradient(0, 0, 0, horizonY);
-    sky.addColorStop(0, PALETTE.skyTop);
-    sky.addColorStop(1, PALETTE.skyBottom);
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, w, horizonY);
+    // Sky, hills, then the soil cross-section — all keyed off the projected
+    // ground line, so the whole world moves together under the camera.
+    drawBackdrop(ctx, viewport, this.layout, dayCycle(snapshot.elapsedSeconds));
 
-    // Soil.
-    const soil = ctx.createLinearGradient(0, horizonY, 0, h);
-    soil.addColorStop(0, PALETTE.soilTop);
-    soil.addColorStop(1, PALETTE.soilBottom);
-    ctx.fillStyle = soil;
-    ctx.fillRect(0, horizonY, w, h - horizonY);
-
-    // Horizon line where canopy air meets the ground.
-    ctx.fillStyle = PALETTE.horizon;
-    ctx.fillRect(0, horizonY - 1, w, 2);
-
-    drawTree(ctx, this.screenTree, now, this.spawns);
+    drawTree(ctx, this.screenTree, now, this.spawns, viewport);
 
     const ghost = this.ghostSegment();
     if (ghost) drawGhostPart(ctx, ghost);

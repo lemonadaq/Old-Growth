@@ -15,6 +15,73 @@ Do not refactor unrelated code.
 
 ## Changelog
 
+### 2026-08-07 — STEP 4 (backfill): Camera, backdrop, sway and culling
+
+STEP 6's entry recorded that STEPs 3 and 4 were only partly delivered: STEP 3's
+graph model was backfilled then, STEP 4's renderer work was not. This closes it.
+The pieces that were already in place — tapered limbs, blob leaf clusters,
+desaturated roots below the soil line, devicePixelRatio handling, resize safety —
+were left alone. What was missing:
+
+- **Camera** (`/src/engine/camera.ts`, pure). Expressed as *the world point at
+  the centre of the viewport* plus a zoom over a base "fits the tree" scale,
+  which makes the cloud-to-bedrock clamp a direct statement about where the
+  viewport edges are instead of an unwound pixel offset. Pan, wheel-scroll,
+  cursor-anchored zoom (0.5×–2.0×) and clamping are all pure functions.
+  - It follows the auto-fit until the player first touches it, then the framing
+    is theirs — growing a branch no longer yanks the view of someone who has
+    deliberately panned down to their roots. `0` hands it back to the auto-fit.
+  - A resize re-derives the base scale but keeps the player's zoom and place.
+  - An open grow menu is re-anchored on every camera move rather than closed:
+    dials left floating in space would still have been clickable there.
+- **Gestures** (`/src/ui/treeInput.ts`). Drag to pan past a 6px threshold, wheel
+  to scroll, ctrl/⌘+wheel (which is what a trackpad pinch reports as) to zoom at
+  the cursor, `+`/`-` to zoom for mice with no pinch to offer. Panning stands
+  down while a second finger is down, leaving pinch to STEP 18.
+  - **Taps still resolve on `pointerdown` and are never taken back.** The drag
+    threshold decides only when to *also* start moving the camera, so STEP 5's
+    zero-missed-inputs guarantee is untouched — a drag that starts on the trunk
+    pays out its tap and then pans.
+- **Time-of-day sky** (`/src/content/daylight.ts`, `/src/engine/daylight.ts`,
+  `/src/render/sky.ts`). A minimal, pure day cycle — enough for the sky to lerp
+  through seven keyframes from pre-dawn to deep night. STEP 8 owns the sun, the
+  moon, and what daylight actually *does* to production.
+  - A new save starts at `DAY_START_FRACTION` (mid-morning), not at `t = 0`:
+    opening the game in the dark half of dawn was a cold first impression and
+    left the first clicks producing nothing.
+- **Distant hills**, two bands of summed sines on the horizon with horizontal
+  parallax, dimmed toward night. Reserved for the Old Growth forest (STEP 13).
+- **Backdrop follows the camera.** Sky, hills and soil are drawn against the
+  *projected* ground line, so panning to the roots takes the horizon off the top
+  of the screen the way a real horizon goes.
+- **Viewport culling** before every draw pass, which is what keeps a 500-node
+  tree cheap once the camera is zoomed in.
+- **Leaf and blossom sway**, phase-seeded per node id so neighbouring clusters
+  lag one another instead of the canopy pulsing as one slab.
+
+Tests: 46 new across camera (clamp, cursor-anchored zoom round-trip, pan/scroll
+sign conventions, refit), daylight, sky/hill/colour maths, sway determinism and
+bounds, culling, and the drag/wheel gesture split.
+
+Verified in a real browser (Chromium, 900×640): scene renders at 60fps with no
+console errors, wheel-pan reaches the roots, pinch-zoom holds the cursor point,
+panning up stops at the cloud ceiling, branches taper and roots read against the
+soil.
+
+**Open TODOs from this step**
+
+- [ ] STEP 4 asks for bark colour *per species*; species do not exist until STEP
+      10. `woodColor()` still keys off node type — give it a species argument
+      there.
+- [ ] `CLOUD_LEVEL_Y` / `BEDROCK_Y` are in canonical units (±2.4). STEP 7
+      specifies soil strata in pixels (Topsoil 0…−300, Bedrock below −1600);
+      reconcile the two scales when the strata land, and expect the empty sky
+      and soil at the clamp limits to fill in over STEPs 7–8.
+- [ ] Sway and parallax should respect `prefers-reduced-motion` (STEP 16 owns
+      this).
+- [ ] No demo tree was added for STEP 4's acceptance wording — the real tree is
+      already growable from STEP 6, and a hardcoded one would be a regression.
+
 ### 2026-08-06 — STEP 6: Growing interaction (the tree IS the skill tree)
 
 The signature interaction. Tap a limb, a radial menu fans out of it, hover an

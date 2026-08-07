@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ZOOM_STEP } from '../engine/camera';
 import { GameLoop } from '../engine/loop';
 import { Simulation } from '../engine/simulation';
 import { gameStore } from '../engine/store';
@@ -120,10 +121,37 @@ export function App() {
         renderer.hoverMenu(null);
         setHover(null);
       },
+
+      onDrag: (dx, dy) => {
+        renderer.panBy(dx, dy);
+        // The tooltip was pinned to a dial that has just moved under the camera.
+        setHover(null);
+      },
+
+      onScroll: (deltaX, deltaY) => {
+        renderer.scrollBy(deltaX, deltaY);
+        setHover(null);
+      },
+
+      onZoom: (factor, at) => {
+        renderer.zoomAt(at, factor);
+        setHover(null);
+      },
     });
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closeMenu();
+      if (event.key === 'Escape') {
+        closeMenu();
+        return;
+      }
+      // Zoom from the keyboard, for mice with no pinch gesture to offer.
+      if (event.key === '+' || event.key === '=') {
+        renderer.zoomBy(ZOOM_STEP);
+      } else if (event.key === '-' || event.key === '_') {
+        renderer.zoomBy(1 / ZOOM_STEP);
+      } else if (event.key === '0') {
+        renderer.resetCamera();
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
 

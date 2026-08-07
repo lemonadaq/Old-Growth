@@ -1,5 +1,6 @@
 import { formatNumber } from '../engine/format';
 import { RESOURCES } from '../content/resources';
+import { BuffBar } from './BuffBar';
 import { DaylightGauge } from './DaylightGauge';
 import { HydrationGauge } from './HydrationGauge';
 import { useGameStore } from './useGameStore';
@@ -45,15 +46,37 @@ export interface HudProps {
   readonly testProducers: boolean;
   /** Toggle the temporary debug producers. */
   readonly onToggleTestProducers: () => void;
+  /** Whether the scissors are out. */
+  readonly pruneMode: boolean;
+  /** Toggle prune mode. Mirrors the P hotkey. */
+  readonly onTogglePrune: () => void;
 }
 
 /** React HUD overlay that sits above the full-screen canvas. */
-export function Hud({ testProducers, onToggleTestProducers }: HudProps) {
+export function Hud({
+  testProducers,
+  onToggleTestProducers,
+  pruneMode,
+  onTogglePrune,
+}: HudProps) {
   return (
     <div className="hud">
       <header className="hud-header">
-        <h1 className="hud-title">Old Growth</h1>
+        <div className="hud-header__left">
+          <h1 className="hud-title">Old Growth</h1>
+          <BuffBar />
+        </div>
         <div className="hud-header__right">
+          <button
+            type="button"
+            className="hud-toggle hud-toggle--prune"
+            aria-pressed={pruneMode}
+            aria-keyshortcuts="P"
+            title="Prune mode (P) — cut a limb for Sap and Deadwood"
+            onClick={onTogglePrune}
+          >
+            <span aria-hidden>✂</span> {pruneMode ? 'Pruning' : 'Prune'}
+          </button>
           <DaylightGauge />
           <HydrationGauge />
           <button

@@ -15,6 +15,106 @@ Do not refactor unrelated code.
 
 ## Changelog
 
+### 2026-08-07 — STEP 9: Pruning, Deadwood and apical dominance
+
+Growing has been one-way since STEP 6: every part bought was a part kept, so a
+badly placed limb was a permanent tax on the run. Pruning makes the tree
+**editable**. Cutting hands back 40% of what the limb is worth and turns its
+bulk into Deadwood, which is the one resource that buys the permanent auras at
+the base — so a cut is a move, not a loss.
+
+- `src/content/prune.ts` — **new**. `PRUNE_REFUND_FRACTION` (0.4),
+  `DEADWOOD_PER_WOOD` (150), and `GROWTH_COST_TAG` (`'growth.cost'`), the tag
+  every part price now resolves against so a discount is an ordinary modifier.
+- `src/engine/prune.ts` — **new**, and the whole step turns on one decision:
+  **the preview and the transaction are the same function.** `quotePrune()` is a
+  pure read of the graph; `prunePart()` takes its quote *before* touching
+  anything and pays exactly that. A tooltip can never promise a number the cut
+  does not honour.
+  - **The refund is priced forward, not remembered.** Parts cost
+    `baseCost × 1.15^owned`, so the price of putting a subtree back is fully
+    determined by what the tree carries *now* — no purchase log, no save
+    migration, and rebuilding a canopy differently costs the same as rebuilding
+    it identically. `rebuildCostOfType()` sums the last `n` price points, which
+    is what makes that symmetry exact rather than approximate.
+  - **The Deadwood is measured from bulk**, `Σ(thickness × length)` scaled by
+    `DEADWOOD_PER_WOOD` — so a fat old branch is worth more timber than a spray
+    of twigs that happened to cost the same Sap.
+  - **Apical dominance** is judged against the whole subtree, not the cut node:
+    a branch whose topmost *leaf* is the tree's high point still costs the tree
+    its leader. `APICAL_EPSILON` (1e-9) keeps the check off floating-point noise,
+    since apex heights come from walking the graph.
+- `src/engine/buffs.ts` + `src/content/buffs.ts` — **new**. A buff is a bundle of
+  ordinary modifiers under one revocable source id plus an expiry; the economy
+  never learns what a buff is. Expiries are in **engine seconds**, not wall
+  clock, so a buff cannot be waited out by closing the tab and offline
+  simulation advances it at the same rate as everything else. Granting one
+  already running **refreshes** it — modifiers are revoked and re-granted, never
+  topped up, so a refresh can't stack with its own previous instance.
+  - **Lateral Surge** (120 s, `1 - 0.25` on `growth.cost`, `1.25` on Sap): real
+    botany — the leading shoot suppresses the buds below it, and cutting it off
+    releases them at once. It carries a third effect on `click.power`, because
+    taps are the only Sap income the game has today and "Sap/s +25%" would
+    otherwise be invisible; the resource-targeted modifier covers the passive
+    producers later steps add.
+- `src/engine/totems.ts` + `src/content/totems.ts` — **new**. Three slots, three
+  recipes (Rain +20% Water / 20 Deadwood, Sun +20% Light / 45, Vigor +20% click
+  / 90), permanent, no uproot path. Modifiers are keyed **by slot**, so three
+  Totems of Rain genuinely stack (×1.2³) instead of one shadowing the others —
+  duplicates are a legitimate build, and forbidding them would decide two of the
+  three slots for the player.
+- `src/engine/simulation.ts` — `pruneQuote()`, `prunePart()` (now returning a
+  `PruneResult` instead of a bare node list), `grantBuff()`, `updateBuffs()`,
+  `craftTotem()`, `republishTotems()`. Tick order gained one step at the front:
+  **lapsed buffs expire before anything is paid out**, so a tick can never pay
+  through a modifier whose time ran out before it started. `growPart()` prices
+  through `state.modifiers` now, so the discount reaches the till and not just
+  the menu label.
+- `src/render/prune.ts` — **new**. The marked subtree is washed in red *over* the
+  tree rather than replacing it: the player is choosing between two versions of
+  their own tree, and blanking the limb out would hide the thing they are
+  deciding about. Red is deliberately the only red on the canvas.
+- `src/render/effects.ts` — `spawnPruneBurst()`: falling leaves from every
+  removed part, drifting and swinging as they settle.
+- `src/render/totems.ts` — **new**. Carved stumps at the base, cut face and
+  rings from the palette, accent colour from each totem's own content entry so a
+  fourth recipe never needs a palette edit.
+- `src/ui/App.tsx` — prune mode, the **P** hotkey, and the inline confirm:
+  hovering marks, the first click *arms*, the second cuts. Escape backs out one
+  layer at a time (armed cut → mode → grow menu), and moving to a different limb
+  always lands unarmed, so a confirm can never be inherited by a limb the player
+  did not confirm.
+- `src/ui/Workshop.tsx`, `src/ui/PruneTooltip.tsx`, `src/ui/BuffBar.tsx` —
+  **new**. The buff badge drains, and visibly jumps back to full when a second
+  cut refreshes it.
+- `src/ui/sfx.ts` — **new and explicitly temporary.** STEP 16 owns audio (Howler
+  `AudioManager`, persisted volumes, full synthesised bank). This is one
+  synthesised snip — two blade strokes — so the sound STEP 9 asks for is not
+  silently owed for seven steps. Shaped to be deleted: one export, no state, no
+  assets. Lazy `AudioContext` created on the first cut (always a user gesture),
+  every path guarded so a headless environment degrades to silence.
+- Tests: `prune.test.ts` (26), `buffs.test.ts` (16), `totems.test.ts` (12) — 490
+  passing overall. Refund and Deadwood math, the last-`n`-price-points symmetry,
+  apex detection through the subtree, buff expiry at exactly `t + duration`,
+  refresh-not-stack, and slot-keyed totem stacking.
+
+**Open TODOs**
+
+- [ ] **Nothing persists yet.** `state.totems`, the buff ledger and `prunes`
+      are in `GameState` and snapshotted, but save/load is STEP 12 — totems are
+      permanent within a session only. `BuffLedger.clear()` exists for the load
+      path; `republishBuffs()` is the rehydrate hook.
+- [ ] Replace `src/ui/sfx.ts` wholesale in STEP 16. Delete the module, don't
+      extend it.
+- [ ] `DEADWOOD_PER_WOOD` and the three totem costs are first-pass numbers.
+      STEP 19 owns balance — in particular whether a full base (155 Deadwood) is
+      the run-long project it is currently priced as.
+- [ ] Pruning a root re-shades the canopy needlessly (`updateHydration()` and
+      `updateLightExposure()` both run on every cut). Cheap today at <300 parts;
+      revisit if the sweep shows up in a profile.
+- [ ] Totems have no uproot path by design. If STEP 10's grafting or STEP 13's
+      prestige wants one, the aura republish is already a remove-then-add.
+
 ### 2026-08-07 — STEP 8: Sunlight, day/night and leaf shading
 
 The sky stops being a backdrop and starts being an input. There is a sun in it

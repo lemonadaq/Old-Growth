@@ -74,6 +74,28 @@ export const PALETTE = {
   ghost: 'rgba(253, 243, 224, 0.42)',
   ghostLeaf: 'rgba(147, 189, 99, 0.45)',
   /**
+   * Prune mode. The doomed subtree is washed in red and outlined in a brighter
+   * red — deliberately the only red in the game, so "this is about to be cut"
+   * cannot be confused with anything else on the canvas.
+   */
+  pruneMark: 'rgba(214, 88, 74, 0.5)',
+  pruneEdge: '#ff8a72',
+  prunePanel: 'rgba(58, 18, 14, 0.92)',
+  pruneText: '#ffe2d8',
+  /** Deadwood, and the falling foliage a cut shakes loose. */
+  deadwood: '#8a6a4a',
+  leafFall: '#8aab55',
+  leafFallDry: '#c08a3a',
+  /**
+   * Carved stumps. The cut face is pale heartwood with darker rings; the aura
+   * colour of each recipe comes from the totem's own content definition, so a
+   * new recipe never needs a palette edit.
+   */
+  stump: '#6b4a2c',
+  stumpShade: '#4d3520',
+  stumpFace: '#c9a878',
+  stumpRing: 'rgba(77, 53, 32, 0.55)',
+  /**
    * Distant hills. Two bands, far and near, and the colour each is dragged
    * toward once the sun is down. They are the ground the Old Growth forest will
    * eventually stand on, so they are deliberately flat and low-contrast — the

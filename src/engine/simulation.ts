@@ -1,8 +1,11 @@
 import Decimal from 'break_infinity.js';
+import { BUFF_BY_ID, LATERAL_SURGE_ID } from '../content/buffs';
 import { GROWTH_RULE_BY_TYPE, type TreeNodeType } from '../content/growth';
 import { DEW_MIN_TAPS, DEW_SECONDS, EXPOSURE_INTERVAL_SECONDS } from '../content/light';
 import { RESOURCE_IDS } from '../content/resources';
+import { TOTEM_BY_ID } from '../content/totems';
 import { UPGRADES, UPGRADE_BY_ID } from '../content/upgrades';
+import { buffModifiers, buffSource, type ActiveBuff } from './buffs';
 import { resolveClick, resolveClickStats, type ClickResult, type ClickStats } from './clicker';
 import { comboFill, comboMultiplier, comboStacksAt, registerComboClick } from './combo';
 import { dayCycle } from './daylight';
@@ -23,11 +26,14 @@ import {
   DAYLIGHT_SOURCE,
 } from './light';
 import { applyModifiers, type Modifier } from './modifiers';
+import { quotePrune, type PruneQuote } from './prune';
 import type { RandomSource } from './rng';
+import { hasFreeSlot, totemCost, totemModifiers, TOTEM_SOURCE } from './totems';
 import { DEFAULT_SPECIES_ID, type TreeNode } from './treeGraph';
 import { isMaxed, upgradeCost, upgradeModifiers, upgradeSource } from './upgrades';
 import {
   createInitialState,
+  type BuffSnapshot,
   type GameSnapshot,
   type GameState,
   type LeafLight,
@@ -39,6 +45,16 @@ import {
 export interface ClickOutcome extends ClickResult {
   /** Sap from the day's first tap, or `null` when this was not that tap. */
   readonly dew: Decimal | null;
+}
+
+/** What a completed cut removed and paid out. */
+export interface PruneResult {
+  /** The quote the cut was executed against — exactly what the preview showed. */
+  readonly quote: PruneQuote;
+  /** The nodes that came off, the cut node first. */
+  readonly removed: readonly TreeNode[];
+  /** The Lateral Surge this cut started or refreshed, or `null`. */
+  readonly surge: ActiveBuff | null;
 }
 
 /**
@@ -59,6 +75,10 @@ export class Simulation {
   constructor(initial: GameState = createInitialState()) {
     this.state = initial;
     this.syncPartProducers();
+    // Permanent auras and any running buffs first: they are inputs to everything
+    // measured below them, and a loaded save arrives with both already set.
+    this.republishTotems();
+    this.republishBuffs();
     this.updateDaylight();
     this.updateHydration();
     this.updateLightExposure();
@@ -163,7 +183,9 @@ export class Simulation {
     }
 
     const rule = GROWTH_RULE_BY_TYPE[childType];
-    const cost = partCost(childType, tree.countOfType(childType));
+    // Priced through the modifiers, so a growth discount reaches the till and
+    // not just the menu label.
+    const cost = partCost(childType, tree.countOfType(childType), this.state.modifiers);
     if (this.state.resources.amount(rule.costResource).lt(cost)) return null;
 
     const node = tree.grow(nodeId, childType, speciesId, this.state.tick);
@@ -188,20 +210,126 @@ export class Simulation {
   }
 
   /**
-   * Cut a limb (or root) and everything hanging off it, dropping the production
-   * it carried. Refunds and Deadwood are STEP 9's business; this is the graph
-   * surgery the renderer and economy need to stay consistent.
+   * What cutting at `nodeId` would remove and pay. `null` when nothing can be
+   * cut there — this is what the prune-mode tooltip renders.
    */
-  prunePart(nodeId: string): TreeNode[] {
+  pruneQuote(nodeId: string): PruneQuote | null {
+    return quotePrune(this.state.tree, nodeId, this.state.modifiers);
+  }
+
+  /**
+   * Cut a limb (or root) and everything hanging off it: drop the production it
+   * carried, hand back the refund and the Deadwood, and — if the cut took the
+   * tree's leader with it — release the buds below into a Lateral Surge.
+   *
+   * Returns `null` and changes nothing when there is nothing to cut there.
+   *
+   * The payout is taken from {@link pruneQuote} *before* the graph is touched,
+   * so the transaction and the preview the player was reading are the same
+   * numbers: prices depend on how many parts of a type the tree carries, and
+   * that changes the instant the subtree comes off.
+   */
+  prunePart(nodeId: string): PruneResult | null {
+    const quote = this.pruneQuote(nodeId);
+    if (!quote) return null;
+
     const removed = this.state.tree.prune(nodeId);
+    if (removed.length === 0) return null;
+
     for (const node of removed) {
       this.removeProducer(partProducerId(node.id));
     }
-    if (removed.length > 0) {
-      this.updateHydration();
-      this.updateLightExposure();
+
+    for (const refund of quote.refunds) {
+      this.state.resources.add(refund.resource, refund.amount);
     }
-    return removed;
+    this.state.resources.add('deadwood', quote.deadwood);
+    this.state.prunes += 1;
+
+    const surge = quote.apical ? this.grantBuff(LATERAL_SURGE_ID) : null;
+
+    this.updateHydration();
+    this.updateLightExposure();
+    return { quote, removed, surge };
+  }
+
+  /**
+   * Start a timed buff, or refresh one already running. Returns the active
+   * record, or `null` for an unknown id.
+   *
+   * Modifiers are revoked and re-granted rather than topped up, so refreshing a
+   * buff can never stack its effects with its own previous instance.
+   */
+  grantBuff(id: string, now: number = this.state.elapsedSeconds): ActiveBuff | null {
+    const def = BUFF_BY_ID[id];
+    if (!def) return null;
+
+    const active = this.state.buffs.grant(def, now);
+    this.state.modifiers.removeBySource(buffSource(id));
+    for (const modifier of buffModifiers(def)) {
+      this.state.modifiers.add(modifier);
+    }
+    return active;
+  }
+
+  /**
+   * Re-grant the modifiers of every running buff. The from-scratch path, used at
+   * construction and after loading a save; ordinary grants keep themselves in
+   * step.
+   */
+  republishBuffs(): void {
+    for (const buff of this.state.buffs.entries()) {
+      const def = BUFF_BY_ID[buff.id];
+      if (!def) continue;
+      this.state.modifiers.removeBySource(buffSource(buff.id));
+      for (const modifier of buffModifiers(def)) {
+        this.state.modifiers.add(modifier);
+      }
+    }
+  }
+
+  /** Retire buffs whose time is up, revoking everything they granted. */
+  updateBuffs(): void {
+    for (const id of this.state.buffs.expire(this.state.elapsedSeconds)) {
+      this.state.modifiers.removeBySource(buffSource(id));
+    }
+  }
+
+  /**
+   * Carve a totem from Deadwood and plant it at the tree base.
+   *
+   * Returns `false` and changes nothing when the id is unknown, every slot is
+   * taken, or there is not enough Deadwood. Totems are permanent — there is no
+   * uproot path on purpose.
+   */
+  craftTotem(totemId: string): boolean {
+    const def = TOTEM_BY_ID[totemId];
+    if (!def) return false;
+    if (!hasFreeSlot(this.state.totems)) return false;
+
+    const cost = totemCost(def);
+    if (this.state.resources.amount(def.costResource).lt(cost)) return false;
+
+    this.state.resources.add(def.costResource, cost.neg());
+    this.state.totems.push(totemId);
+    this.republishTotems();
+    return true;
+  }
+
+  /**
+   * Republish every planted totem's aura under one source.
+   *
+   * A Rain totem moves Water income and therefore hydration; a Sun totem moves
+   * what each leaf earns. Both are re-derived here so the HUD and the next tap
+   * agree with the carving that was just planted.
+   */
+  republishTotems(): void {
+    this.state.modifiers.removeBySource(TOTEM_SOURCE);
+    for (const modifier of totemModifiers(this.state.totems)) {
+      this.state.modifiers.add(modifier);
+    }
+    this.updateHydration();
+    this.updateLightExposure();
   }
 
   /**
@@ -342,10 +470,12 @@ export class Simulation {
     this.state.elapsedSeconds += dtSeconds;
     this.state.lastUpdatedAt = Date.now();
 
-    // Order matters. The sun sets the ceiling on what Light is worth this tick,
-    // hydration sets what the roots can pay for, and only then is it worth
-    // asking what each leaf is earning — so the rate banked for the tooltips is
-    // the one the tick actually pays out.
+    // Order matters. Lapsed buffs go first — a tick must not pay out through a
+    // modifier whose time ran out before it started. Then the sun sets the
+    // ceiling on what Light is worth, hydration sets what the roots can pay for,
+    // and only then is it worth asking what each leaf is earning — so the rate
+    // banked for the tooltips is the one the tick actually pays out.
+    this.updateBuffs();
     this.updateDaylight();
     this.updateHydration();
 
@@ -398,6 +528,17 @@ export class Simulation {
 
     const hydration = this.state.hydration;
 
+    const elapsed = this.state.elapsedSeconds;
+    const buffs: BuffSnapshot[] = this.state.buffs.entries().map((buff) => {
+      const duration = Math.max(1e-9, buff.expiresAt - buff.grantedAt);
+      const remainingSeconds = Math.max(0, buff.expiresAt - elapsed);
+      return {
+        id: buff.id,
+        remainingSeconds,
+        fraction: Math.min(1, remainingSeconds / duration),
+      };
+    });
+
     return {
       resources,
       totals,
@@ -420,7 +561,11 @@ export class Simulation {
         fill: comboFill(this.state.combo, now, clickStats.comboCap),
       },
       upgrades,
+      buffs,
+      // Copied, not shared: the engine pushes onto this array in place.
+      totems: [...this.state.totems],
       clicks: this.state.clicks,
+      prunes: this.state.prunes,
       treeRevision: this.state.tree.revision,
       treeSize: this.state.tree.size,
       tick: this.state.tick,

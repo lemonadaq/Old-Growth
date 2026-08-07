@@ -4,7 +4,7 @@ import { RESOURCE_IDS } from '../content/resources';
 import { UPGRADES, UPGRADE_BY_ID } from '../content/upgrades';
 import { resolveClick, resolveClickStats, type ClickResult } from './clicker';
 import { comboFill, comboMultiplier, comboStacksAt, registerComboClick } from './combo';
-import { computeProduction, type Producer } from './economy';
+import { computeProduction, computeResourceRate, type Producer } from './economy';
 import {
   partCost,
   partProducer,
@@ -12,6 +12,7 @@ import {
   priceGrowthOptions,
   type PricedGrowthOption,
 } from './growth';
+import { computeHydration, hydrationModifiers, HYDRATION_SOURCE } from './hydration';
 import type { Modifier } from './modifiers';
 import type { RandomSource } from './rng';
 import { DEFAULT_SPECIES_ID, type TreeNode } from './treeGraph';
@@ -42,6 +43,7 @@ export class Simulation {
   constructor(initial: GameState = createInitialState()) {
     this.state = initial;
     this.syncPartProducers();
+    this.updateHydration();
   }
 
   /** Register (or replace) a producer by its id. */
@@ -93,7 +95,13 @@ export class Simulation {
    * balances. This is what the radial grow menu renders.
    */
   growthOptions(nodeId: string): PricedGrowthOption[] {
-    return priceGrowthOptions(this.state.tree, nodeId, this.state.resources, this.state.modifiers);
+    return priceGrowthOptions(
+      this.state.tree,
+      nodeId,
+      this.state.resources,
+      this.state.modifiers,
+      this.state.soil,
+    );
   }
 
   /**
@@ -122,8 +130,16 @@ export class Simulation {
 
     this.state.resources.add(rule.costResource, cost.neg());
 
-    const producer = partProducer(node);
+    const producer = partProducer(node, {
+      soil: this.state.soil,
+      placement: tree.placements().get(node.id),
+    });
     if (producer) this.addProducer(producer);
+
+    // A new root (or a new leaf drinking from them) moves the hydration balance
+    // immediately, so the HUD and the next tap agree with the purchase that was
+    // just made rather than lagging a tick behind it.
+    this.updateHydration();
     return node;
   }
 
@@ -137,6 +153,7 @@ export class Simulation {
     for (const node of removed) {
       this.removeProducer(partProducerId(node.id));
     }
+    if (removed.length > 0) this.updateHydration();
     return removed;
   }
 
@@ -150,9 +167,37 @@ export class Simulation {
     for (const id of [...this.state.producers.keys()]) {
       if (id.startsWith('part:')) this.state.producers.delete(id);
     }
+    const placements = this.state.tree.placements();
     for (const node of this.state.tree.allNodes()) {
-      const producer = partProducer(node);
+      const producer = partProducer(node, {
+        soil: this.state.soil,
+        placement: placements.get(node.id),
+      });
       if (producer) this.addProducer(producer);
+    }
+  }
+
+  /**
+   * Re-read the hydration link and republish its modifiers.
+   *
+   * The existing hydration modifiers are revoked *before* Water income is
+   * measured. They do not target Water, so it would read the same either way —
+   * but doing it in this order means no future tagging mistake can turn the
+   * link into a feedback loop.
+   */
+  updateHydration(): void {
+    this.state.modifiers.removeBySource(HYDRATION_SOURCE);
+
+    const income = computeResourceRate(
+      this.state.producers.values(),
+      this.state.modifiers,
+      'water',
+    );
+    const hydration = computeHydration(income, this.state.tree.countOfType('leafCluster'));
+    this.state.hydration = hydration;
+
+    for (const modifier of hydrationModifiers(hydration.value)) {
+      this.state.modifiers.add(modifier);
     }
   }
 
@@ -188,6 +233,10 @@ export class Simulation {
     this.state.tick += 1;
     this.state.elapsedSeconds += dtSeconds;
     this.state.lastUpdatedAt = Date.now();
+
+    // Hydration is resolved first: this tick's canopy output is paid at the
+    // rate the roots can currently support.
+    this.updateHydration();
 
     const perSecond = computeProduction(this.state.producers.values(), this.state.modifiers);
     for (const id of RESOURCE_IDS) {
@@ -231,11 +280,20 @@ export class Simulation {
       };
     });
 
+    const hydration = this.state.hydration;
+
     return {
       resources,
       totals,
       perSecond,
       clickStats,
+      hydration: {
+        income: new Decimal(hydration.income),
+        need: new Decimal(hydration.need),
+        leaves: hydration.leaves,
+        ratio: hydration.ratio,
+        value: hydration.value,
+      },
       combo: {
         stacks,
         cap: clickStats.comboCap,

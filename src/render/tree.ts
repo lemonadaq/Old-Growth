@@ -1,4 +1,5 @@
 import { GROWTH_RULE_BY_TYPE, type TreeNodeType } from '../content/growth';
+import type { Viewport } from '../engine/camera';
 import type { ScreenSegment, TreeBounds, TreeLayout } from '../engine/tree';
 import { HORIZON_RATIO, PALETTE } from './palette';
 
@@ -94,16 +95,22 @@ function interpolated(segment: ScreenSegment, t: number): ScreenSegment {
   };
 }
 
-/**
- * Deterministic blob offsets for a leaf cluster, derived from its node id so a
- * given cluster always has the same silhouette.
- */
-function blobOffsets(id: string, count: number): { dx: number; dy: number; r: number }[] {
+/** FNV-1a over a node id: a stable seed for that node's look and motion. */
+function hashId(id: string): number {
   let hash = 0x811c9dc5;
   for (let i = 0; i < id.length; i += 1) {
     hash ^= id.charCodeAt(i);
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
+  return hash;
+}
+
+/**
+ * Deterministic blob offsets for a leaf cluster, derived from its node id so a
+ * given cluster always has the same silhouette.
+ */
+function blobOffsets(id: string, count: number): { dx: number; dy: number; r: number }[] {
+  let hash = hashId(id);
 
   const blobs: { dx: number; dy: number; r: number }[] = [];
   for (let i = 0; i < count; i += 1) {
@@ -118,6 +125,56 @@ function blobOffsets(id: string, count: number): { dx: number; dy: number; r: nu
     });
   }
   return blobs;
+}
+
+/** How long one full sway takes, in ms. Slow: this is a big old tree. */
+const SWAY_PERIOD_MS = 3400;
+
+/** Sway travel as a fraction of a cluster's radius. */
+const SWAY_AMPLITUDE = 0.22;
+
+/**
+ * How far a piece of foliage has drifted from its rest position, in pixels.
+ *
+ * Each cluster gets its own phase from its node id, so neighbouring leaves lag
+ * one another instead of the whole canopy pulsing as one slab — that
+ * synchronised look is what makes a swaying tree read as a screensaver. The
+ * vertical component is a third of the horizontal and runs at twice the rate,
+ * which traces a shallow figure-eight rather than a slide.
+ */
+export function swayOffset(id: string, now: number, radius: number): { dx: number; dy: number } {
+  const phase = (hashId(id) % 1000) / 1000;
+  const angle = (now / SWAY_PERIOD_MS + phase) * Math.PI * 2;
+  const reach = radius * SWAY_AMPLITUDE;
+  return { dx: Math.sin(angle) * reach, dy: Math.sin(angle * 2) * reach * 0.33 };
+}
+
+/**
+ * Is this segment close enough to the viewport to be worth drawing?
+ *
+ * The padding is generous on purpose: a leaf cluster's blobs reach well past
+ * its centre-line, and a cluster popping in at the screen edge is far more
+ * noticeable than the handful of microseconds spent drawing it. Culling is
+ * what keeps a 500-node tree at 60fps once the camera is zoomed in and most of
+ * the tree is off-screen.
+ */
+export function isSegmentVisible(segment: ScreenSegment, viewport: Viewport, padding = 0): boolean {
+  const reach = padding + segment.width * 2;
+  const minX = Math.min(segment.a.x, segment.b.x) - reach;
+  const maxX = Math.max(segment.a.x, segment.b.x) + reach;
+  const minY = Math.min(segment.a.y, segment.b.y) - reach;
+  const maxY = Math.max(segment.a.y, segment.b.y) + reach;
+
+  return maxX >= 0 && minX <= viewport.width && maxY >= 0 && minY <= viewport.height;
+}
+
+/** The segments worth drawing for this viewport, in their original order. */
+export function cullSegments(
+  segments: readonly ScreenSegment[],
+  viewport: Viewport,
+  padding = 8,
+): ScreenSegment[] {
+  return segments.filter((segment) => isSegmentVisible(segment, viewport, padding));
 }
 
 /** How much of its base width a limb keeps at its tip. */
@@ -155,12 +212,16 @@ function fillWood(
   ctx.fill();
 }
 
+/** No motion — for the ghost preview, which must sit exactly where it will land. */
+const STILL = { dx: 0, dy: 0 } as const;
+
 /** A leaf cluster: overlapping soft circles around the twig's tip. */
 function drawLeafCluster(
   ctx: CanvasRenderingContext2D,
   segment: ScreenSegment,
   t: number,
   alpha = 1,
+  sway: { dx: number; dy: number } = STILL,
 ): void {
   const radius = Math.max(3, segment.width) * t;
   const blobs = blobOffsets(segment.id, 4);
@@ -173,8 +234,8 @@ function drawLeafCluster(
       i === 0 ? PALETTE.leafShade : i === blobs.length - 1 ? PALETTE.leafHighlight : PALETTE.leaf;
     ctx.beginPath();
     ctx.arc(
-      segment.b.x + blob.dx * radius,
-      segment.b.y + blob.dy * radius,
+      segment.b.x + blob.dx * radius + sway.dx,
+      segment.b.y + blob.dy * radius + sway.dy,
       radius * blob.r,
       0,
       Math.PI * 2,
@@ -190,8 +251,11 @@ function drawBlossom(
   segment: ScreenSegment,
   t: number,
   alpha = 1,
+  sway: { dx: number; dy: number } = STILL,
 ): void {
   const radius = Math.max(2.5, segment.width) * t;
+  const cx = segment.b.x + sway.dx;
+  const cy = segment.b.y + sway.dy;
 
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -200,8 +264,8 @@ function drawBlossom(
     const angle = (i / 5) * Math.PI * 2;
     ctx.beginPath();
     ctx.arc(
-      segment.b.x + Math.cos(angle) * radius * 0.7,
-      segment.b.y + Math.sin(angle) * radius * 0.7,
+      cx + Math.cos(angle) * radius * 0.7,
+      cy + Math.sin(angle) * radius * 0.7,
       radius * 0.6,
       0,
       Math.PI * 2,
@@ -210,7 +274,7 @@ function drawBlossom(
   }
   ctx.fillStyle = PALETTE.blossomCore;
   ctx.beginPath();
-  ctx.arc(segment.b.x, segment.b.y, radius * 0.42, 0, Math.PI * 2);
+  ctx.arc(cx, cy, radius * 0.42, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
@@ -242,13 +306,20 @@ export type SpawnTimes = ReadonlyMap<string, number>;
  * Roots go down first (they belong behind the soil's shading), then the wood of
  * the canopy, then the sunlit trunk edge, and finally leaves and blossoms on
  * top so foliage always reads in front of the limb carrying it.
+ *
+ * Passing a `viewport` culls everything off-screen before any of those passes
+ * run, so a zoomed-in camera pays only for the parts the player can see.
  */
 export function drawTree(
   ctx: CanvasRenderingContext2D,
-  segments: readonly ScreenSegment[],
+  allSegments: readonly ScreenSegment[],
   now: number,
   spawns: SpawnTimes = new Map(),
+  viewport?: Viewport,
 ): void {
+  const segments = viewport ? cullSegments(allSegments, viewport) : allSegments;
+  if (segments.length === 0) return;
+
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -286,11 +357,13 @@ export function drawTree(
     ctx.stroke();
   }
 
-  // Foliage on top.
+  // Foliage on top, drifting in the wind.
   for (const segment of segments) {
+    if (segment.kind !== 'leafCluster' && segment.kind !== 'blossom') continue;
     const t = progress.get(segment.id) ?? 1;
-    if (segment.kind === 'leafCluster') drawLeafCluster(ctx, segment, t);
-    else if (segment.kind === 'blossom') drawBlossom(ctx, segment, t);
+    const sway = swayOffset(segment.id, now, Math.max(3, segment.width) * t);
+    if (segment.kind === 'leafCluster') drawLeafCluster(ctx, segment, t, 1, sway);
+    else drawBlossom(ctx, segment, t, 1, sway);
   }
 
   ctx.restore();

@@ -10,7 +10,18 @@ import {
 } from './growth';
 import { ModifierSet } from './modifiers';
 import { ResourceRegistry } from './resourceRegistry';
-import { TreeGraph } from './treeGraph';
+import { BARREN_SOIL, type SoilMap } from './soil';
+import { TreeGraph, type NodePlacement } from './treeGraph';
+
+/** A placement whose working tip sits at canonical `y` (negative = underground). */
+function placementAt(y: number): NodePlacement {
+  return { start: { x: 0, y: 0 }, direction: -Math.PI / 2, end: { x: 0, y } };
+}
+
+/** Soil holding one generous pocket centred on a given depth. */
+function soilWithVeinAt(y: number, richness: number): SoilMap {
+  return { seed: 1, veins: [{ id: 'planted', center: { x: 0, y }, radius: 0.1, richness }] };
+}
 
 describe('partCost', () => {
   it('charges the base cost for the first part of a type', () => {
@@ -46,11 +57,45 @@ describe('partProducer', () => {
     expect(partProducer({ id: 'trunk-0', type: 'trunk' })).toBeNull();
   });
 
-  it('tags roots as underground, ready for offline production later', () => {
+  it('tags roots as underground and offline-safe', () => {
     expect(partProducer({ id: 'rootSegment-2', type: 'rootSegment' })?.tags).toEqual([
       'root',
       'rootSegment',
+      'offline',
     ]);
+  });
+
+  it('scales a root by the depth its tip reached', () => {
+    const producer = partProducer(
+      { id: 'rootSegment-2', type: 'rootSegment' },
+      { soil: BARREN_SOIL, placement: placementAt(-0.5) },
+    );
+    // 500 soil units down doubles production.
+    expect(Number(producer?.baseRate)).toBeCloseTo(0.6, 9);
+  });
+
+  it('registers nothing for a root tip that found no vein', () => {
+    expect(
+      partProducer(
+        { id: 'rootTip-3', type: 'rootTip' },
+        { soil: BARREN_SOIL, placement: placementAt(-0.5) },
+      ),
+    ).toBeNull();
+  });
+
+  it('registers a root tip that struck ore, scaled by richness', () => {
+    const producer = partProducer(
+      { id: 'rootTip-3', type: 'rootTip' },
+      { soil: soilWithVeinAt(-0.5, 2), placement: placementAt(-0.5) },
+    );
+    expect(Number(producer?.baseRate)).toBeCloseTo(0.12 * 2 * 2, 9);
+  });
+
+  it('treats a part with no known placement as sitting in barren surface soil', () => {
+    expect(
+      Number(partProducer({ id: 'rootSegment-2', type: 'rootSegment' })?.baseRate),
+    ).toBeCloseTo(0.3, 9);
+    expect(partProducer({ id: 'rootTip-3', type: 'rootTip' })).toBeNull();
   });
 });
 
@@ -87,6 +132,67 @@ describe('partProductionDelta', () => {
     const modifiers = new ModifierSet();
     modifiers.add({ source: 'test', type: 'mul', targetKind: 'tag', target: 'root', value: 5 });
     expect(partProductionDelta('leafCluster', modifiers)?.rate.toNumber()).toBeCloseTo(0.4, 9);
+  });
+
+  it('reports no soil conditions for a part in the canopy', () => {
+    const delta = partProductionDelta('leafCluster', new ModifierSet(), {
+      soil: BARREN_SOIL,
+      placement: placementAt(0.6),
+    });
+    expect(delta?.depth).toBeNull();
+    expect(delta?.stratum).toBeNull();
+    expect(delta?.depthMultiplier).toBe(1);
+    expect(delta?.missingVein).toBe(false);
+  });
+
+  it('names the layer a root would sit in and the bonus it earns there', () => {
+    const delta = partProductionDelta('rootSegment', new ModifierSet(), {
+      soil: BARREN_SOIL,
+      placement: placementAt(-0.5),
+    });
+    expect(delta?.depth).toBeCloseTo(500, 9);
+    expect(delta?.stratum?.id).toBe('clay');
+    expect(delta?.depthMultiplier).toBeCloseTo(2, 9);
+    expect(delta?.rate.toNumber()).toBeCloseTo(0.6, 9);
+  });
+
+  it('quotes zero, and says why, for a mineral part with no vein', () => {
+    const delta = partProductionDelta('rootTip', new ModifierSet(), {
+      soil: BARREN_SOIL,
+      placement: placementAt(-0.5),
+    });
+    expect(delta?.rate.toNumber()).toBe(0);
+    expect(delta?.missingVein).toBe(true);
+    expect(delta?.vein).toBeNull();
+  });
+
+  it('stacks depth, richness and modifiers in that order', () => {
+    const modifiers = new ModifierSet();
+    modifiers.add({ source: 'test', type: 'mul', targetKind: 'tag', target: 'root', value: 3 });
+
+    const delta = partProductionDelta('rootTip', modifiers, {
+      soil: soilWithVeinAt(-0.5, 2),
+      placement: placementAt(-0.5),
+    });
+    expect(delta?.vein?.richness).toBe(2);
+    expect(delta?.rate.toNumber()).toBeCloseTo(0.12 * 2 * 2 * 3, 9);
+  });
+
+  it('keeps a zero rate at zero even under an additive modifier', () => {
+    const modifiers = new ModifierSet();
+    modifiers.add({
+      source: 'test',
+      type: 'add',
+      targetKind: 'resource',
+      target: 'minerals',
+      value: 5,
+    });
+
+    const delta = partProductionDelta('rootTip', modifiers, {
+      soil: BARREN_SOIL,
+      placement: placementAt(-0.5),
+    });
+    expect(delta?.rate.toNumber()).toBe(0);
   });
 });
 
@@ -147,6 +253,26 @@ describe('priceGrowthOptions', () => {
 
     const twig = priced.find((p) => p.option.type === 'twig');
     expect(twig?.production).toBeNull();
+  });
+
+  it('places each option where it would actually land before pricing it', () => {
+    const graph = TreeGraph.seedling();
+    const resources = new ResourceRegistry();
+    resources.add('sap', new Decimal(1e6));
+
+    const priced = priceGrowthOptions(
+      graph,
+      graph.rootId,
+      resources,
+      new ModifierSet(),
+      BARREN_SOIL,
+    );
+    const root = priced.find((p) => p.option.type === 'rootSegment');
+
+    // The root leaves the trunk base heading down, so it is quoted underground
+    // and already earning its depth bonus.
+    expect(root?.production?.depth).toBeGreaterThan(0);
+    expect(root?.production?.rate.toNumber()).toBeGreaterThan(0.3);
   });
 
   it('returns nothing for a node with no valid options', () => {

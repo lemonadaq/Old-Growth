@@ -41,3 +41,27 @@ export function computeProduction(
 
   return perSecond;
 }
+
+/**
+ * The same evaluation as {@link computeProduction}, restricted to one resource.
+ *
+ * Used where a single rate is needed mid-tick — the hydration link reads Water
+ * income before deciding what the canopy is worth — and skipping the other six
+ * resources keeps that from costing a full pipeline pass.
+ */
+export function computeResourceRate(
+  producers: Iterable<Producer>,
+  modifiers: ModifierSet,
+  resource: ResourceId,
+): Decimal {
+  let total = new Decimal(0);
+
+  for (const producer of producers) {
+    if (producer.resource !== resource) continue;
+    const base =
+      producer.baseRate instanceof Decimal ? producer.baseRate : new Decimal(producer.baseRate);
+    total = total.add(applyModifiers(base, modifiers.matching(producer.resource, producer.tags)));
+  }
+
+  return total;
+}

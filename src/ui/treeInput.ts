@@ -25,10 +25,23 @@ export interface PointerLikeEvent {
   preventDefault(): void;
 }
 
+/** The subset of `WheelEvent` this module reads. */
+export interface WheelLikeEvent {
+  readonly clientX: number;
+  readonly clientY: number;
+  readonly deltaX: number;
+  readonly deltaY: number;
+  /** Set by trackpad pinch gestures, which browsers report as a ctrl+wheel. */
+  readonly ctrlKey: boolean;
+  readonly metaKey: boolean;
+  preventDefault(): void;
+}
+
 export type PointerEventName =
   'pointerdown' | 'pointermove' | 'pointerup' | 'pointercancel' | 'pointerleave';
 
 export type PointerListener = (event: PointerLikeEvent) => void;
+export type WheelListener = (event: WheelLikeEvent) => void;
 
 /** The subset of `HTMLCanvasElement` this module needs. */
 export interface PointerSurface {
@@ -37,8 +50,28 @@ export interface PointerSurface {
     listener: PointerListener,
     options?: { passive?: boolean },
   ): void;
+  addEventListener(type: 'wheel', listener: WheelListener, options?: { passive?: boolean }): void;
   removeEventListener(type: PointerEventName, listener: PointerListener): void;
+  removeEventListener(type: 'wheel', listener: WheelListener): void;
   getBoundingClientRect(): { readonly left: number; readonly top: number };
+}
+
+/**
+ * How far a press must travel before it counts as a drag rather than a tap.
+ *
+ * The tap has *already* paid out by then — taps resolve on `pointerdown` and
+ * that is not negotiable (see above). So this threshold does not decide between
+ * tap and drag; it only decides when to also start moving the camera, which is
+ * why it can afford to be small.
+ */
+export const DRAG_THRESHOLD_PX = 6;
+
+/** One notch of wheel zoom, per 100 units of ctrl+wheel delta. */
+export const WHEEL_ZOOM_RATE = 1.15;
+
+/** Zoom factor for a pinch/ctrl+wheel of `deltaY`. */
+export function wheelZoomFactor(deltaY: number): number {
+  return Math.pow(WHEEL_ZOOM_RATE, -deltaY / 100);
 }
 
 export interface TreeInputHandlers {
@@ -58,6 +91,12 @@ export interface TreeInputHandlers {
   onPointerMove?(point: Vec2): void;
   /** The last pointer left the surface. */
   onPointerLeave?(): void;
+  /** A held pointer dragged by `dx, dy` CSS pixels since the last move. */
+  onDrag?(dx: number, dy: number): void;
+  /** A wheel/trackpad scroll, in CSS pixels of intended travel. */
+  onScroll?(deltaX: number, deltaY: number): void;
+  /** A pinch or ctrl+wheel: multiply the zoom by `factor`, about `at`. */
+  onZoom?(factor: number, at: Vec2): void;
 }
 
 /**
@@ -69,7 +108,10 @@ export function attachTreeInput(surface: PointerSurface, handlers: TreeInputHand
   // is still pressed.
   const activePointers = new Set<number>();
 
-  const toLocal = (event: PointerLikeEvent): Vec2 => {
+  /** Where each held pointer was last seen, and whether it is dragging yet. */
+  const drags = new Map<number, { last: Vec2; origin: Vec2; dragging: boolean }>();
+
+  const toLocal = (event: PointerLikeEvent | WheelLikeEvent): Vec2 => {
     const rect = surface.getBoundingClientRect();
     return { x: event.clientX - rect.left, y: event.clientY - rect.top };
   };
@@ -80,6 +122,7 @@ export function attachTreeInput(surface: PointerSurface, handlers: TreeInputHand
     activePointers.add(event.pointerId);
 
     const point = toLocal(event);
+    drags.set(event.pointerId, { last: point, origin: point, dragging: false });
     handlers.onPointerMove?.(point);
 
     if (handlers.onPress?.(point)) return;
@@ -91,26 +134,55 @@ export function attachTreeInput(surface: PointerSurface, handlers: TreeInputHand
   };
 
   const onPointerMove = (event: PointerLikeEvent): void => {
-    handlers.onPointerMove?.(toLocal(event));
+    const point = toLocal(event);
+    const drag = drags.get(event.pointerId);
+
+    // A second finger means a pinch, which this layer does not handle; panning
+    // with either of them would fight the gesture, so stand down until one lifts.
+    if (drag && activePointers.size === 1) {
+      if (!drag.dragging) {
+        const travelled = Math.hypot(point.x - drag.origin.x, point.y - drag.origin.y);
+        if (travelled >= DRAG_THRESHOLD_PX) drag.dragging = true;
+      }
+      if (drag.dragging) {
+        handlers.onDrag?.(point.x - drag.last.x, point.y - drag.last.y);
+      }
+      drag.last = point;
+    }
+
+    handlers.onPointerMove?.(point);
   };
 
   const onPointerRelease = (event: PointerLikeEvent): void => {
     activePointers.delete(event.pointerId);
+    drags.delete(event.pointerId);
   };
 
   const onPointerLeave = (event: PointerLikeEvent): void => {
     activePointers.delete(event.pointerId);
+    drags.delete(event.pointerId);
     if (activePointers.size === 0) {
       handlers.onPointerLeave?.();
     }
   };
 
-  // Non-passive: pointerdown calls preventDefault.
+  const onWheel = (event: WheelLikeEvent): void => {
+    // Always: the page behind the canvas must not scroll or pinch-zoom.
+    event.preventDefault();
+    if (event.ctrlKey || event.metaKey) {
+      handlers.onZoom?.(wheelZoomFactor(event.deltaY), toLocal(event));
+    } else {
+      handlers.onScroll?.(event.deltaX, event.deltaY);
+    }
+  };
+
+  // Non-passive: pointerdown and wheel both call preventDefault.
   surface.addEventListener('pointerdown', onPointerDown, { passive: false });
   surface.addEventListener('pointermove', onPointerMove, { passive: true });
   surface.addEventListener('pointerup', onPointerRelease, { passive: true });
   surface.addEventListener('pointercancel', onPointerRelease, { passive: true });
   surface.addEventListener('pointerleave', onPointerLeave, { passive: true });
+  surface.addEventListener('wheel', onWheel, { passive: false });
 
   return () => {
     surface.removeEventListener('pointerdown', onPointerDown);
@@ -118,6 +190,8 @@ export function attachTreeInput(surface: PointerSurface, handlers: TreeInputHand
     surface.removeEventListener('pointerup', onPointerRelease);
     surface.removeEventListener('pointercancel', onPointerRelease);
     surface.removeEventListener('pointerleave', onPointerLeave);
+    surface.removeEventListener('wheel', onWheel);
     activePointers.clear();
+    drags.clear();
   };
 }

@@ -33,6 +33,12 @@ export interface PartProduction {
   readonly resource: ResourceId;
   /** Units per second before modifiers. */
   readonly baseRate: number;
+  /**
+   * When set, the part produces *only* inside a mineral vein, and its yield is
+   * scaled by that vein's richness. A part placed outside every pocket produces
+   * nothing at all — which is what makes where a root tip lands matter.
+   */
+  readonly requiresVein?: boolean;
 }
 
 export interface GrowthRule {
@@ -207,7 +213,7 @@ export const GROWTH_RULES: readonly GrowthRule[] = [
     depthFalloff: 1,
     costResource: 'sap',
     baseCost: 35,
-    production: { resource: 'minerals', baseRate: 0.12 },
+    production: { resource: 'minerals', baseRate: 0.12, requiresVein: true },
   },
 ] as const;
 
@@ -220,9 +226,23 @@ export const GROWTH_RULE_BY_TYPE: Readonly<Record<TreeNodeType, GrowthRule>> = O
 export const TREE_NODE_TYPES: readonly TreeNodeType[] = GROWTH_RULES.map((r) => r.type);
 
 /**
+ * Tag carried by production that keeps running while the player is away.
+ *
+ * The tree rests but the roots do not: STEP 14's offline calculator pays this
+ * tag in full and everything else at a fraction, so the tag has to be on the
+ * producers from the moment roots exist rather than retrofitted later.
+ */
+export const OFFLINE_TAG = 'offline';
+
+/**
  * Producer tags a grown part carries, so modifiers can target "everything in
  * the canopy" or "every leaf cluster" without naming individual nodes.
+ *
+ * Underground parts additionally carry {@link OFFLINE_TAG}.
  */
 export function partProducerTags(type: TreeNodeType): readonly string[] {
-  return [GROWTH_RULE_BY_TYPE[type].domain, type];
+  const rule = GROWTH_RULE_BY_TYPE[type];
+  const tags: string[] = [rule.domain, type];
+  if (rule.domain === 'root') tags.push(OFFLINE_TAG);
+  return tags;
 }

@@ -9,10 +9,14 @@ import { EffectPool } from '../render/effects';
 import { computeTreeLayout } from '../render/tree';
 import {
   attachTreeInput,
+  wheelZoomFactor,
+  DRAG_THRESHOLD_PX,
   type PointerEventName,
   type PointerLikeEvent,
   type PointerListener,
   type PointerSurface,
+  type WheelLikeEvent,
+  type WheelListener,
 } from './treeInput';
 
 /**
@@ -21,18 +25,41 @@ import {
  */
 class FakeSurface implements PointerSurface {
   private readonly listeners = new Map<PointerEventName, Set<PointerListener>>();
+  private readonly wheelListeners = new Set<WheelListener>();
   left = 0;
   top = 0;
   preventedCount = 0;
 
-  addEventListener(type: PointerEventName, listener: PointerListener): void {
+  addEventListener(
+    type: PointerEventName,
+    listener: PointerListener,
+    options?: { passive?: boolean },
+  ): void;
+  addEventListener(type: 'wheel', listener: WheelListener, options?: { passive?: boolean }): void;
+  addEventListener(
+    type: PointerEventName | 'wheel',
+    listener: PointerListener | WheelListener,
+  ): void {
+    if (type === 'wheel') {
+      this.wheelListeners.add(listener as WheelListener);
+      return;
+    }
     const set = this.listeners.get(type) ?? new Set<PointerListener>();
-    set.add(listener);
+    set.add(listener as PointerListener);
     this.listeners.set(type, set);
   }
 
-  removeEventListener(type: PointerEventName, listener: PointerListener): void {
-    this.listeners.get(type)?.delete(listener);
+  removeEventListener(type: PointerEventName, listener: PointerListener): void;
+  removeEventListener(type: 'wheel', listener: WheelListener): void;
+  removeEventListener(
+    type: PointerEventName | 'wheel',
+    listener: PointerListener | WheelListener,
+  ): void {
+    if (type === 'wheel') {
+      this.wheelListeners.delete(listener as WheelListener);
+      return;
+    }
+    this.listeners.get(type)?.delete(listener as PointerListener);
   }
 
   getBoundingClientRect(): { readonly left: number; readonly top: number } {
@@ -40,7 +67,7 @@ class FakeSurface implements PointerSurface {
   }
 
   get listenerCount(): number {
-    let total = 0;
+    let total = this.wheelListeners.size;
     for (const set of this.listeners.values()) total += set.size;
     return total;
   }
@@ -57,6 +84,44 @@ class FakeSurface implements PointerSurface {
     };
     // Copy: a handler may detach mid-dispatch.
     for (const listener of [...(this.listeners.get(type) ?? [])]) listener(full);
+  }
+
+  wheel(event: Partial<WheelLikeEvent> = {}): void {
+    const full: WheelLikeEvent = {
+      clientX: this.left,
+      clientY: this.top,
+      deltaX: 0,
+      deltaY: 0,
+      ctrlKey: false,
+      metaKey: false,
+      preventDefault: () => {
+        this.preventedCount += 1;
+      },
+      ...event,
+    };
+    for (const listener of [...this.wheelListeners]) listener(full);
+  }
+
+  /** Press, move through a list of offsets, then release. */
+  drag(from: Vec2, steps: readonly Vec2[], pointerId = 1): void {
+    this.dispatch('pointerdown', {
+      clientX: from.x + this.left,
+      clientY: from.y + this.top,
+      pointerId,
+    });
+    for (const step of steps) {
+      this.dispatch('pointermove', {
+        clientX: step.x + this.left,
+        clientY: step.y + this.top,
+        pointerId,
+      });
+    }
+    const last = steps[steps.length - 1] ?? from;
+    this.dispatch('pointerup', {
+      clientX: last.x + this.left,
+      clientY: last.y + this.top,
+      pointerId,
+    });
   }
 
   tap(x: number, y: number, pointerId = 1): void {
@@ -80,6 +145,9 @@ function setup() {
   const sim = new Simulation();
   const effects = new EffectPool();
   const hits: Vec2[] = [];
+  const drags: Vec2[] = [];
+  const scrolls: Vec2[] = [];
+  const zooms: { factor: number; at: Vec2 }[] = [];
   let pointer: Vec2 | null = null;
   let clock = 0;
 
@@ -97,6 +165,15 @@ function setup() {
     onPointerLeave: () => {
       pointer = null;
     },
+    onDrag: (dx, dy) => {
+      drags.push({ x: dx, y: dy });
+    },
+    onScroll: (deltaX, deltaY) => {
+      scrolls.push({ x: deltaX, y: deltaY });
+    },
+    onZoom: (factor, at) => {
+      zooms.push({ factor, at });
+    },
   });
 
   return {
@@ -104,6 +181,9 @@ function setup() {
     sim,
     effects,
     hits,
+    drags,
+    scrolls,
+    zooms,
     detach,
     advance: (ms: number) => {
       clock += ms;
@@ -234,12 +314,118 @@ describe('hit filtering and coordinates', () => {
 describe('detach', () => {
   it('removes every listener it added', () => {
     const t = setup();
-    expect(t.surface.listenerCount).toBe(5);
+    // Five pointer events plus the wheel.
+    expect(t.surface.listenerCount).toBe(6);
 
     t.detach();
     expect(t.surface.listenerCount).toBe(0);
 
     t.surface.tap(ON_TRUNK.x, ON_TRUNK.y);
     expect(t.sim.state.clicks).toBe(0);
+  });
+});
+
+describe('camera gestures', () => {
+  it('ignores a press that never travels', () => {
+    const { surface, drags } = setup();
+    surface.drag(OFF_TREE, [OFF_TREE, { x: OFF_TREE.x + 2, y: OFF_TREE.y + 1 }]);
+    expect(drags).toEqual([]);
+  });
+
+  it('starts panning once the press passes the drag threshold', () => {
+    const { surface, drags } = setup();
+    const start = { x: 400, y: 300 };
+    surface.drag(start, [
+      { x: start.x, y: start.y + DRAG_THRESHOLD_PX - 1 },
+      { x: start.x, y: start.y + 40 },
+      { x: start.x, y: start.y + 70 },
+    ]);
+
+    // The sub-threshold move is swallowed; the rest report deltas since the
+    // previous position, not since the press.
+    expect(drags).toEqual([
+      { x: 0, y: 40 - (DRAG_THRESHOLD_PX - 1) },
+      { x: 0, y: 30 },
+    ]);
+  });
+
+  it('still pays out the tap that started the drag', () => {
+    const { surface, sim, hits } = setup();
+    surface.drag(ON_TRUNK, [
+      { x: ON_TRUNK.x + 60, y: ON_TRUNK.y + 60 },
+      { x: ON_TRUNK.x + 120, y: ON_TRUNK.y + 120 },
+    ]);
+    // Taps resolve on pointerdown and are never taken back by a later drag.
+    expect(hits).toHaveLength(1);
+    expect(sim.state.clicks).toBe(1);
+  });
+
+  it('stands down while a second finger is on the glass', () => {
+    const { surface, drags } = setup();
+    surface.dispatch('pointerdown', { clientX: 100, clientY: 100, pointerId: 1 });
+    surface.dispatch('pointerdown', { clientX: 300, clientY: 300, pointerId: 2 });
+    surface.dispatch('pointermove', { clientX: 100, clientY: 200, pointerId: 1 });
+    expect(drags).toEqual([]);
+
+    // Once the second finger lifts, the first can pan again.
+    surface.dispatch('pointerup', { clientX: 300, clientY: 300, pointerId: 2 });
+    surface.dispatch('pointermove', { clientX: 100, clientY: 260, pointerId: 1 });
+    expect(drags).toHaveLength(1);
+  });
+
+  it('forgets a drag once the pointer lifts', () => {
+    const { surface, drags } = setup();
+    surface.drag({ x: 400, y: 300 }, [{ x: 400, y: 380 }]);
+    drags.length = 0;
+    // A fresh press starts below threshold again rather than resuming.
+    surface.dispatch('pointerdown', { clientX: 400, clientY: 380, pointerId: 1 });
+    surface.dispatch('pointermove', { clientX: 402, clientY: 381, pointerId: 1 });
+    expect(drags).toEqual([]);
+  });
+
+  it('routes a plain wheel to scrolling', () => {
+    const { surface, scrolls, zooms } = setup();
+    surface.wheel({ deltaX: 5, deltaY: -120 });
+    expect(scrolls).toEqual([{ x: 5, y: -120 }]);
+    expect(zooms).toEqual([]);
+  });
+
+  it('routes a pinch (ctrl+wheel) to zooming, about the cursor', () => {
+    const { surface, scrolls, zooms } = setup();
+    surface.wheel({ deltaY: -100, ctrlKey: true, clientX: 250, clientY: 120 });
+    expect(scrolls).toEqual([]);
+    expect(zooms).toHaveLength(1);
+    expect(zooms[0].at).toEqual({ x: 250, y: 120 });
+    expect(zooms[0].factor).toBeGreaterThan(1);
+  });
+
+  it('always swallows the wheel so the page behind cannot scroll', () => {
+    const { surface } = setup();
+    const before = surface.preventedCount;
+    surface.wheel({ deltaY: 40 });
+    expect(surface.preventedCount).toBe(before + 1);
+  });
+
+  it('detaches its wheel listener too', () => {
+    const { surface, detach, scrolls } = setup();
+    detach();
+    expect(surface.listenerCount).toBe(0);
+    surface.wheel({ deltaY: 40 });
+    expect(scrolls).toEqual([]);
+  });
+});
+
+describe('wheelZoomFactor', () => {
+  it('zooms in when scrolling up and out when scrolling down', () => {
+    expect(wheelZoomFactor(-100)).toBeGreaterThan(1);
+    expect(wheelZoomFactor(100)).toBeLessThan(1);
+  });
+
+  it('does nothing for no movement', () => {
+    expect(wheelZoomFactor(0)).toBe(1);
+  });
+
+  it('is symmetric, so a pinch in and back out returns to where it started', () => {
+    expect(wheelZoomFactor(-80) * wheelZoomFactor(80)).toBeCloseTo(1);
   });
 });

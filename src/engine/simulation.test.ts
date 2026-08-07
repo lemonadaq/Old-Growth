@@ -5,6 +5,12 @@ import { createInitialState } from './types';
 import { disableTestProducers, enableTestProducers } from './debugProducers';
 import { COMBO_DECAY_MS, COMBO_FULL_STACKS } from './combo';
 import { RESOURCE_IDS } from '../content/resources';
+import { HYDRATION_MAX, HYDRATION_MIN, WATER_NEED_PER_LEAF } from '../content/hydration';
+import { OFFLINE_TAG } from '../content/growth';
+import type { Vec2 } from './geometry';
+import { HYDRATION_SOURCE } from './hydration';
+import { partProducerId } from './growth';
+import { BARREN_SOIL, depthAt, depthMultiplier } from './soil';
 
 /** Rolls that never / always crit. */
 const NEVER_CRIT = () => 1;
@@ -251,10 +257,11 @@ describe('growing the tree', () => {
     const leaf = sim.growPart(branch?.id ?? '', 'leafCluster');
     expect(leaf).not.toBeNull();
 
+    // A leaf with no roots under it runs at the hydration floor.
     sim.tick(1);
     const snap = sim.snapshot(0);
-    expect(snap.perSecond.light.toNumber()).toBeCloseTo(0.4, 9);
-    expect(snap.resources.light.toNumber()).toBeCloseTo(0.4, 9);
+    expect(snap.perSecond.light.toNumber()).toBeCloseTo(0.4 * HYDRATION_MIN, 9);
+    expect(snap.resources.light.toNumber()).toBeCloseTo(0.4 * HYDRATION_MIN, 9);
   });
 
   it('accumulates production across parts', () => {
@@ -262,11 +269,17 @@ describe('growing the tree', () => {
     const branch = sim.growPart(sim.state.tree.rootId, 'branch');
     sim.growPart(branch?.id ?? '', 'leafCluster');
     sim.growPart(branch?.id ?? '', 'leafCluster');
-    sim.growPart(sim.state.tree.rootId, 'rootSegment');
+    const root = sim.growPart(sim.state.tree.rootId, 'rootSegment');
+
+    // Water is what that root's depth earns it; Light is two leaves throttled
+    // by what that one root can supply to them.
+    const end = sim.state.tree.placements().get(root?.id ?? '')?.end as Vec2;
+    const water = 0.3 * depthMultiplier(depthAt(end.y));
+    const hydration = Math.min(HYDRATION_MAX, water / (2 * WATER_NEED_PER_LEAF));
 
     sim.tick(1);
-    expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(0.8, 9);
-    expect(sim.state.resources.perSecond('water').toNumber()).toBeCloseTo(0.3, 9);
+    expect(sim.state.resources.perSecond('water').toNumber()).toBeCloseTo(water, 9);
+    expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(0.8 * hydration, 9);
   });
 
   it('drops the production of everything a prune removes', () => {
@@ -274,7 +287,7 @@ describe('growing the tree', () => {
     const branch = sim.growPart(sim.state.tree.rootId, 'branch');
     sim.growPart(branch?.id ?? '', 'leafCluster');
     sim.tick(1);
-    expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(0.4, 9);
+    expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(0.4 * HYDRATION_MIN, 9);
 
     sim.prunePart(branch?.id ?? '');
     sim.tick(1);
@@ -289,7 +302,7 @@ describe('growing the tree', () => {
 
     const sim = new Simulation(state);
     sim.tick(1);
-    expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(0.4, 9);
+    expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(0.4 * HYDRATION_MIN, 9);
   });
 
   it('advances the tree revision so the renderer knows to re-project', () => {
@@ -305,5 +318,232 @@ describe('growing the tree', () => {
     sim.tick(0.1);
     const branch = sim.growPart(sim.state.tree.rootId, 'branch');
     expect(branch?.createdAtTick).toBe(2);
+  });
+});
+
+describe('roots, soil and the idle economy', () => {
+  /** A simulation with money to spend and, by default, no ore in the ground. */
+  function rich(soil = BARREN_SOIL): Simulation {
+    const state = createInitialState();
+    state.soil = soil;
+    const sim = new Simulation(state);
+    sim.state.resources.add('sap', new Decimal(100_000));
+    return sim;
+  }
+
+  /** Grow a root chain `depth` segments long off the trunk, returning the last. */
+  function rootChain(sim: Simulation, segments: number): string {
+    let parent = sim.state.tree.rootId;
+    for (let i = 0; i < segments; i += 1) {
+      const node = sim.growPart(parent, 'rootSegment');
+      parent = node?.id ?? parent;
+    }
+    return parent;
+  }
+
+  it('tags root production as offline-safe and canopy production as not', () => {
+    const sim = rich();
+    const root = sim.growPart(sim.state.tree.rootId, 'rootSegment');
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+    const leaf = sim.growPart(branch?.id ?? '', 'leafCluster');
+
+    const rootTags = sim.state.producers.get(partProducerId(root?.id ?? ''))?.tags;
+    const leafTags = sim.state.producers.get(partProducerId(leaf?.id ?? ''))?.tags;
+
+    expect(rootTags).toContain(OFFLINE_TAG);
+    expect(rootTags).toContain('root');
+    expect(leafTags).not.toContain(OFFLINE_TAG);
+  });
+
+  it('pays a root by the depth it reached', () => {
+    const sim = rich();
+    const root = sim.growPart(sim.state.tree.rootId, 'rootSegment');
+    const end = sim.state.tree.placements().get(root?.id ?? '')?.end as Vec2;
+    const depth = depthAt(end.y);
+
+    expect(depth).toBeGreaterThan(0);
+    sim.tick(1);
+    expect(sim.state.resources.perSecond('water').toNumber()).toBeCloseTo(
+      0.3 * depthMultiplier(depth),
+      9,
+    );
+  });
+
+  it('pays a deeper root more than a shallow one', () => {
+    const shallow = rich();
+    shallow.growPart(shallow.state.tree.rootId, 'rootSegment');
+    shallow.tick(1);
+
+    const deep = rich();
+    rootChain(deep, 3);
+    deep.tick(1);
+
+    const perRootShallow = shallow.state.resources.perSecond('water').toNumber();
+    const perRootDeep = deep.state.resources.perSecond('water').toNumber() / 3;
+    expect(perRootDeep).toBeGreaterThan(perRootShallow);
+  });
+
+  it('finds no Minerals for a root tip outside every vein', () => {
+    const sim = rich();
+    const root = rootChain(sim, 1);
+    const tip = sim.growPart(root, 'rootTip');
+
+    expect(tip).not.toBeNull();
+    expect(sim.state.producers.has(partProducerId(tip?.id ?? ''))).toBe(false);
+
+    sim.tick(1);
+    expect(sim.state.resources.perSecond('minerals').toNumber()).toBe(0);
+  });
+
+  it('mines a root tip that lands inside a vein, scaled by its richness', () => {
+    // Geometry is deterministic, so a barren run tells us exactly where to
+    // bury the ore for the real one.
+    const scout = rich();
+    const scoutTip = scout.growPart(rootChain(scout, 1), 'rootTip');
+    const end = scout.state.tree.placements().get(scoutTip?.id ?? '')?.end as Vec2;
+
+    const sim = rich({
+      seed: 1,
+      veins: [{ id: 'planted', center: end, radius: 0.05, richness: 2 }],
+    });
+    const tip = sim.growPart(rootChain(sim, 1), 'rootTip');
+    expect(sim.state.tree.placements().get(tip?.id ?? '')?.end).toEqual(end);
+
+    sim.tick(1);
+    expect(sim.state.resources.perSecond('minerals').toNumber()).toBeCloseTo(
+      0.12 * depthMultiplier(depthAt(end.y)) * 2,
+      9,
+    );
+  });
+
+  it('quotes a root tip’s find before it is bought', () => {
+    const scout = rich();
+    const scoutTip = scout.growPart(rootChain(scout, 1), 'rootTip');
+    const end = scout.state.tree.placements().get(scoutTip?.id ?? '')?.end as Vec2;
+
+    const barren = rich();
+    const barrenOption = barren
+      .growthOptions(rootChain(barren, 1))
+      .find((priced) => priced.option.type === 'rootTip');
+    expect(barrenOption?.production?.missingVein).toBe(true);
+    expect(barrenOption?.production?.rate.toNumber()).toBe(0);
+
+    const seam = rich({
+      seed: 1,
+      veins: [{ id: 'planted', center: end, radius: 0.05, richness: 2 }],
+    });
+    const seamOption = seam
+      .growthOptions(rootChain(seam, 1))
+      .find((priced) => priced.option.type === 'rootTip');
+    expect(seamOption?.production?.missingVein).toBe(false);
+    expect(seamOption?.production?.vein?.id).toBe('planted');
+    // The quote is exactly what the part goes on to produce.
+    expect(seamOption?.production?.rate.toNumber()).toBeCloseTo(
+      0.12 * depthMultiplier(depthAt(end.y)) * 2,
+      9,
+    );
+  });
+
+  it('tells the grow menu how deep a root would reach', () => {
+    const sim = rich();
+    const option = sim
+      .growthOptions(sim.state.tree.rootId)
+      .find((priced) => priced.option.type === 'rootSegment');
+
+    expect(option?.production?.depth).toBeGreaterThan(0);
+    expect(option?.production?.stratum?.id).toBe('topsoil');
+    expect(option?.production?.depthMultiplier).toBeGreaterThan(1);
+  });
+
+  it('leaves the canopy unhydrated until something is drinking', () => {
+    const sim = rich();
+    expect(sim.state.hydration.value).toBe(1);
+    sim.growPart(sim.state.tree.rootId, 'branch');
+    sim.tick(1);
+    expect(sim.state.hydration.value).toBe(1);
+  });
+
+  it('throttles a canopy grown without roots', () => {
+    const sim = rich();
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+    sim.growPart(branch?.id ?? '', 'leafCluster');
+    sim.tick(1);
+
+    expect(sim.state.hydration.value).toBe(HYDRATION_MIN);
+    expect(sim.snapshot(0).clickStats.clickPower.toNumber()).toBeCloseTo(HYDRATION_MIN, 9);
+  });
+
+  it('lifts Light/s once three roots are feeding the canopy', () => {
+    const sim = rich();
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+    sim.growPart(branch?.id ?? '', 'leafCluster');
+    sim.tick(1);
+    const parched = sim.state.resources.perSecond('light').toNumber();
+
+    for (let i = 0; i < 3; i += 1) sim.growPart(sim.state.tree.rootId, 'rootSegment');
+    sim.tick(1);
+    const watered = sim.state.resources.perSecond('light').toNumber();
+
+    expect(parched).toBeCloseTo(0.4 * HYDRATION_MIN, 9);
+    expect(watered).toBeCloseTo(0.4 * HYDRATION_MAX, 9);
+    expect(watered / parched).toBeCloseTo(HYDRATION_MAX / HYDRATION_MIN, 9);
+  });
+
+  it('reacts to a purchase immediately, not a tick later', () => {
+    const sim = rich();
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+    sim.growPart(branch?.id ?? '', 'leafCluster');
+    expect(sim.state.hydration.value).toBe(HYDRATION_MIN);
+
+    sim.growPart(sim.state.tree.rootId, 'rootSegment');
+    expect(sim.state.hydration.value).toBeGreaterThan(HYDRATION_MIN);
+  });
+
+  it('recovers hydration when the leaves that were drinking are pruned', () => {
+    const sim = rich();
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+    sim.growPart(branch?.id ?? '', 'leafCluster');
+    expect(sim.state.hydration.value).toBe(HYDRATION_MIN);
+
+    sim.prunePart(branch?.id ?? '');
+    expect(sim.state.hydration.value).toBe(1);
+  });
+
+  it('republishes its modifiers instead of stacking them up', () => {
+    const sim = rich();
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+    sim.growPart(branch?.id ?? '', 'leafCluster');
+    for (let i = 0; i < 50; i += 1) sim.tick(0.1);
+
+    const hydrationMods = sim.state.modifiers.all().filter((m) => m.source === HYDRATION_SOURCE);
+    expect(hydrationMods).toHaveLength(2);
+    expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(0.4 * HYDRATION_MIN, 9);
+  });
+
+  it('never lets hydration feed back into the Water that drives it', () => {
+    const sim = rich();
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+    sim.growPart(branch?.id ?? '', 'leafCluster');
+    sim.growPart(sim.state.tree.rootId, 'rootSegment');
+
+    sim.tick(1);
+    const first = sim.state.resources.perSecond('water').toNumber();
+    for (let i = 0; i < 20; i += 1) sim.tick(1);
+    expect(sim.state.resources.perSecond('water').toNumber()).toBeCloseTo(first, 9);
+  });
+
+  it('publishes the hydration sum in snapshots', () => {
+    const sim = rich();
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+    sim.growPart(branch?.id ?? '', 'leafCluster');
+    sim.growPart(branch?.id ?? '', 'leafCluster');
+    sim.tick(1);
+
+    const { hydration } = sim.snapshot(0);
+    expect(hydration.leaves).toBe(2);
+    expect(hydration.need.toNumber()).toBeCloseTo(2 * WATER_NEED_PER_LEAF, 9);
+    expect(hydration.income.toNumber()).toBe(0);
+    expect(hydration.ratio).toBe(0);
+    expect(hydration.value).toBe(HYDRATION_MIN);
   });
 });

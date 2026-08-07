@@ -1,5 +1,6 @@
 import { formatNumber } from '../engine/format';
 import { RESOURCES } from '../content/resources';
+import { HydrationGauge } from './HydrationGauge';
 import { useGameStore } from './useGameStore';
 import './Hud.css';
 
@@ -52,6 +53,7 @@ export function Hud({ testProducers, onToggleTestProducers }: HudProps) {
       <header className="hud-header">
         <h1 className="hud-title">Old Growth</h1>
         <div className="hud-header__right">
+          <HydrationGauge />
           <button
             type="button"
             className="hud-toggle"

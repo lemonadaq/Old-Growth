@@ -15,6 +15,139 @@ Do not refactor unrelated code.
 
 ## Changelog
 
+### 2026-08-07 — STEP 8: Sunlight, day/night and leaf shading
+
+The sky stops being a backdrop and starts being an input. There is a sun in it
+now, it goes down, and — the part that matters — a leaf is worth what the sky it
+can *see* makes it worth. Placement above ground finally pays the way placement
+below ground has since STEP 7.
+
+- `src/content/light.ts` — **new**. The occlusion cone (250 world units, 60°
+  wide), `SHADE_PER_OCCLUDER` (0.15), `EXPOSURE_MIN` (0.1), the blossom boost
+  (+25%, range 150, capped at 2 stacks), `MOONLIGHT_FRACTION` (0.1), the
+  once-a-second sweep interval, and the Dew constants. Distances are in the same
+  **world units** the strata table uses (`SOIL_UNITS_PER_CANONICAL` = 1000), so
+  "250px" reads as the design wrote it while the geometry stays
+  resolution-independent.
+- `src/engine/light.ts` — **new**, and deliberately split in two halves:
+  - **Exposure** is per leaf and positional. `occludes()` is the cone test —
+    strictly above, within range, `dy/distance ≥ cos 30°` (no trig in the inner
+    loop). `shadeFactor` **compounds** (`0.85ⁿ`) rather than subtracting, so the
+    tenth leaf over a spot costs less than the second did and no pile can switch
+    a leaf off; `MAX_COUNTED_OCCLUDERS` (15) is where the floor makes further
+    counting pointless, and doubles as the scan's early exit.
+  - **The daylight factor** is global and temporal: `lightFactorAt(t)` =
+    `max(0.1, daylightAt(t))`, published as one ordinary `mul` on the *Light
+    resource* under a revocable `daylight` source. Resource-targeted rather than
+    tag-targeted so every future light source is covered without having to
+    remember a tag.
+  - `exposureAt(point, canopy, excludeId?)` answers both questions with one
+    call: omit the id and it prices a leaf that does not exist yet. That is what
+    lets the grow menu warn about a shaded spot before a Sap is spent.
+- `src/engine/growth.ts` — `PartSoilContext` → **`PartContext`** (`NO_SOIL_CONTEXT`
+  → `NO_PART_CONTEXT`), now carrying `exposure` alongside soil. A part is scaled
+  by it only if its catalogue entry says `shaded: true` — same shape as STEP 7's
+  `requiresVein`, so this stayed a data edit. `ProductionDelta` gained
+  `exposure`, and `priceGrowthOptions` builds one `canopyIndex` per menu and
+  quotes each prospective leaf at the light of the exact spot it would land in.
+- `src/engine/simulation.ts` — `updateDaylight()` and `updateLightExposure()`.
+  Tick order is now **daylight → hydration → exposure → production**: the sun
+  sets the ceiling, the roots set what can be paid for, and only then is it worth
+  asking what each leaf earns — so the per-leaf rate banked for the tooltips is
+  the one the tick actually pays out. Growing or pruning re-shades immediately
+  rather than waiting for the next sweep.
+  - Exposure rides on the producer's **base rate**, not on a modifier. It is per
+    node and there is no tag meaning "this leaf and no other"; rebuilding the
+    leaf producers wholesale keeps the pipeline itself untouched.
+  - `click()` now returns a `ClickOutcome` (`ClickResult` + `dew`).
+- **Dew.** The first tap of each engine day grants 60 s of Sap income — with a
+  floor of 30 taps' worth, because *nothing produces Sap passively yet* and the
+  literal formula would pay exactly zero for the whole of the current game. A
+  fresh save's very first tap counts as a dawn, so the bonus is discoverable
+  instead of eight minutes away.
+- `src/render/sky.ts` — `celestialAt(t)` (pure) plus `drawCelestial`. The sun
+  owns the lit part of the day and the moon the rest, each on a half-sine; they
+  swap **at the horizon**, where both are at zero altitude, so the handover is
+  never visible. The moon's crescent is one even-odd path (disc minus offset
+  disc), and the hills are drawn *after* the body so a low sun sets behind the
+  ridgeline.
+- `src/render/tree.ts` — `shadeTint()` and per-cluster tinting toward
+  `PALETTE.leafOccluded`.
+- `src/ui/LeafTooltip.tsx` — **new**. Hovering a leaf on the tree now names its
+  exposure, what is shading it, any blossom boost, the hour, and its own
+  Light/s. Hover resolution order is menu dial → leaf → nothing.
+- `src/ui/DaylightGauge.tsx` + `.css` — **new**. Phase glyph, the live ×factor,
+  and a tooltip. Light halving over an afternoon and collapsing at dusk is
+  alarming if nothing accounts for it; this makes a falling Light/s read as
+  nightfall rather than as something the player broke.
+- Tests: 436 pass (up from 370). New `light.test.ts` (35 — the cone incl. both
+  edges and the exact range, compounding vs subtracting, the floor, the early
+  exit, blossom cap, self-exclusion, the prospective path, and **the acceptance
+  case with mocked positions**: four stacked leaves total 3.11 against four
+  spread leaves' 4.00). `sky.test.ts` gained 7 (arc shape, one-way travel, the
+  horizon handover, wrapping), `growth.test.ts` 6 (exposure in the context,
+  including that it applies *before* modifiers), `render/tree.test.ts` 5, and
+  `simulation.test.ts` 13 across sunlight, shading and Dew.
+- Verified in a real browser (Chromium/Playwright, 1280×800, production build):
+  the sun arcs and sets behind the hills, the crescent moon rises at night, the
+  HUD chip tracked **☀️×0.94 → ×0.99**, a leaf's tooltip read "Exposure 100% /
+  0 clusters / Daylight day ×0.99 / +0.1 Light/s", and the grow menu quoted
+  "Sunlight here 100%" for the first leaf and **"Sunlight here 85% — already
+  shaded"** for one placed under existing foliage. A separate render harness
+  drove a 16-leaf canopy through a whole day: Light/s ran 0.318 (dawn) → 1.578
+  (noon) → 0.158 (night) with 10 leaves shaded and 4 blossom-boosted, and a
+  pixel diff against the same frame with shading disabled confirmed the tint
+  reaches the canvas. 60 fps, no page errors beyond the pre-existing favicon 404.
+
+**Design decisions worth knowing**
+
+- **Compounding shade, not subtracting.** "Reduced 15% per leaf" reads either
+  way. Subtracting kills a leaf outright at seven occluders — a dead purchase
+  with no diagnosis — while compounding keeps every leaf worth *something* and
+  makes the first mistake the expensive one, which is the right lesson.
+- **The tint uses a square root.** A single occluder costs 15%, and a linear 15%
+  tint is invisible against foliage already drawn in three greens: the first
+  mistake would look exactly like no mistake. The curve front-loads the
+  response. This was changed after looking at the rendered frames, not before.
+- **The sun is measured against the visible sky, not a world height.** Anchoring
+  it to the cloud ceiling was the honest reading and put it permanently
+  off-screen — the tree fits the canvas, so the ceiling is several screens up at
+  any normal framing. It still rises from and sets into the *projected* ground
+  line, so panning down to the roots takes it away with the horizon.
+- **The blossom boost is capped at two.** Uncapped, ringing one leaf with
+  blossoms would beat spreading the canopy — the exact lesson this step exists
+  to teach.
+- **Exposure is swept once a second**, not per tick: it is O(n²) over the canopy
+  and only changes when the tree does. Purchases and prunes re-shade instantly,
+  so the cadence is never felt.
+
+**Open TODOs**
+
+- [ ] **Two parts can land in exactly the same place.** On a leaning limb,
+      `clampDirection` can snap several sibling options to the same end of the
+      allowed arc, so e.g. two leaf clusters on one twig share a position
+      exactly. Harmless to the light model (co-located leaves have `dy = 0` and
+      do not shade each other) but it looks like one blob and wastes the
+      purchase. Predates this step; visible through exposure now.
+- [ ] Blossoms make Light but are not shaded themselves and do not drink (the
+      STEP 7 hydration TODO). Both are defensible; neither is stated in fiction.
+- [ ] `MOONLIGHT_FRACTION`, the shade rate, the cone, the blossom boost and the
+      Dew floor are all first-pass values — STEP 19 owns real balance, and
+      `DEW_MIN_TAPS` should shrink to irrelevance once passive Sap exists.
+- [ ] The Dew burst has no sound and no ceremony beyond a gold floating number
+      (STEP 16 owns audio and juice).
+- [ ] Exposure is not persisted; it is recomputed from the graph on load, which
+      is correct but means STEP 15's save has to be loaded *before* the first
+      sweep. `Simulation`'s constructor already does this in the right order.
+- [ ] Offline progress (STEP 14) will need to advance the day cycle for the
+      canopy's 25% share — `lightFactorAt` is pure and ready for it, but a long
+      absence should probably be paid at a day-averaged factor rather than at
+      whatever hour the player happens to return.
+- [ ] `src/content/resources.ts` and `src/index.css` still fail
+      `prettier --check`. Pre-existing; left alone rather than sweeping
+      unrelated files into this diff.
+- [ ] Everything STEPs 4, 6 and 7 left open below still stands.
+
 ### 2026-08-07 — STEP 7: Roots, soil strata and the idle economy
 
 The underground stops being empty brown. There is a *column* down there — four

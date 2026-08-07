@@ -9,6 +9,7 @@ import {
 import type { ResourceId } from '../content/resources';
 import type { Stratum } from '../content/soil';
 import type { Producer } from './economy';
+import { canopyIndex, exposureAt } from './light';
 import { applyModifiers, type ModifierSet } from './modifiers';
 import {
   BARREN_SOIL,
@@ -34,10 +35,12 @@ import {
  * same numbers.
  *
  * Underground parts are worth what the *ground* makes them worth: a root's rate
- * is scaled by its depth, and a root tip only finds Minerals inside a vein. All
- * of that is resolved from the part's placement, so the same function answers
- * both "what is this root earning" and "what would a root here earn" — which is
- * what lets the grow tooltip quote an honest number before the purchase.
+ * is scaled by its depth, and a root tip only finds Minerals inside a vein.
+ * Above ground the equivalent is light: a leaf is worth what the sky it can see
+ * makes it worth. All of that is resolved from the part's placement, so the same
+ * function answers both "what is this part earning" and "what would a part here
+ * earn" — which is what lets the grow tooltip quote an honest number before the
+ * purchase.
  */
 
 /** Producer id for the part grown at `nodeId`. */
@@ -55,20 +58,25 @@ export function partCost(type: TreeNodeType, owned: number): Decimal {
 }
 
 /**
- * Where a part sits, and in what. Everything positional the economy needs.
+ * Where a part sits, in what, and in how much light. Everything positional the
+ * economy needs.
  *
  * `placement` is omitted only where the caller genuinely has no position (a
  * bare type, in tests or in a catalogue view); an underground part evaluated
  * without one is treated as sitting at the surface in barren ground, which is
- * the pessimistic reading rather than an optimistic guess.
+ * the pessimistic reading rather than an optimistic guess. `exposure` is the
+ * optimistic default in the same situation — an unplaced leaf is quoted in full
+ * sun, because the alternative is inventing a shadow nobody cast.
  */
-export interface PartSoilContext {
+export interface PartContext {
   readonly soil: SoilMap;
   readonly placement?: NodePlacement;
+  /** Light multiplier for a `shaded` part; `1` (full sun) when unknown. */
+  readonly exposure?: number;
 }
 
-/** No position, no ore — the default context when nothing better is known. */
-export const NO_SOIL_CONTEXT: PartSoilContext = { soil: BARREN_SOIL };
+/** No position, no ore, full sun — the default when nothing better is known. */
+export const NO_PART_CONTEXT: PartContext = { soil: BARREN_SOIL };
 
 /**
  * A part's production before modifiers, resolved against the ground it sits in.
@@ -79,32 +87,36 @@ export const NO_SOIL_CONTEXT: PartSoilContext = { soil: BARREN_SOIL };
  */
 interface SitedProduction {
   readonly resource: ResourceId;
-  /** Rate after depth and vein, before modifiers. */
+  /** Rate after depth, vein and light exposure, before modifiers. */
   readonly rate: number;
   /** Soil facts at the part's working tip; `null` for canopy parts. */
   readonly conditions: SoilConditions | null;
   /** Whether this production needs a vein to happen at all. */
   readonly requiresVein: boolean;
+  /** Light multiplier applied; `null` for parts the sky does not reach. */
+  readonly exposure: number | null;
 }
 
 /**
  * Resolve a part type's production against a position.
  *
  * The working point is the part's **far end** — the root tip that actually sits
- * in the ore, not the joint it grew from — so a long root is judged by where it
- * reached rather than where it started.
+ * in the ore, the foliage at the twig's tip rather than the joint it grew from —
+ * so a part is judged by where it reached rather than where it started.
  */
-function siteProduction(type: TreeNodeType, ctx: PartSoilContext): SitedProduction | null {
+function siteProduction(type: TreeNodeType, ctx: PartContext): SitedProduction | null {
   const rule = GROWTH_RULE_BY_TYPE[type];
   const production = rule.production;
   if (!production) return null;
 
   if (rule.domain !== 'root') {
+    const exposure = production.shaded ? (ctx.exposure ?? 1) : null;
     return {
       resource: production.resource,
-      rate: production.baseRate,
+      rate: production.baseRate * (exposure ?? 1),
       conditions: null,
       requiresVein: false,
+      exposure,
     };
   }
 
@@ -122,6 +134,7 @@ function siteProduction(type: TreeNodeType, ctx: PartSoilContext): SitedProducti
     rate,
     conditions,
     requiresVein: production.requiresVein === true,
+    exposure: null,
   };
 }
 
@@ -133,7 +146,7 @@ function siteProduction(type: TreeNodeType, ctx: PartSoilContext): SitedProducti
  */
 export function partProducer(
   node: Pick<TreeNode, 'id' | 'type'>,
-  ctx: PartSoilContext = NO_SOIL_CONTEXT,
+  ctx: PartContext = NO_PART_CONTEXT,
 ): Producer | null {
   const sited = siteProduction(node.type, ctx);
   if (!sited || sited.rate <= 0) return null;
@@ -161,6 +174,8 @@ export interface ProductionDelta {
   readonly vein: MineralVein | null;
   /** True when this part needs a vein it has not got, and so produces nothing. */
   readonly missingVein: boolean;
+  /** Light multiplier at this position; `null` for parts the sky does not reach. */
+  readonly exposure: number | null;
 }
 
 /**
@@ -174,7 +189,7 @@ export interface ProductionDelta {
 export function partProductionDelta(
   type: TreeNodeType,
   modifiers: ModifierSet,
-  ctx: PartSoilContext = NO_SOIL_CONTEXT,
+  ctx: PartContext = NO_PART_CONTEXT,
 ): ProductionDelta | null {
   const sited = siteProduction(type, ctx);
   if (!sited) return null;
@@ -190,6 +205,7 @@ export function partProductionDelta(
     depthMultiplier: sited.conditions?.multiplier ?? 1,
     vein,
     missingVein: sited.requiresVein && vein === null,
+    exposure: sited.exposure,
   };
 }
 
@@ -212,7 +228,7 @@ export function priceGrowthOption(
   owned: number,
   balance: Decimal,
   modifiers: ModifierSet,
-  ctx: PartSoilContext = NO_SOIL_CONTEXT,
+  ctx: PartContext = NO_PART_CONTEXT,
 ): PricedGrowthOption {
   const rule = GROWTH_RULE_BY_TYPE[option.type];
   const cost = partCost(option.type, owned);
@@ -242,7 +258,8 @@ export interface BalanceSource {
  *
  * Each option is placed exactly where growing it would put it, so the quoted
  * `/s` already accounts for the depth it will reach and the vein it will (or
- * will not) strike.
+ * will not) strike — and, above ground, the shade already standing over the spot
+ * a leaf would land in.
  */
 export function priceGrowthOptions(
   graph: TreeGraph,
@@ -252,16 +269,24 @@ export function priceGrowthOptions(
   soil: SoilMap = BARREN_SOIL,
 ): PricedGrowthOption[] {
   const parent = graph.placements().get(nodeId);
+  // Built once for the whole menu rather than per option: the canopy does not
+  // change while the player is deciding.
+  const canopy = canopyIndex(graph);
 
-  return graph
-    .getValidGrowthOptions(nodeId)
-    .map((option) =>
-      priceGrowthOption(
-        option,
-        graph.countOfType(option.type),
-        balances.amount(GROWTH_RULE_BY_TYPE[option.type].costResource),
-        modifiers,
-        { soil, placement: parent ? placeOption(parent, option) : undefined },
-      ),
+  return graph.getValidGrowthOptions(nodeId).map((option) => {
+    const placement = parent ? placeOption(parent, option) : undefined;
+    const shaded = GROWTH_RULE_BY_TYPE[option.type].production?.shaded === true;
+
+    return priceGrowthOption(
+      option,
+      graph.countOfType(option.type),
+      balances.amount(GROWTH_RULE_BY_TYPE[option.type].costResource),
+      modifiers,
+      {
+        soil,
+        placement,
+        exposure: shaded && placement ? exposureAt(placement.end, canopy).exposure : undefined,
+      },
     );
+  });
 }

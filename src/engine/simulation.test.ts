@@ -7,14 +7,29 @@ import { COMBO_DECAY_MS, COMBO_FULL_STACKS } from './combo';
 import { RESOURCE_IDS } from '../content/resources';
 import { HYDRATION_MAX, HYDRATION_MIN, WATER_NEED_PER_LEAF } from '../content/hydration';
 import { OFFLINE_TAG } from '../content/growth';
+import { DEW_MIN_TAPS, DEW_SECONDS, MOONLIGHT_FRACTION } from '../content/light';
+import { DAY_LENGTH_SECONDS } from '../content/daylight';
+import { dayCycle } from './daylight';
 import type { Vec2 } from './geometry';
 import { HYDRATION_SOURCE } from './hydration';
 import { partProducerId } from './growth';
+import { DAYLIGHT_SOURCE, lightFactorAt } from './light';
 import { BARREN_SOIL, depthAt, depthMultiplier } from './soil';
 
 /** Rolls that never / always crit. */
 const NEVER_CRIT = () => 1;
 const ALWAYS_CRIT = () => 0;
+
+/**
+ * The multiplier the time of day is currently putting on Light.
+ *
+ * Every Light expectation carries this factor: a leaf is worth what the sun
+ * makes it worth, and the sun has been moving since STEP 8.
+ */
+const daylight = (sim: Simulation) => lightFactorAt(dayCycle(sim.state.elapsedSeconds).t);
+
+/** Sap the dawn Dew pays a fresh save on its first tap (no passive Sap yet). */
+const FIRST_DEW = DEW_MIN_TAPS;
 
 describe('Simulation', () => {
   it('starts with all resources at zero', () => {
@@ -104,14 +119,16 @@ describe('Simulation.click', () => {
     expect(result.comboStacks).toBe(1);
     expect(result.gain.toNumber()).toBeCloseTo(1.02, 10);
     expect(result.crit).toBe(false);
-    expect(sim.state.resources.amount('sap').toNumber()).toBeCloseTo(1.02, 10);
+    // The very first tap of a save is also a dawn, so it finds Dew on the tree.
+    expect(result.dew?.toNumber()).toBeCloseTo(FIRST_DEW, 10);
+    expect(sim.state.resources.amount('sap').toNumber()).toBeCloseTo(1.02 + FIRST_DEW, 10);
     expect(sim.state.clicks).toBe(1);
   });
 
   it('credits the lifetime Sap total as well as the balance', () => {
     const sim = new Simulation();
     sim.click(0, NEVER_CRIT);
-    expect(sim.state.resources.total('sap').toNumber()).toBeCloseTo(1.02, 10);
+    expect(sim.state.resources.total('sap').toNumber()).toBeCloseTo(1.02 + FIRST_DEW, 10);
   });
 
   it('pays ×10 on a critical tap', () => {
@@ -260,8 +277,9 @@ describe('growing the tree', () => {
     // A leaf with no roots under it runs at the hydration floor.
     sim.tick(1);
     const snap = sim.snapshot(0);
-    expect(snap.perSecond.light.toNumber()).toBeCloseTo(0.4 * HYDRATION_MIN, 9);
-    expect(snap.resources.light.toNumber()).toBeCloseTo(0.4 * HYDRATION_MIN, 9);
+    const lit = 0.4 * HYDRATION_MIN * daylight(sim);
+    expect(snap.perSecond.light.toNumber()).toBeCloseTo(lit, 9);
+    expect(snap.resources.light.toNumber()).toBeCloseTo(lit, 9);
   });
 
   it('accumulates production across parts', () => {
@@ -279,7 +297,10 @@ describe('growing the tree', () => {
 
     sim.tick(1);
     expect(sim.state.resources.perSecond('water').toNumber()).toBeCloseTo(water, 9);
-    expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(0.8 * hydration, 9);
+    expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(
+      0.8 * hydration * daylight(sim),
+      9,
+    );
   });
 
   it('drops the production of everything a prune removes', () => {
@@ -287,7 +308,10 @@ describe('growing the tree', () => {
     const branch = sim.growPart(sim.state.tree.rootId, 'branch');
     sim.growPart(branch?.id ?? '', 'leafCluster');
     sim.tick(1);
-    expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(0.4 * HYDRATION_MIN, 9);
+    expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(
+      0.4 * HYDRATION_MIN * daylight(sim),
+      9,
+    );
 
     sim.prunePart(branch?.id ?? '');
     sim.tick(1);
@@ -302,7 +326,10 @@ describe('growing the tree', () => {
 
     const sim = new Simulation(state);
     sim.tick(1);
-    expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(0.4 * HYDRATION_MIN, 9);
+    expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(
+      0.4 * HYDRATION_MIN * daylight(sim),
+      9,
+    );
   });
 
   it('advances the tree revision so the renderer knows to re-project', () => {
@@ -479,14 +506,20 @@ describe('roots, soil and the idle economy', () => {
     sim.growPart(branch?.id ?? '', 'leafCluster');
     sim.tick(1);
     const parched = sim.state.resources.perSecond('light').toNumber();
+    const parchedSun = daylight(sim);
 
     for (let i = 0; i < 3; i += 1) sim.growPart(sim.state.tree.rootId, 'rootSegment');
     sim.tick(1);
     const watered = sim.state.resources.perSecond('light').toNumber();
 
-    expect(parched).toBeCloseTo(0.4 * HYDRATION_MIN, 9);
-    expect(watered).toBeCloseTo(0.4 * HYDRATION_MAX, 9);
-    expect(watered / parched).toBeCloseTo(HYDRATION_MAX / HYDRATION_MIN, 9);
+    expect(parched).toBeCloseTo(0.4 * HYDRATION_MIN * parchedSun, 9);
+    expect(watered).toBeCloseTo(0.4 * HYDRATION_MAX * daylight(sim), 9);
+    // Hold the sun still — it moved a second between the two readings — and the
+    // lift is exactly the span of the hydration clamp.
+    expect(watered / daylight(sim) / (parched / parchedSun)).toBeCloseTo(
+      HYDRATION_MAX / HYDRATION_MIN,
+      9,
+    );
   });
 
   it('reacts to a purchase immediately, not a tick later', () => {
@@ -517,7 +550,10 @@ describe('roots, soil and the idle economy', () => {
 
     const hydrationMods = sim.state.modifiers.all().filter((m) => m.source === HYDRATION_SOURCE);
     expect(hydrationMods).toHaveLength(2);
-    expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(0.4 * HYDRATION_MIN, 9);
+    expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(
+      0.4 * HYDRATION_MIN * daylight(sim),
+      9,
+    );
   });
 
   it('never lets hydration feed back into the Water that drives it', () => {
@@ -545,5 +581,192 @@ describe('roots, soil and the idle economy', () => {
     expect(hydration.income.toNumber()).toBe(0);
     expect(hydration.ratio).toBe(0);
     expect(hydration.value).toBe(HYDRATION_MIN);
+  });
+});
+
+describe('sunlight, the day and leaf shading', () => {
+  function rich(): Simulation {
+    const sim = new Simulation();
+    sim.state.resources.add('sap', new Decimal(100_000));
+    return sim;
+  }
+
+  /** Three leaves piled onto one twig. */
+  function clustered(): Simulation {
+    const sim = rich();
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+    const twig = sim.growPart(branch?.id ?? '', 'twig');
+    for (let i = 0; i < 3; i += 1) sim.growPart(twig?.id ?? '', 'leafCluster');
+    return sim;
+  }
+
+  /** The same three leaves, one to a branch. */
+  function spread(): Simulation {
+    const sim = rich();
+    for (let i = 0; i < 3; i += 1) {
+      const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+      sim.growPart(branch?.id ?? '', 'leafCluster');
+    }
+    return sim;
+  }
+
+  /** Total exposure across the canopy. */
+  function totalExposure(sim: Simulation): number {
+    return [...sim.state.leafLight.values()].reduce((sum, leaf) => sum + leaf.exposure, 0);
+  }
+
+  it('runs the canopy on the sun', () => {
+    const sim = rich();
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+    sim.growPart(branch?.id ?? '', 'leafCluster');
+
+    sim.tick(1);
+    const morning = sim.state.resources.perSecond('light').toNumber();
+    const morningFactor = sim.state.lightFactor;
+    expect(morningFactor).toBeCloseTo(daylight(sim), 10);
+
+    // Straight through to the small hours.
+    sim.tick(DAY_LENGTH_SECONDS * 0.55);
+    expect(sim.snapshot(0).day.phase).toBe('night');
+
+    const night = sim.state.resources.perSecond('light').toNumber();
+    expect(sim.state.lightFactor).toBe(MOONLIGHT_FRACTION);
+    expect(night).toBeLessThan(morning);
+    expect(night / morning).toBeCloseTo(MOONLIGHT_FRACTION / morningFactor, 9);
+  });
+
+  it('never stops producing entirely — the moon keeps a trickle going', () => {
+    const sim = rich();
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+    sim.growPart(branch?.id ?? '', 'leafCluster');
+    sim.tick(DAY_LENGTH_SECONDS * 0.55);
+
+    expect(sim.snapshot(0).day.phase).toBe('night');
+    expect(sim.state.resources.perSecond('light').toNumber()).toBeGreaterThan(0);
+  });
+
+  it('republishes the daylight modifier instead of stacking it up', () => {
+    const sim = rich();
+    for (let i = 0; i < 40; i += 1) sim.tick(1);
+    expect(sim.state.modifiers.all().filter((m) => m.source === DAYLIGHT_SOURCE)).toHaveLength(1);
+  });
+
+  it('pays each leaf for the light it can actually see', () => {
+    const sim = clustered();
+    sim.tick(1);
+
+    const expected = totalExposure(sim) * 0.4 * sim.state.hydration.value * daylight(sim);
+    expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(expected, 9);
+  });
+
+  it('earns less from a canopy stacked in one spot than from one spread out', () => {
+    const piled = clustered();
+    const fanned = spread();
+    piled.tick(1);
+    fanned.tick(1);
+
+    // Same number of leaves, so the same Sap spent and the same hydration draw.
+    expect(piled.state.leafLight.size).toBe(fanned.state.leafLight.size);
+    expect(piled.state.hydration.value).toBe(fanned.state.hydration.value);
+
+    expect(totalExposure(piled)).toBeLessThan(totalExposure(fanned));
+    expect(piled.state.resources.perSecond('light').toNumber()).toBeLessThan(
+      fanned.state.resources.perSecond('light').toNumber(),
+    );
+  });
+
+  it('re-shades the canopy the moment a leaf lands, not on the next sweep', () => {
+    const sim = clustered();
+    // No tick has run since the last purchase, yet the shading is already known.
+    expect(sim.state.tick).toBe(0);
+    expect([...sim.state.leafLight.values()].some((leaf) => leaf.occluders > 0)).toBe(true);
+  });
+
+  it('forgets a pruned leaf and lifts the shade it was casting', () => {
+    const sim = clustered();
+    const shadedBefore = [...sim.state.leafLight.values()].filter((l) => l.occluders > 0).length;
+    expect(shadedBefore).toBeGreaterThan(0);
+
+    // Cut the whole limb: nothing is left to shade or be shaded.
+    const branch = sim.state.tree.children(sim.state.tree.rootId)[0];
+    sim.prunePart(branch.id);
+
+    expect(sim.state.leafLight.size).toBe(0);
+    sim.tick(1);
+    expect(sim.state.resources.perSecond('light').toNumber()).toBe(0);
+  });
+
+  it('quotes a prospective leaf at the light of the spot it would land in', () => {
+    const sim = clustered();
+    sim.tick(1);
+
+    const branch = sim.state.tree.allNodes().find((node) => node.type === 'branch');
+    const leafOption = sim
+      .growthOptions(branch?.id ?? '')
+      .find((option) => option.option.type === 'leafCluster');
+
+    // The quote is the whole sum written out: catalogue rate, the exposure at
+    // that exact position, hydration, and the hour of the day.
+    const exposure = leafOption?.production?.exposure ?? 0;
+    expect(exposure).toBeGreaterThan(0);
+    expect(leafOption?.production?.rate.toNumber()).toBeCloseTo(
+      0.4 * exposure * sim.state.hydration.value * daylight(sim),
+      9,
+    );
+
+    // A blossom is not shaded, so it is quoted without an exposure at all.
+    const blossomOption = sim
+      .growthOptions(branch?.id ?? '')
+      .find((option) => option.option.type === 'blossom');
+    expect(blossomOption?.production?.exposure).toBeNull();
+  });
+
+  it('reports the day and the canopy in snapshots', () => {
+    const sim = clustered();
+    sim.tick(1);
+    const snap = sim.snapshot(0);
+
+    expect(snap.day.dayNumber).toBe(0);
+    expect(snap.lightFactor).toBeCloseTo(daylight(sim), 10);
+    expect(snap.leafLight.size).toBe(3);
+    expect([...snap.leafLight.values()].every((leaf) => leaf.rate.gt(0))).toBe(true);
+  });
+});
+
+describe('the dawn Dew', () => {
+  it('lands on the first tap of a save and not on the second', () => {
+    const sim = new Simulation();
+    expect(sim.click(0, NEVER_CRIT).dew?.toNumber()).toBeCloseTo(FIRST_DEW, 10);
+    expect(sim.click(100, NEVER_CRIT).dew).toBeNull();
+    expect(sim.click(200, NEVER_CRIT).dew).toBeNull();
+  });
+
+  it('returns with the next day', () => {
+    const sim = new Simulation();
+    sim.click(0, NEVER_CRIT);
+    sim.tick(DAY_LENGTH_SECONDS);
+    expect(sim.click(1000, NEVER_CRIT).dew?.toNumber()).toBeCloseTo(FIRST_DEW, 10);
+    expect(sim.click(1100, NEVER_CRIT).dew).toBeNull();
+  });
+
+  it('is worth a minute of Sap income once there is any', () => {
+    const sim = new Simulation();
+    sim.click(0, NEVER_CRIT); // spend the opening day's Dew
+    sim.addProducer({ id: 'sapflow', resource: 'sap', baseRate: 4, tags: [] });
+    sim.tick(DAY_LENGTH_SECONDS);
+
+    const dew = sim.click(1000, NEVER_CRIT).dew;
+    expect(dew?.toNumber()).toBeCloseTo(4 * DEW_SECONDS, 9);
+  });
+
+  it('credits the Sap it grants, on top of the tap itself', () => {
+    const sim = new Simulation();
+    const before = sim.state.resources.amount('sap').toNumber();
+    const result = sim.click(0, NEVER_CRIT);
+
+    expect(sim.state.resources.amount('sap').toNumber()).toBeCloseTo(
+      before + result.gain.toNumber() + (result.dew?.toNumber() ?? 0),
+      9,
+    );
   });
 });

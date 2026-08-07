@@ -9,6 +9,7 @@ import {
   isSegmentVisible,
   swayOffset,
   GROW_ANIM_MS,
+  shadeTint,
 } from './tree';
 
 /** A grown tree with canopy and roots, so the layout has both halves to fit. */
@@ -222,5 +223,30 @@ describe('culling', () => {
   it('leaves an on-screen tree untouched', () => {
     const projected = projectTree(TREE, computeTreeLayout(800, 600, treeBounds(TREE)));
     expect(cullSegments(projected, VIEWPORT)).toHaveLength(projected.length);
+  });
+});
+
+describe('shadeTint', () => {
+  it('leaves a leaf in full sun untinted', () => {
+    expect(shadeTint(1)).toBe(0);
+  });
+
+  it('leaves an unknown leaf untinted rather than guessing at a shadow', () => {
+    expect(shadeTint(undefined)).toBe(0);
+  });
+
+  it('darkens further the less light a leaf gets', () => {
+    expect(shadeTint(0.85)).toBeGreaterThan(0);
+    expect(shadeTint(0.5)).toBeGreaterThan(shadeTint(0.85));
+    expect(shadeTint(0.1)).toBeGreaterThan(shadeTint(0.5));
+  });
+
+  it('never tints the whole way, so a shaded leaf still reads as a leaf', () => {
+    expect(shadeTint(0)).toBeLessThan(1);
+    expect(shadeTint(-5)).toBe(shadeTint(0));
+  });
+
+  it('does not brighten a blossom-boosted leaf', () => {
+    expect(shadeTint(1.5)).toBe(0);
   });
 });

@@ -10,7 +10,6 @@ import {
   type Viewport,
 } from '../engine/camera';
 import { CLICK_TOLERANCE_PX } from '../engine/clicker';
-import { dayCycle } from '../engine/daylight';
 import { hitTestSegments, type Vec2 } from '../engine/geometry';
 import type { PricedGrowthOption } from '../engine/growth';
 import {
@@ -361,8 +360,8 @@ export class Renderer {
     // line — and all three travel together under the camera.
     const horizonY = this.layout.originY;
 
-    // Sky and the hills standing on the horizon.
-    drawBackdrop(ctx, viewport, this.layout, dayCycle(snapshot.elapsedSeconds));
+    // Sky, the sun or moon crossing it, and the hills on the horizon.
+    drawBackdrop(ctx, viewport, this.layout, snapshot.day);
 
     // Soil: strata bands and the mineral pockets buried in them.
     drawSoil(ctx, w, h, this.layout, this.soil);
@@ -371,7 +370,7 @@ export class Renderer {
     ctx.fillStyle = PALETTE.horizon;
     ctx.fillRect(0, horizonY - 1, w, 2);
 
-    drawTree(ctx, this.screenTree, now, this.spawns, viewport);
+    drawTree(ctx, this.screenTree, now, this.spawns, viewport, snapshot.leafLight);
 
     const ghost = this.ghostSegment();
     if (ghost) drawGhostPart(ctx, ghost);

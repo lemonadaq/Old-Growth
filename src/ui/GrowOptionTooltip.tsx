@@ -57,6 +57,15 @@ export function GrowOptionTooltip({ priced }: GrowOptionTooltipProps) {
           </div>
         )}
 
+        {priced.production?.exposure !== null && priced.production?.exposure !== undefined && (
+          <div className="tooltip__row">
+            <dt>Sunlight here</dt>
+            <dd className={priced.production.exposure < 1 ? 'tooltip__short' : 'tooltip__gain'}>
+              {Math.round(priced.production.exposure * 100)}%
+            </dd>
+          </div>
+        )}
+
         {!priced.affordable && (
           <div className="tooltip__row">
             <dt>Short by</dt>
@@ -72,6 +81,14 @@ export function GrowOptionTooltip({ priced }: GrowOptionTooltipProps) {
           No vein here — this tip would find no Minerals. Try another root.
         </p>
       )}
+
+      {priced.production?.exposure !== null &&
+        priced.production?.exposure !== undefined &&
+        priced.production.exposure < 1 && (
+          <p className="tooltip__hint">
+            Already shaded — the canopy above would take part of this leaf&apos;s light.
+          </p>
+        )}
 
       {!priced.production && (
         <p className="tooltip__hint">Structural — grow leaves or roots on it to produce.</p>

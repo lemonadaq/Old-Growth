@@ -39,6 +39,11 @@ export interface PartProduction {
    * nothing at all — which is what makes where a root tip lands matter.
    */
   readonly requiresVein?: boolean;
+  /**
+   * When set, the part's yield is scaled by its light exposure — dimmed by the
+   * foliage above it, lifted by the blossoms beside it. See `src/content/light.ts`.
+   */
+  readonly shaded?: boolean;
 }
 
 export interface GrowthRule {
@@ -159,7 +164,7 @@ export const GROWTH_RULES: readonly GrowthRule[] = [
     depthFalloff: 1,
     costResource: 'sap',
     baseCost: 10,
-    production: { resource: 'light', baseRate: 0.4 },
+    production: { resource: 'light', baseRate: 0.4, shaded: true },
   },
   {
     type: 'blossom',

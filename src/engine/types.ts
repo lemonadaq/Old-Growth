@@ -1,6 +1,7 @@
 import Decimal from 'break_infinity.js';
 import { EXPOSURE_INTERVAL_SECONDS } from '../content/light';
 import type { ResourceId } from '../content/resources';
+import { BuffLedger } from './buffs';
 import type { ClickStats } from './clicker';
 import { createComboState, type ComboState } from './combo';
 import { dayCycle, type DayCycle } from './daylight';
@@ -55,8 +56,14 @@ export interface GameState {
   combo: ComboState;
   /** Levels owned per upgrade. */
   upgrades: UpgradeLedger;
+  /** Timed buffs currently running, keyed by id. */
+  buffs: BuffLedger;
+  /** Totems planted at the tree base, in slot order. */
+  totems: string[];
   /** Lifetime count of successful taps on the tree. */
   clicks: number;
+  /** Lifetime count of limbs cut. */
+  prunes: number;
   /** Total number of fixed simulation ticks executed. */
   tick: number;
   /** Total simulated time in seconds. */
@@ -89,6 +96,15 @@ export interface HydrationSnapshot {
   readonly ratio: number;
   /** The multiplier applied to Light and to Sap per tap. */
   readonly value: number;
+}
+
+/** One running buff as the HUD reads it. */
+export interface BuffSnapshot {
+  readonly id: string;
+  /** Engine seconds left before it lapses. */
+  readonly remainingSeconds: number;
+  /** How much of its duration is left, in `[0, 1]`, for a drain bar. */
+  readonly fraction: number;
 }
 
 /** One upgrade's purchase state, resolved against the player's balance. */
@@ -128,8 +144,14 @@ export interface GameSnapshot {
   readonly leafLight: ReadonlyMap<string, LeafLight>;
   readonly combo: ComboSnapshot;
   readonly upgrades: readonly UpgradeSnapshot[];
+  /** Buffs running right now, with the time left on each. */
+  readonly buffs: readonly BuffSnapshot[];
+  /** Totems planted at the tree base, in slot order. */
+  readonly totems: readonly string[];
   /** Lifetime count of successful taps on the tree. */
   readonly clicks: number;
+  /** Lifetime count of limbs cut. */
+  readonly prunes: number;
   /**
    * Structural revision of the tree graph. Consumers that cache derived tree
    * geometry (the renderer projects it only on change) compare this instead of
@@ -165,7 +187,10 @@ export function createInitialState(now: number = Date.now()): GameState {
     lastDewDay: -1,
     combo: createComboState(),
     upgrades: new UpgradeLedger(),
+    buffs: new BuffLedger(),
+    totems: [],
     clicks: 0,
+    prunes: 0,
     tick: 0,
     elapsedSeconds: 0,
     lastUpdatedAt: now,

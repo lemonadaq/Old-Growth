@@ -1,9 +1,11 @@
+import type { Vec2 } from '../engine/geometry';
 import { PALETTE } from './palette';
 
 /**
- * Transient click feedback: floating "+N" numbers and hit ripples.
+ * Transient feedback: floating "+N" numbers, hit ripples, and the foliage a
+ * prune shakes loose.
  *
- * Both effect kinds are **object-pooled**. The pools are allocated once at
+ * All three effect kinds are **object-pooled**. The pools are allocated once at
  * construction and every slot is reused forever, so a player hammering the tree
  * at ten taps a second never triggers allocation or GC pressure in the input
  * path. When every slot is busy the oldest one is recycled — dropping the
@@ -34,8 +36,31 @@ const RIPPLE_MAX_RADIUS_PX = 34;
 const DRIFT_MIN_PX = 14;
 const DRIFT_RANGE_PX = 26;
 
+/**
+ * How long a shaken-loose leaf takes to fall out of frame, in ms.
+ *
+ * Long by the standards of the other effects on purpose: a cut is the most
+ * consequential thing a player can do to their tree, and the drift down is the
+ * only part of it that reads as *loss*. It should outlast the click that caused
+ * it.
+ */
+export const LEAF_FALL_DURATION_MS = 1600;
+
+/** Downward speed a falling leaf settles at, in CSS px per second. */
+const LEAF_FALL_SPEED_PX = 130;
+
+/** Sideways drift of a falling leaf, in CSS px per second. */
+const LEAF_DRIFT_PX = 34;
+
+/** How far a falling leaf swings across its drift, in CSS px. */
+const LEAF_SWAY_PX = 11;
+
+/** Full swings per second as a leaf falls. */
+const LEAF_SWAY_RATE = 1.6;
+
 const FLOAT_CAPACITY = 128;
 const RIPPLE_CAPACITY = 64;
+const LEAF_CAPACITY = 96;
 
 interface FloatingNumber {
   active: boolean;
@@ -53,6 +78,25 @@ interface Ripple {
   x: number;
   y: number;
   crit: boolean;
+  spawnedAt: number;
+}
+
+/** One scrap of foliage tumbling down from a cut. */
+interface FallingLeaf {
+  active: boolean;
+  x: number;
+  y: number;
+  /** Sideways drift in px/s; sign decides which way it slides. */
+  drift: number;
+  /** Fall speed in px/s. Varied so a burst does not fall as a sheet. */
+  speed: number;
+  /** Radians per second of tumble. */
+  spin: number;
+  /** Phase offset into the sway, so neighbours swing out of step. */
+  phase: number;
+  /** Half-length of the leaf in px. */
+  size: number;
+  color: string;
   spawnedAt: number;
 }
 
@@ -78,10 +122,29 @@ function acquire<T extends { active: boolean; spawnedAt: number }>(pool: T[]): T
 export class EffectPool {
   private readonly floats: FloatingNumber[] = [];
   private readonly ripples: Ripple[] = [];
+  private readonly leaves: FallingLeaf[] = [];
   /** Alternating sign so consecutive numbers drift to opposite sides. */
   private driftSign = 1;
 
-  constructor(floatCapacity = FLOAT_CAPACITY, rippleCapacity = RIPPLE_CAPACITY) {
+  constructor(
+    floatCapacity = FLOAT_CAPACITY,
+    rippleCapacity = RIPPLE_CAPACITY,
+    leafCapacity = LEAF_CAPACITY,
+  ) {
+    for (let i = 0; i < leafCapacity; i += 1) {
+      this.leaves.push({
+        active: false,
+        x: 0,
+        y: 0,
+        drift: 0,
+        speed: 0,
+        spin: 0,
+        phase: 0,
+        size: 0,
+        color: PALETTE.leafFall,
+        spawnedAt: 0,
+      });
+    }
     for (let i = 0; i < floatCapacity; i += 1) {
       this.floats.push({
         active: false,
@@ -127,6 +190,43 @@ export class EffectPool {
     this.spawnFloatingNumber(x, y, text, crit, now);
   }
 
+  /** Shake one scrap of foliage loose from a point. */
+  spawnFallingLeaf(x: number, y: number, now: number): void {
+    const slot = acquire(this.leaves);
+    slot.active = true;
+    slot.x = x;
+    slot.y = y;
+    slot.drift = (Math.random() * 2 - 1) * LEAF_DRIFT_PX;
+    slot.speed = LEAF_FALL_SPEED_PX * (0.7 + Math.random() * 0.6);
+    slot.spin = (Math.random() * 2 - 1) * 3.4;
+    slot.phase = Math.random() * Math.PI * 2;
+    slot.size = 3.5 + Math.random() * 3;
+    // A cut sheds green and dry alike; mixing the two keeps a burst from
+    // reading as one flat colour.
+    slot.color = Math.random() < 0.7 ? PALETTE.leafFall : PALETTE.leafFallDry;
+    slot.spawnedAt = now;
+  }
+
+  /**
+   * The burst a prune throws off: `perPoint` leaves from each removed part,
+   * scattered a little so they do not all start from the same pixel.
+   *
+   * Points come from the *screen* geometry of the subtree, captured before the
+   * cut — which is why the debris falls from where the limb actually was rather
+   * than from the cursor.
+   */
+  spawnPruneBurst(points: readonly Vec2[], now: number, perPoint = 3): void {
+    for (const point of points) {
+      for (let i = 0; i < perPoint; i += 1) {
+        this.spawnFallingLeaf(
+          point.x + (Math.random() * 2 - 1) * 6,
+          point.y + (Math.random() * 2 - 1) * 6,
+          now,
+        );
+      }
+    }
+  }
+
   /** Retire everything that has outlived its duration at `now`. */
   prune(now: number): void {
     for (const slot of this.floats) {
@@ -134,6 +234,9 @@ export class EffectPool {
     }
     for (const slot of this.ripples) {
       if (slot.active && now - slot.spawnedAt >= RIPPLE_DURATION_MS) slot.active = false;
+    }
+    for (const slot of this.leaves) {
+      if (slot.active && now - slot.spawnedAt >= LEAF_FALL_DURATION_MS) slot.active = false;
     }
   }
 
@@ -147,17 +250,61 @@ export class EffectPool {
     return this.ripples.reduce((n, slot) => n + (slot.active ? 1 : 0), 0);
   }
 
+  /** Live falling leaves — for tests and debugging. */
+  get activeLeaves(): number {
+    return this.leaves.reduce((n, slot) => n + (slot.active ? 1 : 0), 0);
+  }
+
   /** Deactivate every slot. */
   clear(): void {
     for (const slot of this.floats) slot.active = false;
     for (const slot of this.ripples) slot.active = false;
+    for (const slot of this.leaves) slot.active = false;
   }
 
-  /** Draw all live effects. Prune first so expired slots are skipped. */
+  /**
+   * Draw all live effects. Prune first so expired slots are skipped.
+   *
+   * Falling debris goes underneath the numbers: a "+N Deadwood" that a leaf
+   * tumbles across is harder to read than one drawn over the top of it.
+   */
   draw(ctx: CanvasRenderingContext2D, now: number): void {
     this.prune(now);
+    this.drawFallingLeaves(ctx, now);
     this.drawRipples(ctx, now);
     this.drawFloats(ctx, now);
+  }
+
+  /**
+   * Foliage tumbling out of a cut: each leaf falls at its own speed, slides
+   * along its own drift, and swings across it as it goes, so a burst spreads
+   * into a shower instead of dropping as one block.
+   */
+  private drawFallingLeaves(ctx: CanvasRenderingContext2D, now: number): void {
+    ctx.save();
+    for (const slot of this.leaves) {
+      if (!slot.active) continue;
+      const elapsed = (now - slot.spawnedAt) / 1000;
+      const t = (now - slot.spawnedAt) / LEAF_FALL_DURATION_MS;
+
+      const x =
+        slot.x + slot.drift * elapsed + Math.sin(elapsed * LEAF_SWAY_RATE * Math.PI + slot.phase) * LEAF_SWAY_PX;
+      // Eased downward: a leaf leaves the limb slowly and picks up speed.
+      const y = slot.y + slot.speed * elapsed * (0.45 + 0.55 * t);
+
+      // Hold, then fade over the back half — a leaf that vanishes the instant it
+      // is cut never reads as having fallen.
+      ctx.globalAlpha = t < 0.5 ? 1 : Math.max(0, 1 - (t - 0.5) / 0.5);
+      ctx.fillStyle = slot.color;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(slot.spin * elapsed);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, slot.size, slot.size * 0.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
   }
 
   private drawRipples(ctx: CanvasRenderingContext2D, now: number): void {

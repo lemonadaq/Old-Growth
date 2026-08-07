@@ -6,6 +6,7 @@ import {
   type GrowthRule,
   type TreeNodeType,
 } from '../content/growth';
+import { GROWTH_COST_TAG } from '../content/prune';
 import type { ResourceId } from '../content/resources';
 import type { Stratum } from '../content/soil';
 import type { Producer } from './economy';
@@ -50,11 +51,22 @@ export function partProducerId(nodeId: string): string {
 
 /**
  * Price of the *next* part of a type, given how many the tree already carries:
- * `baseCost × 1.15^owned`.
+ * `baseCost × 1.15^owned`, then whatever the {@link GROWTH_COST_TAG} modifiers
+ * make of it.
+ *
+ * Passing `modifiers` is what lets a discount (apical dominance today, a species
+ * or a season later) reach prices without any caller having to know a discount
+ * exists. Omitting them prices the part at list, which is what a catalogue view
+ * or a test with no simulation behind it wants. A discount can never take a
+ * price below zero.
  */
-export function partCost(type: TreeNodeType, owned: number): Decimal {
+export function partCost(type: TreeNodeType, owned: number, modifiers?: ModifierSet): Decimal {
   const rule = GROWTH_RULE_BY_TYPE[type];
-  return new Decimal(rule.baseCost).mul(Decimal.pow(PART_COST_GROWTH, Math.max(0, owned)));
+  const list = new Decimal(rule.baseCost).mul(Decimal.pow(PART_COST_GROWTH, Math.max(0, owned)));
+  if (!modifiers) return list;
+
+  const priced = applyModifiers(list, modifiers.matchingTag(GROWTH_COST_TAG));
+  return priced.lt(0) ? new Decimal(0) : priced;
 }
 
 /**
@@ -231,7 +243,7 @@ export function priceGrowthOption(
   ctx: PartContext = NO_PART_CONTEXT,
 ): PricedGrowthOption {
   const rule = GROWTH_RULE_BY_TYPE[option.type];
-  const cost = partCost(option.type, owned);
+  const cost = partCost(option.type, owned, modifiers);
   const affordable = balance.gte(cost);
 
   return {

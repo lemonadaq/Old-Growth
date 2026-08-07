@@ -1,0 +1,131 @@
+/* STEP 9's Deadwood sink. The final HUD (STEP 18) folds this into the dock. */
+.workshop {
+  pointer-events: auto; /* the HUD ignores pointer events by default */
+  position: absolute;
+  top: 56px;
+  left: 12px;
+  width: 224px;
+  max-height: calc(100% - 160px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 10px;
+  backdrop-filter: blur(4px);
+}
+
+.workshop__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hud-muted);
+}
+
+.workshop__stock {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--hud-muted);
+}
+
+.workshop__stock b {
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  color: var(--hud-accent);
+}
+
+.workshop__slots {
+  list-style: none;
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+
+.workshop__slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  font-size: 15px;
+  border: 1px dashed var(--hud-border);
+  border-radius: 8px;
+  color: var(--hud-muted);
+}
+
+.workshop__slot--filled {
+  border-style: solid;
+  background: rgba(255, 240, 214, 0.08);
+}
+
+.workshop__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.totem {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  color: var(--hud-text);
+  background: rgba(255, 240, 214, 0.06);
+  border: 1px solid var(--hud-border);
+  border-left-width: 3px;
+  border-radius: 8px;
+  padding: 8px;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.totem:hover:not(:disabled) {
+  background: rgba(255, 210, 122, 0.16);
+}
+
+.totem:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.totem__name {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.totem__desc {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--hud-muted);
+}
+
+.totem__cost {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--hud-accent);
+}
+
+.workshop__hint {
+  margin: 0;
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1.35;
+  color: var(--hud-muted);
+  opacity: 0.8;
+}

@@ -5,22 +5,29 @@ import { Simulation } from '../engine/simulation';
 import { gameStore } from '../engine/store';
 import { formatNumber } from '../engine/format';
 import type { PricedGrowthOption } from '../engine/growth';
+import type { PruneQuote } from '../engine/prune';
+import { RESOURCE_BY_ID } from '../content/resources';
 import { enableTestProducers, disableTestProducers } from '../engine/debugProducers';
 import { Renderer } from '../render/canvas';
 import { GrowOptionTooltip } from './GrowOptionTooltip';
 import { Hud } from './Hud';
 import { LeafTooltip } from './LeafTooltip';
+import { PruneTooltip } from './PruneTooltip';
 import { Tooltip } from './Tooltip';
 import { UpgradePanel } from './UpgradePanel';
+import { Workshop } from './Workshop';
+import { playSnip } from './sfx';
 import { attachTreeInput } from './treeInput';
 import './App.css';
 
 /**
  * What the tooltip is currently pointing at, in viewport coordinates.
  *
- * Two things on the canvas can explain themselves: a dial in the grow menu
- * (what a part would cost and add) and a leaf cluster already on the tree (how
- * much sky it can still see). The menu wins where they overlap.
+ * Three things on the canvas can explain themselves: a dial in the grow menu
+ * (what a part would cost and add), a leaf cluster already on the tree (how much
+ * sky it can still see), and — with the scissors out — a limb about to be cut
+ * (what it pays and what it costs). Prune mode owns the pointer entirely while
+ * it is on; otherwise the menu wins where it overlaps a leaf.
  */
 type HoverState =
   | {
@@ -29,16 +36,27 @@ type HoverState =
       readonly x: number;
       readonly y: number;
     }
-  | { readonly kind: 'leaf'; readonly nodeId: string; readonly x: number; readonly y: number };
+  | { readonly kind: 'leaf'; readonly nodeId: string; readonly x: number; readonly y: number }
+  | { readonly kind: 'prune'; readonly quote: PruneQuote; readonly x: number; readonly y: number };
 
 /** How far above the tap the Dew number is spawned, so it clears the "+N". */
 const DEW_LABEL_OFFSET_PX = 26;
 
+/** Vertical spacing between the payout numbers a cut throws up. */
+const PRUNE_LABEL_SPACING_PX = 24;
+
 export function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const simRef = useRef<Simulation | null>(null);
+  const rendererRef = useRef<Renderer | null>(null);
   const [testProducers, setTestProducers] = useState(false);
+  const [pruneMode, setPruneMode] = useState(false);
   const [hover, setHover] = useState<HoverState | null>(null);
+
+  // The input handlers are wired once, on mount, and must read the *current*
+  // mode rather than the one that was in force when they were created.
+  const pruneModeRef = useRef(false);
+  const togglePrune = useCallback(() => setPruneMode((on) => !on), []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -47,6 +65,7 @@ export function App() {
     const sim = new Simulation();
     simRef.current = sim;
     const renderer = new Renderer(canvas);
+    rendererRef.current = renderer;
     renderer.setSoil(sim.state.soil);
 
     // The renderer caches the projected tree; re-push it only when the graph's
@@ -74,12 +93,115 @@ export function App() {
       setHover(null);
     };
 
+    /** Drop the prune mark and its tooltip. */
+    const clearPruneMark = () => {
+      renderer.setPruneSelection(null);
+      setHover(null);
+    };
+
+    /**
+     * Mark the subtree at `nodeId`, quoting it against live prices.
+     *
+     * `armed` is the inline confirm: hovering marks, the first click arms, and
+     * only a second click on the same limb cuts. Re-marking a different limb
+     * always lands unarmed, so a confirm can never be inherited by a limb the
+     * player did not confirm.
+     */
+    const markPrune = (nodeId: string, armed: boolean): PruneQuote | null => {
+      const quote = sim.pruneQuote(nodeId);
+      if (!quote) {
+        clearPruneMark();
+        return null;
+      }
+      renderer.setPruneSelection({
+        nodeId,
+        ids: new Set(quote.nodeIds),
+        quote,
+        armed,
+      });
+      return quote;
+    };
+
+    /** Execute the marked cut: snip, debris, payout numbers. */
+    const performPrune = (nodeId: string, at: { x: number; y: number }, now: number) => {
+      // Captured before the cut — the graph is about to forget these nodes.
+      const debris = renderer.prunePoints();
+
+      const result = sim.prunePart(nodeId);
+      if (!result) {
+        clearPruneMark();
+        return;
+      }
+
+      playSnip();
+      renderer.effects.spawnPruneBurst(debris, now);
+      syncTree(now);
+      clearPruneMark();
+
+      let row = 0;
+      for (const refund of result.quote.refunds) {
+        renderer.effects.spawnFloatingNumber(
+          at.x,
+          at.y - row * PRUNE_LABEL_SPACING_PX,
+          `+${formatNumber(refund.amount)} ${RESOURCE_BY_ID[refund.resource].label}`,
+          false,
+          now,
+        );
+        row += 1;
+      }
+      renderer.effects.spawnFloatingNumber(
+        at.x,
+        at.y - row * PRUNE_LABEL_SPACING_PX,
+        `+${formatNumber(result.quote.deadwood)} Deadwood`,
+        false,
+        now,
+      );
+      if (result.surge) {
+        renderer.effects.spawnHit(
+          at.x,
+          at.y - (row + 1) * PRUNE_LABEL_SPACING_PX,
+          'Lateral Surge!',
+          true,
+          now,
+        );
+      }
+    };
+
     // Taps resolve here, straight off pointerdown — outside the frame loop and
     // outside React state — so nothing can coalesce or defer them.
     const detachInput = attachTreeInput(canvas, {
-      // The open grow menu gets first refusal on every press.
+      // The open grow menu gets first refusal on every press — unless the
+      // scissors are out, in which case prune mode owns the whole surface.
       onPress: (point) => {
         const now = Date.now();
+
+        if (pruneModeRef.current) {
+          const segment = renderer.hitTest(point);
+          const nodeId = segment?.id ?? null;
+
+          // Nothing cuttable under the press: cancel whatever was marked. The
+          // trunk is the graph root and has no joint to be cut at.
+          if (!nodeId || nodeId === sim.state.tree.rootId) {
+            clearPruneMark();
+            return true;
+          }
+
+          const mark = renderer.pruneMark;
+          if (mark?.armed && mark.nodeId === nodeId) {
+            performPrune(nodeId, point, now);
+            return true;
+          }
+
+          // First press: mark and arm, so touch (which never hovers) still gets
+          // its confirm.
+          const quote = markPrune(nodeId, true);
+          if (quote) {
+            const client = toClient(point);
+            setHover({ kind: 'prune', quote, x: client.x, y: client.y });
+          }
+          return true;
+        }
+
         if (!renderer.isMenuArmed(now)) return false;
 
         const priced = renderer.menuOptionAt(point);
@@ -136,6 +258,27 @@ export function App() {
         renderer.setPointer(point);
         const client = toClient(point);
 
+        if (pruneModeRef.current) {
+          const segment = renderer.hitTest(point);
+          const nodeId = segment?.id ?? null;
+          if (!nodeId || nodeId === sim.state.tree.rootId) {
+            clearPruneMark();
+            return;
+          }
+
+          const mark = renderer.pruneMark;
+          // Already on this limb: keep the confirm the player has armed rather
+          // than disarming it under a stray pixel of mouse movement.
+          if (mark?.nodeId === nodeId) {
+            setHover({ kind: 'prune', quote: mark.quote, x: client.x, y: client.y });
+            return;
+          }
+
+          const quote = markPrune(nodeId, false);
+          if (quote) setHover({ kind: 'prune', quote, x: client.x, y: client.y });
+          return;
+        }
+
         const priced = renderer.hoverMenu(point);
         if (priced) {
           setHover({ kind: 'option', priced, x: client.x, y: client.y });
@@ -154,6 +297,7 @@ export function App() {
       onPointerLeave: () => {
         renderer.setPointer(null);
         renderer.hoverMenu(null);
+        if (pruneModeRef.current) renderer.setPruneSelection(null);
         setHover(null);
       },
 
@@ -175,8 +319,29 @@ export function App() {
     });
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      // Never steal a keystroke aimed at a control the player is typing into.
+      const target = event.target as HTMLElement | null;
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) {
+        return;
+      }
+
       if (event.key === 'Escape') {
+        // Escape backs out one layer at a time: an armed cut first, then the
+        // mode, then the grow menu.
+        if (pruneModeRef.current) {
+          if (renderer.pruneMark?.armed) {
+            renderer.setPruneSelection(null);
+            setHover(null);
+          } else {
+            setPruneMode(false);
+          }
+          return;
+        }
         closeMenu();
+        return;
+      }
+      if (event.key === 'p' || event.key === 'P') {
+        togglePrune();
         return;
       }
       // Zoom from the keyboard, for mice with no pinch gesture to offer.
@@ -222,8 +387,17 @@ export function App() {
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('keydown', handleKeyDown);
       simRef.current = null;
+      rendererRef.current = null;
     };
-  }, []);
+  }, [togglePrune]);
+
+  // Mirror prune mode into the places that cannot read React state: the input
+  // handlers (through a ref) and the renderer (which draws the mark).
+  useEffect(() => {
+    pruneModeRef.current = pruneMode;
+    rendererRef.current?.setPruneMode(pruneMode);
+    setHover(null);
+  }, [pruneMode]);
 
   // Toggle the temporary debug producers on the live simulation.
   useEffect(() => {
@@ -240,13 +414,23 @@ export function App() {
     simRef.current?.buyUpgrade(id);
   }, []);
 
+  const handleCraft = useCallback((totemId: string) => {
+    simRef.current?.craftTotem(totemId);
+  }, []);
+
   return (
     <div className="app">
-      <canvas ref={canvasRef} className="app-canvas" />
+      <canvas
+        ref={canvasRef}
+        className={`app-canvas${pruneMode ? ' app-canvas--pruning' : ''}`}
+      />
       <Hud
         testProducers={testProducers}
         onToggleTestProducers={() => setTestProducers((on) => !on)}
+        pruneMode={pruneMode}
+        onTogglePrune={togglePrune}
       />
+      <Workshop onCraft={handleCraft} />
       <UpgradePanel onBuy={handleBuy} />
       <Tooltip
         content={
@@ -254,6 +438,8 @@ export function App() {
             <GrowOptionTooltip priced={hover.priced} />
           ) : hover?.kind === 'leaf' ? (
             <LeafTooltip nodeId={hover.nodeId} />
+          ) : hover?.kind === 'prune' ? (
+            <PruneTooltip quote={hover.quote} />
           ) : null
         }
         x={hover?.x ?? 0}

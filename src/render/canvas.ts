@@ -35,7 +35,14 @@ import {
   layoutRadialMenu,
   type RadialMenuState,
 } from './radialMenu';
+import {
+  drawPruneConfirm,
+  drawPruneMark,
+  markedPoints,
+  type PruneSelection,
+} from './prune';
 import { drawBackdrop } from './sky';
+import { drawTotems } from './totems';
 import { computeTreeLayout, drawGhostPart, drawTree } from './tree';
 
 /**
@@ -84,6 +91,11 @@ export class Renderer {
   private menuOptions: readonly PricedGrowthOption[] = [];
   private hoveredItem: number | null = null;
   private ghost: PricedGrowthOption | null = null;
+
+  /** Whether the scissors are out. Prune mode owns every press while it is on. */
+  private pruning = false;
+  /** The subtree currently marked for cutting, if any. */
+  private pruneSelection: PruneSelection | null = null;
 
   /** Latest pointer position in CSS px, or `null` when the pointer has left. */
   private pointer: Vec2 | null = null;
@@ -218,6 +230,42 @@ export class Renderer {
   /** Whether the menu's dials are live yet (see `MENU_ARM_MS`). */
   isMenuArmed(now: number): boolean {
     return this.menu !== null && isMenuArmed(this.menu, now);
+  }
+
+  /**
+   * Turn prune mode on or off. Turning it on closes the grow menu — the two are
+   * opposite intentions on the same limb and must never both be live.
+   */
+  setPruneMode(on: boolean): void {
+    this.pruning = on;
+    this.pruneSelection = null;
+    if (on) this.closeMenu();
+  }
+
+  /** Whether the scissors are out. */
+  get isPruning(): boolean {
+    return this.pruning;
+  }
+
+  /** Mark a subtree for cutting, or clear the mark with `null`. */
+  setPruneSelection(selection: PruneSelection | null): void {
+    this.pruneSelection = selection;
+  }
+
+  /** The subtree currently marked, if any. */
+  get pruneMark(): PruneSelection | null {
+    return this.pruneSelection;
+  }
+
+  /**
+   * Screen points of the marked subtree — where a cut's debris falls from.
+   *
+   * Must be read *before* the cut: the projection is rebuilt from the graph, and
+   * the graph is about to forget these nodes ever existed.
+   */
+  prunePoints(): Vec2[] {
+    if (!this.pruneSelection) return [];
+    return markedPoints(this.screenTree, this.pruneSelection.ids);
   }
 
   /**
@@ -370,7 +418,16 @@ export class Renderer {
     ctx.fillStyle = PALETTE.horizon;
     ctx.fillRect(0, horizonY - 1, w, 2);
 
+    // Totems stand behind the trunk, so a stump planted close in reads as being
+    // *at* the base rather than in front of it.
+    drawTotems(ctx, snapshot.totems, this.layout);
+
     drawTree(ctx, this.screenTree, now, this.spawns, viewport, snapshot.leafLight);
+
+    if (this.pruning && this.pruneSelection) {
+      drawPruneMark(ctx, this.screenTree, this.pruneSelection, now);
+      drawPruneConfirm(ctx, this.screenTree, this.pruneSelection);
+    }
 
     const ghost = this.ghostSegment();
     if (ghost) drawGhostPart(ctx, ghost);

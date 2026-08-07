@@ -16,6 +16,12 @@
   gap: 12px;
 }
 
+.hud-header__left {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
 .hud-header__right {
   display: flex;
   align-items: center;
@@ -38,6 +44,13 @@
 .hud-toggle[aria-pressed='true'] {
   color: var(--hud-accent);
   border-color: var(--hud-accent);
+}
+
+/* Prune mode is the one destructive mode in the game, so it gets the one red. */
+.hud-toggle--prune[aria-pressed='true'] {
+  color: #ffe2d8;
+  border-color: #ff8a72;
+  background: rgba(120, 34, 26, 0.7);
 }
 
 .hud-title {

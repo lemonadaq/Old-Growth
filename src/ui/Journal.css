@@ -1,0 +1,174 @@
+/* STEP 10's species record. The final UI (STEP 18) folds this into the dock. */
+.journal {
+  pointer-events: auto; /* the HUD ignores pointer events by default */
+  position: absolute;
+  top: 56px;
+  right: 12px;
+  width: 340px;
+  max-height: calc(100% - 96px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 10px;
+  backdrop-filter: blur(4px);
+}
+
+.journal__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hud-muted);
+}
+
+.journal__heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--hud-text);
+}
+
+.journal__count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--hud-accent);
+}
+
+.journal__grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.journal__card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 9px;
+  background: rgba(255, 240, 214, 0.06);
+  border: 1px solid var(--hud-border);
+  border-left-width: 3px;
+  border-radius: 8px;
+}
+
+.journal__card--locked {
+  opacity: 0.7;
+}
+
+.journal__card--planting {
+  background: rgba(255, 210, 122, 0.14);
+  border-color: var(--hud-accent);
+}
+
+/* Undiscovered hybrids: present, shaped, and unreadable — a blank on the map. */
+.journal__card--silhouette {
+  border-left-color: rgba(253, 243, 224, 0.25);
+  background: rgba(253, 243, 224, 0.03);
+  color: var(--hud-muted);
+}
+
+.journal__name {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.journal__owned {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--hud-muted);
+}
+
+.journal__parents {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: capitalize;
+  color: var(--hud-muted);
+}
+
+.journal__flavor {
+  margin: 0;
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1.35;
+  color: var(--hud-muted);
+}
+
+.journal__hint {
+  margin: 0;
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1.35;
+  opacity: 0.75;
+}
+
+.journal__traits {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.journal__trait {
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.journal__trait--dormant {
+  opacity: 0.55;
+}
+
+.journal__soon {
+  font-style: italic;
+}
+
+.journal__locked {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--hud-muted);
+}
+
+.journal__bar {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(253, 243, 224, 0.15);
+  overflow: hidden;
+}
+
+.journal__bar > span {
+  display: block;
+  height: 100%;
+  background: var(--hud-accent);
+}
+
+.journal__footer {
+  margin: 0;
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1.35;
+  color: var(--hud-muted);
+  opacity: 0.8;
+}

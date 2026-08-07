@@ -82,6 +82,16 @@ export const PALETTE = {
   pruneEdge: '#ff8a72',
   prunePanel: 'rgba(58, 18, 14, 0.92)',
   pruneText: '#ffe2d8',
+  /**
+   * Graft mode. Green for a join that works, red for one that does not — the
+   * only other coloured overlay on the canvas, and deliberately not prune's red
+   * wash: cutting and joining must never look alike.
+   */
+  graftMark: '#8fd694',
+  graftRefused: 'rgba(214, 88, 74, 0.75)',
+  graftPanel: 'rgba(20, 40, 24, 0.92)',
+  /** Confetti thrown by a first-time hybrid discovery. */
+  confetti: ['#ffd27a', '#8fd694', '#f0b6cd', '#fdf3e0', '#6fb7e0'] as readonly string[],
   /** Deadwood, and the falling foliage a cut shakes loose. */
   deadwood: '#8a6a4a',
   leafFall: '#8aab55',

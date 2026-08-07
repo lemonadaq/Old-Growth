@@ -58,9 +58,25 @@ const LEAF_SWAY_PX = 11;
 /** Full swings per second as a leaf falls. */
 const LEAF_SWAY_RATE = 1.6;
 
+/**
+ * How long a scrap of confetti stays up, in ms.
+ *
+ * Longer than anything else here, and unapologetically so: it fires once per
+ * *new* hybrid — a few dozen times in a whole run — and a discovery that is over
+ * before the player has read the toast is not a celebration.
+ */
+export const CONFETTI_DURATION_MS = 2200;
+
+/** Initial upward speed of a scrap of confetti, in CSS px/s. */
+const CONFETTI_LAUNCH_PX = 340;
+
+/** Downward pull on confetti, in CSS px/s². */
+const CONFETTI_GRAVITY_PX = 620;
+
 const FLOAT_CAPACITY = 128;
 const RIPPLE_CAPACITY = 64;
 const LEAF_CAPACITY = 96;
+const CONFETTI_CAPACITY = 120;
 
 interface FloatingNumber {
   active: boolean;
@@ -100,6 +116,20 @@ interface FallingLeaf {
   spawnedAt: number;
 }
 
+/** One scrap of confetti thrown by a discovery. */
+interface Confetto {
+  active: boolean;
+  x: number;
+  y: number;
+  /** Launch velocity in px/s. */
+  vx: number;
+  vy: number;
+  spin: number;
+  size: number;
+  color: string;
+  spawnedAt: number;
+}
+
 /** Ease-out cubic: fast at first, settling toward the end. */
 function easeOut(t: number): number {
   const inverted = 1 - t;
@@ -123,6 +153,7 @@ export class EffectPool {
   private readonly floats: FloatingNumber[] = [];
   private readonly ripples: Ripple[] = [];
   private readonly leaves: FallingLeaf[] = [];
+  private readonly confetti: Confetto[] = [];
   /** Alternating sign so consecutive numbers drift to opposite sides. */
   private driftSign = 1;
 
@@ -130,7 +161,21 @@ export class EffectPool {
     floatCapacity = FLOAT_CAPACITY,
     rippleCapacity = RIPPLE_CAPACITY,
     leafCapacity = LEAF_CAPACITY,
+    confettiCapacity = CONFETTI_CAPACITY,
   ) {
+    for (let i = 0; i < confettiCapacity; i += 1) {
+      this.confetti.push({
+        active: false,
+        x: 0,
+        y: 0,
+        vx: 0,
+        vy: 0,
+        spin: 0,
+        size: 0,
+        color: PALETTE.confetti[0],
+        spawnedAt: 0,
+      });
+    }
     for (let i = 0; i < leafCapacity; i += 1) {
       this.leaves.push({
         active: false,
@@ -227,8 +272,37 @@ export class EffectPool {
     }
   }
 
+  /**
+   * Throw a burst of confetti from a point — the discovery of a hybrid nobody
+   * has grown before.
+   *
+   * Scraps launch into a cone rather than a full circle: a fountain reads as
+   * celebration, while an even sphere reads as an explosion, and a graft is a
+   * good thing happening to the tree.
+   */
+  spawnConfetti(x: number, y: number, now: number, count = 44): void {
+    const colors = PALETTE.confetti;
+    for (let i = 0; i < count; i += 1) {
+      const slot = acquire(this.confetti);
+      const angle = -Math.PI / 2 + (Math.random() * 2 - 1) * 0.9;
+      const speed = CONFETTI_LAUNCH_PX * (0.55 + Math.random() * 0.65);
+      slot.active = true;
+      slot.x = x;
+      slot.y = y;
+      slot.vx = Math.cos(angle) * speed;
+      slot.vy = Math.sin(angle) * speed;
+      slot.spin = (Math.random() * 2 - 1) * 8;
+      slot.size = 3 + Math.random() * 3.5;
+      slot.color = colors[i % colors.length];
+      slot.spawnedAt = now;
+    }
+  }
+
   /** Retire everything that has outlived its duration at `now`. */
   prune(now: number): void {
+    for (const slot of this.confetti) {
+      if (slot.active && now - slot.spawnedAt >= CONFETTI_DURATION_MS) slot.active = false;
+    }
     for (const slot of this.floats) {
       if (slot.active && now - slot.spawnedAt >= FLOAT_DURATION_MS) slot.active = false;
     }
@@ -255,11 +329,17 @@ export class EffectPool {
     return this.leaves.reduce((n, slot) => n + (slot.active ? 1 : 0), 0);
   }
 
+  /** Live confetti — for tests and debugging. */
+  get activeConfetti(): number {
+    return this.confetti.reduce((n, slot) => n + (slot.active ? 1 : 0), 0);
+  }
+
   /** Deactivate every slot. */
   clear(): void {
     for (const slot of this.floats) slot.active = false;
     for (const slot of this.ripples) slot.active = false;
     for (const slot of this.leaves) slot.active = false;
+    for (const slot of this.confetti) slot.active = false;
   }
 
   /**
@@ -271,8 +351,33 @@ export class EffectPool {
   draw(ctx: CanvasRenderingContext2D, now: number): void {
     this.prune(now);
     this.drawFallingLeaves(ctx, now);
+    this.drawConfetti(ctx, now);
     this.drawRipples(ctx, now);
     this.drawFloats(ctx, now);
+  }
+
+  /** Confetti: ballistic scraps that launch, tumble, and drift back down. */
+  private drawConfetti(ctx: CanvasRenderingContext2D, now: number): void {
+    ctx.save();
+    for (const slot of this.confetti) {
+      if (!slot.active) continue;
+      const elapsed = (now - slot.spawnedAt) / 1000;
+      const t = (now - slot.spawnedAt) / CONFETTI_DURATION_MS;
+
+      const x = slot.x + slot.vx * elapsed;
+      const y = slot.y + slot.vy * elapsed + 0.5 * CONFETTI_GRAVITY_PX * elapsed * elapsed;
+
+      ctx.globalAlpha = t < 0.6 ? 1 : Math.max(0, 1 - (t - 0.6) / 0.4);
+      ctx.fillStyle = slot.color;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(slot.spin * elapsed);
+      // Rectangles, not discs: a tumbling rectangle flashes edge-on as it spins,
+      // which is most of what makes confetti read as confetti.
+      ctx.fillRect(-slot.size / 2, -slot.size / 4, slot.size, slot.size / 2);
+      ctx.restore();
+    }
+    ctx.restore();
   }
 
   /**

@@ -50,6 +50,14 @@ export interface HudProps {
   readonly pruneMode: boolean;
   /** Toggle prune mode. Mirrors the P hotkey. */
   readonly onTogglePrune: () => void;
+  /** Whether the grafting knife is out. */
+  readonly graftMode: boolean;
+  /** Toggle graft mode. Mirrors the G hotkey. */
+  readonly onToggleGraft: () => void;
+  /** Whether the Journal is open. */
+  readonly journalOpen: boolean;
+  /** Toggle the Journal. Mirrors the J hotkey. */
+  readonly onToggleJournal: () => void;
 }
 
 /** React HUD overlay that sits above the full-screen canvas. */
@@ -58,7 +66,12 @@ export function Hud({
   onToggleTestProducers,
   pruneMode,
   onTogglePrune,
+  graftMode,
+  onToggleGraft,
+  journalOpen,
+  onToggleJournal,
 }: HudProps) {
+  const discovered = useGameStore((s) => s.snapshot.species.discovered.length);
   return (
     <div className="hud">
       <header className="hud-header">
@@ -76,6 +89,27 @@ export function Hud({
             onClick={onTogglePrune}
           >
             <span aria-hidden>✂</span> {pruneMode ? 'Pruning' : 'Prune'}
+          </button>
+          <button
+            type="button"
+            className="hud-toggle hud-toggle--graft"
+            aria-pressed={graftMode}
+            aria-keyshortcuts="G"
+            title="Graft mode (G) — join two limbs of different species into a hybrid"
+            onClick={onToggleGraft}
+          >
+            <span aria-hidden>🜋</span> {graftMode ? 'Grafting' : 'Graft'}
+          </button>
+          <button
+            type="button"
+            className="hud-toggle"
+            aria-pressed={journalOpen}
+            aria-keyshortcuts="J"
+            title="Journal (J) — species and hybrids"
+            onClick={onToggleJournal}
+          >
+            <span aria-hidden>📖</span> Journal
+            {discovered > 0 && <span className="hud-toggle__badge">{discovered}</span>}
           </button>
           <DaylightGauge />
           <HydrationGauge />

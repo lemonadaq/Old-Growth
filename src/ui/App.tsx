@@ -4,15 +4,19 @@ import { GameLoop } from '../engine/loop';
 import { Simulation } from '../engine/simulation';
 import { gameStore } from '../engine/store';
 import { formatNumber } from '../engine/format';
+import type { GraftAssessment } from '../engine/graft';
 import type { PricedGrowthOption } from '../engine/growth';
 import type { PruneQuote } from '../engine/prune';
 import { RESOURCE_BY_ID } from '../content/resources';
 import { enableTestProducers, disableTestProducers } from '../engine/debugProducers';
 import { Renderer } from '../render/canvas';
+import { GraftTooltip } from './GraftTooltip';
 import { GrowOptionTooltip } from './GrowOptionTooltip';
 import { Hud } from './Hud';
+import { Journal } from './Journal';
 import { LeafTooltip } from './LeafTooltip';
 import { PruneTooltip } from './PruneTooltip';
+import { Toast } from './Toast';
 import { Tooltip } from './Tooltip';
 import { UpgradePanel } from './UpgradePanel';
 import { Workshop } from './Workshop';
@@ -37,7 +41,23 @@ type HoverState =
       readonly y: number;
     }
   | { readonly kind: 'leaf'; readonly nodeId: string; readonly x: number; readonly y: number }
-  | { readonly kind: 'prune'; readonly quote: PruneQuote; readonly x: number; readonly y: number };
+  | { readonly kind: 'prune'; readonly quote: PruneQuote; readonly x: number; readonly y: number }
+  | {
+      readonly kind: 'graft';
+      readonly assessment: GraftAssessment;
+      readonly x: number;
+      readonly y: number;
+    };
+
+/** The one-off card a first-time hybrid throws up. */
+interface DiscoveryToast {
+  readonly title: string;
+  readonly body: string;
+  readonly glyph: string;
+  readonly color: string;
+  /** Bumped per discovery so a repeat of the same hybrid still re-fires. */
+  readonly key: number;
+}
 
 /** How far above the tap the Dew number is spawned, so it clears the "+N". */
 const DEW_LABEL_OFFSET_PX = 26;
@@ -51,12 +71,36 @@ export function App() {
   const rendererRef = useRef<Renderer | null>(null);
   const [testProducers, setTestProducers] = useState(false);
   const [pruneMode, setPruneMode] = useState(false);
+  const [graftMode, setGraftMode] = useState(false);
+  const [journalOpen, setJournalOpen] = useState(false);
+  const [toast, setToast] = useState<DiscoveryToast | null>(null);
   const [hover, setHover] = useState<HoverState | null>(null);
 
   // The input handlers are wired once, on mount, and must read the *current*
   // mode rather than the one that was in force when they were created.
   const pruneModeRef = useRef(false);
-  const togglePrune = useCallback(() => setPruneMode((on) => !on), []);
+  const graftModeRef = useRef(false);
+
+  // The two canvas modes are mutually exclusive: they are different intentions
+  // aimed at the same limb, and both live at once would make every click a guess.
+  const togglePrune = useCallback(
+    () =>
+      setPruneMode((on) => {
+        if (!on) setGraftMode(false);
+        return !on;
+      }),
+    [],
+  );
+  const toggleGraft = useCallback(
+    () =>
+      setGraftMode((on) => {
+        if (!on) setPruneMode(false);
+        return !on;
+      }),
+    [],
+  );
+  const toggleJournal = useCallback(() => setJournalOpen((open) => !open), []);
+  const dismissToast = useCallback(() => setToast(null), []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -78,6 +122,17 @@ export function App() {
     };
     syncTree(Date.now());
 
+    // The picker has to be hit-testable between frames, so the renderer holds
+    // the species list rather than being handed it per draw. Pushed only when it
+    // actually changes — an unlock or a chip click — not sixty times a second.
+    let speciesKey = '';
+    const syncSpecies = (snapshot: { species: { unlocked: readonly string[]; planting: string } }) => {
+      const key = `${snapshot.species.planting}|${snapshot.species.unlocked.join(',')}`;
+      if (key === speciesKey) return;
+      speciesKey = key;
+      renderer.setPlantableSpecies(snapshot.species.unlocked, snapshot.species.planting);
+    };
+
     /** Canvas-local point → viewport point, for positioning the DOM tooltip. */
     const toClient = (point: { x: number; y: number }) => {
       const rect = canvas.getBoundingClientRect();
@@ -97,6 +152,52 @@ export function App() {
     const clearPruneMark = () => {
       renderer.setPruneSelection(null);
       setHover(null);
+    };
+
+    // Graft mode needs two targets, so the first one has to survive between
+    // presses. It lives here rather than in React state because the input
+    // handlers are wired once and must never read a stale closure.
+    let graftFirstId: string | null = null;
+
+    const clearGraft = () => {
+      graftFirstId = null;
+      renderer.setGraftSelection(null);
+      setHover(null);
+    };
+
+    /**
+     * Mark what graft mode has picked and what it is pointing at, and assess the
+     * pair. Returns the assessment so the caller can decide whether to act on it.
+     */
+    const markGraft = (hoverId: string | null): GraftAssessment | null => {
+      const assessment =
+        graftFirstId && hoverId && hoverId !== graftFirstId
+          ? sim.graftQuote(graftFirstId, hoverId)
+          : null;
+      renderer.setGraftSelection({ firstId: graftFirstId, hoverId, assessment });
+      return assessment;
+    };
+
+    /** Execute a graft: confetti and a toast when it is the first of its kind. */
+    const performGraft = (aId: string, bId: string, at: { x: number; y: number }, now: number) => {
+      const result = sim.graft(aId, bId);
+      if (!result) return;
+
+      syncTree(now);
+      clearGraft();
+
+      renderer.effects.spawnFloatingNumber(at.x, at.y, `${result.hybrid.name}!`, true, now);
+
+      if (result.discovered) {
+        renderer.effects.spawnConfetti(at.x, at.y, now);
+        setToast({
+          title: `${result.hybrid.glyph} ${result.hybrid.name}`,
+          body: result.hybrid.flavor,
+          glyph: '❖',
+          color: result.hybrid.palette.bark,
+          key: now,
+        });
+      }
     };
 
     /**
@@ -175,6 +276,36 @@ export function App() {
       onPress: (point) => {
         const now = Date.now();
 
+        if (graftModeRef.current) {
+          const segment = renderer.hitTest(point);
+          const nodeId = segment?.id ?? null;
+
+          // A press on nothing puts the knife down without cutting anything —
+          // the same escape hatch prune mode gives.
+          if (!nodeId) {
+            clearGraft();
+            return true;
+          }
+
+          if (!graftFirstId) {
+            graftFirstId = nodeId;
+            markGraft(nodeId);
+            return true;
+          }
+
+          const assessment = markGraft(nodeId);
+          if (assessment?.ok) {
+            performGraft(graftFirstId, nodeId, point, now);
+          } else {
+            // Not a pair: treat the press as choosing a new first limb rather
+            // than as an error. Grafting is a two-target action and re-picking
+            // is the commonest thing a player will want to do.
+            graftFirstId = nodeId;
+            markGraft(nodeId);
+          }
+          return true;
+        }
+
         if (pruneModeRef.current) {
           const segment = renderer.hitTest(point);
           const nodeId = segment?.id ?? null;
@@ -204,6 +335,20 @@ export function App() {
 
         if (!renderer.isMenuArmed(now)) return false;
 
+        // The species picker sits inside the menu, so it gets the same arming
+        // delay and the same first refusal as the dials.
+        const chip = renderer.pickerChipAt(point);
+        if (chip) {
+          if (sim.setPlantingSpecies(chip)) {
+            const open = renderer.openMenuState;
+            // Prices, ghosts and production quotes all move with the species, so
+            // the menu is re-priced rather than merely re-tinted.
+            if (open) openMenuFor(open.nodeId, now);
+            renderer.hoverMenu(point);
+          }
+          return true;
+        }
+
         const priced = renderer.menuOptionAt(point);
         if (!priced) return false;
 
@@ -225,7 +370,10 @@ export function App() {
 
       onHit: (point) => {
         const now = Date.now();
-        const result = sim.click(now);
+        // Resolved before the tap, so the tap knows what wood it landed on — a
+        // limb's own species moves its click stats.
+        const struck = renderer.hitTest(point);
+        const result = sim.click(now, Math.random, struck?.id);
         renderer.effects.spawnHit(
           point.x,
           point.y,
@@ -248,8 +396,7 @@ export function App() {
         }
 
         // Every part of the tree is also its own upgrade button.
-        const segment = renderer.hitTest(point);
-        if (segment) openMenuFor(segment.id, now);
+        if (struck) openMenuFor(struck.id, now);
       },
 
       onMiss: closeMenu,
@@ -257,6 +404,17 @@ export function App() {
       onPointerMove: (point) => {
         renderer.setPointer(point);
         const client = toClient(point);
+
+        if (graftModeRef.current) {
+          const segment = renderer.hitTest(point);
+          const assessment = markGraft(segment?.id ?? null);
+          if (assessment) {
+            setHover({ kind: 'graft', assessment, x: client.x, y: client.y });
+          } else {
+            setHover(null);
+          }
+          return;
+        }
 
         if (pruneModeRef.current) {
           const segment = renderer.hitTest(point);
@@ -280,6 +438,7 @@ export function App() {
         }
 
         const priced = renderer.hoverMenu(point);
+        renderer.hoverPicker(point);
         if (priced) {
           setHover({ kind: 'option', priced, x: client.x, y: client.y });
           return;
@@ -297,7 +456,11 @@ export function App() {
       onPointerLeave: () => {
         renderer.setPointer(null);
         renderer.hoverMenu(null);
+        renderer.hoverPicker(null);
         if (pruneModeRef.current) renderer.setPruneSelection(null);
+        // The chosen limb is *kept* when the pointer leaves: a half-finished
+        // graft is a decision in progress, not a hover state.
+        if (graftModeRef.current) markGraft(null);
         setHover(null);
       },
 
@@ -326,8 +489,16 @@ export function App() {
       }
 
       if (event.key === 'Escape') {
-        // Escape backs out one layer at a time: an armed cut first, then the
-        // mode, then the grow menu.
+        // Escape backs out one layer at a time: a chosen limb first, then the
+        // mode; an armed cut first, then the mode; then the grow menu.
+        if (graftModeRef.current) {
+          if (renderer.graftMark?.firstId) {
+            clearGraft();
+          } else {
+            setGraftMode(false);
+          }
+          return;
+        }
         if (pruneModeRef.current) {
           if (renderer.pruneMark?.armed) {
             renderer.setPruneSelection(null);
@@ -342,6 +513,14 @@ export function App() {
       }
       if (event.key === 'p' || event.key === 'P') {
         togglePrune();
+        return;
+      }
+      if (event.key === 'g' || event.key === 'G') {
+        toggleGraft();
+        return;
+      }
+      if (event.key === 'j' || event.key === 'J') {
+        toggleJournal();
         return;
       }
       // Zoom from the keyboard, for mice with no pinch gesture to offer.
@@ -365,6 +544,7 @@ export function App() {
         const now = Date.now();
         syncTree(now);
         const snapshot = sim.snapshot(now);
+        syncSpecies(snapshot);
         gameStore.getState().setSnapshot(snapshot);
         renderer.draw(snapshot, alpha, now);
       },
@@ -389,15 +569,21 @@ export function App() {
       simRef.current = null;
       rendererRef.current = null;
     };
-  }, [togglePrune]);
+  }, [togglePrune, toggleGraft, toggleJournal]);
 
-  // Mirror prune mode into the places that cannot read React state: the input
-  // handlers (through a ref) and the renderer (which draws the mark).
+  // Mirror the canvas modes into the places that cannot read React state: the
+  // input handlers (through a ref) and the renderer (which draws the marks).
   useEffect(() => {
     pruneModeRef.current = pruneMode;
     rendererRef.current?.setPruneMode(pruneMode);
     setHover(null);
   }, [pruneMode]);
+
+  useEffect(() => {
+    graftModeRef.current = graftMode;
+    rendererRef.current?.setGraftMode(graftMode);
+    setHover(null);
+  }, [graftMode]);
 
   // Toggle the temporary debug producers on the live simulation.
   useEffect(() => {
@@ -422,16 +608,32 @@ export function App() {
     <div className="app">
       <canvas
         ref={canvasRef}
-        className={`app-canvas${pruneMode ? ' app-canvas--pruning' : ''}`}
+        className={`app-canvas${pruneMode ? ' app-canvas--pruning' : ''}${
+          graftMode ? ' app-canvas--grafting' : ''
+        }`}
       />
       <Hud
         testProducers={testProducers}
         onToggleTestProducers={() => setTestProducers((on) => !on)}
         pruneMode={pruneMode}
         onTogglePrune={togglePrune}
+        graftMode={graftMode}
+        onToggleGraft={toggleGraft}
+        journalOpen={journalOpen}
+        onToggleJournal={toggleJournal}
       />
       <Workshop onCraft={handleCraft} />
-      <UpgradePanel onBuy={handleBuy} />
+      {journalOpen ? <Journal /> : <UpgradePanel onBuy={handleBuy} />}
+      {toast && (
+        <Toast
+          key={toast.key}
+          title={toast.title}
+          body={toast.body}
+          glyph={toast.glyph}
+          color={toast.color}
+          onDismiss={dismissToast}
+        />
+      )}
       <Tooltip
         content={
           hover?.kind === 'option' ? (
@@ -440,6 +642,8 @@ export function App() {
             <LeafTooltip nodeId={hover.nodeId} />
           ) : hover?.kind === 'prune' ? (
             <PruneTooltip quote={hover.quote} />
+          ) : hover?.kind === 'graft' ? (
+            <GraftTooltip assessment={hover.assessment} />
           ) : null
         }
         x={hover?.x ?? 0}

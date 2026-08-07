@@ -80,6 +80,25 @@ export class ModifierSet {
   }
 }
 
+/**
+ * Separator between a scope and the tag it narrows.
+ *
+ * A scoped tag is an ordinary tag with a compound name: `species:cherry` plus
+ * `click.critChance` becomes `species:cherry::click.critChance`. Nothing in the
+ * modifier system treats it specially — it works because the *reader* asks for
+ * it. `resolveClickStats` looks up its plain stat tag and, for a tap that landed
+ * on cherry wood, that stat scoped to cherry as well.
+ *
+ * This is how a modifier can apply to one limb rather than the whole tree
+ * without the set having to support AND across targets.
+ */
+export const SCOPE_SEPARATOR = '::';
+
+/** Compose a scoped tag: `scope::tag`. */
+export function scopedTag(scope: string, tag: string): string {
+  return `${scope}${SCOPE_SEPARATOR}${tag}`;
+}
+
 function toDecimal(value: number | Decimal): Decimal {
   return value instanceof Decimal ? value : new Decimal(value);
 }

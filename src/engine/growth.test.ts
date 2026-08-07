@@ -49,7 +49,7 @@ describe('partProducer', () => {
     expect(producer).not.toBeNull();
     expect(producer?.id).toBe(partProducerId('leafCluster-7'));
     expect(producer?.resource).toBe('light');
-    expect(producer?.tags).toEqual(['canopy', 'leafCluster']);
+    expect(producer?.tags).toEqual(['canopy', 'leafCluster', 'species:oak', 'species:oak/light']);
   });
 
   it('returns nothing for structural parts', () => {
@@ -61,6 +61,8 @@ describe('partProducer', () => {
     expect(partProducer({ id: 'rootSegment-2', type: 'rootSegment' })?.tags).toEqual([
       'root',
       'rootSegment',
+      'species:oak',
+      'species:oak/water',
       'offline',
     ]);
   });

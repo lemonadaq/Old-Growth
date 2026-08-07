@@ -15,6 +15,164 @@ Do not refactor unrelated code.
 
 ## Changelog
 
+### 2026-08-07 — STEP 10: Species and grafting discovery
+
+Until now every part of the tree was made of the same anonymous wood. Now a part
+is made of *something*: six species you unlock and choose between, and fifteen
+hybrids you make at a fork by joining two limbs that grew there. The tree stops
+being one plant and starts being a collection of decisions you can see from
+across the screen.
+
+- `src/content/species.ts` — **new**. The six as data: palette (eleven colours,
+  all required), flavour, cost multipliers, unlock milestone, and traits. The
+  interesting part is that traits are declared **relative to the species** rather
+  than as raw modifier targets, through `SpeciesTraitTarget`:
+  - `ownProduction` — this species' parts, optionally one resource of them.
+  - `ownLimbClick` — taps landing on this species' wood.
+  - `ownTag` — any tag, scoped to this species; the general form of the above.
+  - `tree` — the whole tree, **scaled by this species' share of it**.
+  - `price` — publishes nothing; realised by the cost multipliers, and listed
+    only so the Journal can show Birch's discount as the trait it actually is.
+- `src/content/hybrids.ts` — **new**. All fifteen unordered pairs, keyed by
+  `pairKey`, each with its own palette, flavour, a **hint line for its
+  silhouette**, and effects no other entry has. Hybrid traits are local by rule —
+  a hybrid is a *place on the tree*, not another global percentage — and a test
+  enforces it.
+- `src/engine/species.ts` — **new**, and the whole system rides on producer
+  **tags**. A willow root registers carrying `species:willow` and
+  `species:willow/water`, so "willow's Water" is an ordinary tag-targeted
+  modifier and the economy never learns that species exist. The two-part tag is
+  load-bearing: `ModifierSet.matching` matches a producer by resource *or* by
+  tag and never by both, so the conjunction has to live in a tag name.
+- `src/engine/modifiers.ts` — `scopedTag(scope, tag)` (`species:cherry` +
+  `click.critChance` → `species:cherry::click.critChance`). Nothing in the
+  modifier system treats it specially; it works because the **reader** asks for
+  it. `resolveClickStats(modifiers, scopes)` takes the struck limb's species, so
+  Ironblossom's "×1.5 crit damage **on that limb**" is real rather than a
+  rounding of itself into a global bonus. `Simulation.click` now takes the node
+  id the tap landed on; omitting it resolves the tree-wide stats, which is what
+  the HUD readout should show.
+- `src/engine/graft.ts` — **new**. `quoteGraft` is a pure read that returns
+  either a full quote or **one named refusal** (`not-adjacent`, `immature`,
+  `same-species`, `no-hybrid`…), checked in the order a player meets them.
+  Adjacency means parent-and-child — a graft happens at a fork the tree already
+  has — and the **scion** (the upper limb) takes the hybrid along with everything
+  it carries, the way a real graft puts the scion's wood on the rootstock's
+  roots.
+- `src/engine/treeGraph.ts` — a per-species tally maintained alongside the
+  per-type one, and `respeciate(nodeId, speciesId)`, which **replaces** nodes
+  rather than mutating them: nodes are handed out by reference all over the
+  renderer, and one whose species changed under a consumer that had already read
+  it would be a bug with no stack trace.
+- `src/engine/growth.ts` — `partCost` takes a species and applies its price break
+  to the **list price, before** the `growth.cost` modifiers, so a cheap species
+  and a growth buff compose instead of one swallowing the other.
+  `priceGrowthOptions` prices the whole menu as whatever the picker is showing.
+- `src/render/speciesPicker.ts` — **new**. A row of chips hanging off the grow
+  menu's anchor on the **opposite side from the dials** (under a canopy menu,
+  over a root menu), each filled with its species' own bark so the row reads as a
+  set of woods rather than a set of buttons. Pure layout + hit-test, tested
+  without a canvas. It appears only at `PICKER_MIN_SPECIES` (2): a picker
+  offering one option is a control that cannot do anything.
+- `src/render/graft.ts` — **new**. The chosen limb stays outlined the whole time
+  the player is looking for the second one; the hovered limb is outlined **green
+  when the pair works and red when it does not**, so the adjacency rule is
+  learned by pointing rather than by reading. Deliberately not prune's red wash —
+  cutting and joining must never look alike.
+- `src/render/tree.ts` — `woodColor(kind, speciesId)` and per-species foliage and
+  blossoms. **This closes STEP 4's open TODO** ("bark colour per species; species
+  do not exist until STEP 10").
+- `src/render/effects.ts` — `spawnConfetti`: a pooled, ballistic burst on a
+  cone rather than a sphere (a fountain reads as celebration, a sphere as an
+  explosion). Longest-lived effect in the game on purpose — it fires a few dozen
+  times in a whole run.
+- `src/ui/Journal.tsx` + `.css` — **new**. Six species with their traits and, while
+  locked, the milestone and a progress bar; fifteen hybrids of which the
+  undiscovered are silhouettes carrying their **parent pair and one line of
+  hint**. Naming the parents is deliberate: the table is deterministic, so a
+  player reading the grid can go and *make* the one they want instead of grafting
+  at random. Dormant traits are greyed and say what they are waiting for.
+- `src/ui/Toast.tsx`, `src/ui/GraftTooltip.tsx` — **new**. The toast fires once
+  per never-before-made hybrid and dismisses itself. The tooltip always gives a
+  *sentence* rather than a greyed-out silence.
+- `src/ui/App.tsx` — graft mode (**G**), the Journal (**J**), the picker's click
+  path, and Escape backing out a chosen limb before the mode. Prune and graft
+  turn each other off: two intentions aimed at the same limb must never both be
+  live.
+- Tests: **575 pass** (up from 490). New `species.test.ts` (32 — the complete
+  15-pair table, order-independence, distinct effects, the local-only rule for
+  hybrids, tag composition, share dilution, unlock thresholds and progress, and
+  click scoping), `graft.test.ts` (16 — cost escalation, maturity, adjacency both
+  ways round, and every refusal), `render/speciesPicker.test.ts` (11).
+  `simulation.test.ts` gained 12 across planting, per-species pricing and output,
+  the full graft transaction, discovery bookkeeping and the hybrid's effect
+  landing on its limb and nowhere else; `treeGraph.test.ts` 7; `render/tree.test.ts`
+  4; `render/effects.test.ts` 3.
+- Verified in a real browser (Chromium/Playwright, 1280×800, production build):
+  60 taps → **171.86 Sap**; the Journal shows **21 cards, 15 of them silhouettes
+  and 5 locked species**, with dormant traits greyed and milestones quoted; **G**
+  toggles graft mode (button `aria-pressed`, `app-canvas--grafting` cursor) and
+  Escape leaves it. A separate render harness (dev server, deleted before commit)
+  drew a four-species tree with a grafted Ghostwood limb: the picker rendered six
+  chips in their own barks with **Cherry selected and its blossom priced at 30
+  against a list 60** — the species discount reaching the menu label — and the
+  graft overlay showed green on the held limb, red on a non-adjacent one, with
+  confetti over the top. No page errors beyond the pre-existing favicon 404.
+
+**Design decisions worth knowing**
+
+- **Oak's Sap bonus is local, not tree-wide, and that was a correction.** Written
+  as a whole-tree trait it was baked into the baseline — a new tree is *entirely*
+  oak — and it then read as a **penalty for planting anything else**: taps
+  quietly weakening as the player diversified, with nothing on screen explaining
+  why. Scoped to oak wood it is a reason to keep tapping the trunk. (It also
+  moved every click number in the game by 15%, which broke thirteen tests from
+  STEPs 5–9 — the tests were the symptom, the trap was the reason.)
+- **Whole-tree traits are diluted by share** (`1 + (value − 1) × share`), so
+  every live trait today is local and only the dormant resistances are tree-wide.
+  That is the shape STEP 12's seasons and weather want, and it is fully tested
+  even though no live trait uses it yet.
+- **The trunk counts toward the species tally.** It is a part of the tree like
+  any other, and counting it makes Oak the identity a player has to actively
+  dilute rather than a free extra — which is what being the starter should mean.
+- **Unlock gating lives in `setPlantingSpecies`, not in `growPart`.** One choke
+  point, at the one place the player expresses the choice; `growPart` takes the
+  species it is given the way it takes the node it is given. It does refuse a
+  hybrid, which is made at a fork and never bought from a menu.
+- **A graft needs both limbs to carry something of their own.** Without the
+  maturity rule grafting is "buy two branches, press the button" — no placement,
+  no patience, no decision.
+- **Discovery survives the limb.** Pruning a hybrid off drops it from the tally
+  but not from the Journal: the Journal is a record of the save, and (from STEP
+  13) of everything before it.
+- **Prune refunds are still quoted at list price**, species-agnostic. A birch
+  limb therefore refunds less than the fraction of what it cost — 57% of it
+  rather than 40% — which is a loss either way, so there is no exploit, but the
+  asymmetry is deliberate and worth knowing.
+
+**Open TODOs**
+
+- [ ] **The discovery toast's React wiring is not covered in the browser run.**
+      The engine half (`discovered === true` on a first graft) and the confetti
+      are; triggering the real toast needs a graft driven through canvas clicks,
+      which needs the limb coordinates the harness has and the app does not
+      expose. A dev-only handle on the renderer would make the whole flow
+      scriptable and is probably worth it before STEP 13's prestige ceremony.
+- [ ] Species traits are first-pass numbers, and Pine's "everything +12%" is the
+      one identity that is a number rather than a mechanic. STEP 19 owns balance;
+      it may also want to look at whether Birch's −30%/−15% is ever the right
+      trade.
+- [ ] Nothing persists (STEP 15): `plantingSpecies`, `discoveries` and `grafts`
+      are in `GameState` and snapshotted, and `republishSpecies()` is the
+      rehydrate hook, but a reload starts again.
+- [ ] The picker has no keyboard path and no touch variant (STEP 18), and the
+      chip row can overlap a crowded canopy.
+- [ ] A grafted limb cannot be grafted again — deliberate (`no-hybrid`), but it
+      means a three-species limb is impossible. If second-generation hybrids are
+      ever wanted, the table is the only thing that needs extending.
+- [ ] Everything STEP 9 left open below still stands, except STEP 4's per-species
+      bark, which this step closes.
+
 ### 2026-08-07 — STEP 9: Pruning, Deadwood and apical dominance
 
 Growing has been one-way since STEP 6: every part bought was a part kept, so a

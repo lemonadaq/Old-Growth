@@ -8,9 +8,11 @@ import {
   growProgress,
   isSegmentVisible,
   swayOffset,
+  woodColor,
   GROW_ANIM_MS,
   shadeTint,
 } from './tree';
+import { SPECIES_BY_ID } from '../content/species';
 
 /** A grown tree with canopy and roots, so the layout has both halves to fit. */
 function demoTree() {
@@ -248,5 +250,31 @@ describe('shadeTint', () => {
 
   it('does not brighten a blossom-boosted leaf', () => {
     expect(shadeTint(1.5)).toBe(0);
+  });
+});
+
+describe('woodColor', () => {
+  it('draws a limb in its own species’ wood', () => {
+    expect(woodColor('branch', 'birch')).toBe(SPECIES_BY_ID.birch.palette.branch);
+    expect(woodColor('branch', 'cherry')).toBe(SPECIES_BY_ID.cherry.palette.branch);
+  });
+
+  it('gives every part type of a species a colour from that species', () => {
+    const palette = SPECIES_BY_ID.willow.palette;
+    expect(woodColor('trunk', 'willow')).toBe(palette.bark);
+    expect(woodColor('twig', 'willow')).toBe(palette.twig);
+    expect(woodColor('rootSegment', 'willow')).toBe(palette.root);
+    expect(woodColor('rootTip', 'willow')).toBe(palette.rootTip);
+  });
+
+  it('draws a hybrid as neither of its parents', () => {
+    const hybrid = woodColor('branch', 'ghostwood');
+    expect(hybrid).not.toBe(woodColor('branch', 'oak'));
+    expect(hybrid).not.toBe(woodColor('branch', 'birch'));
+  });
+
+  it('falls back to the starter for an unspecified or unknown species', () => {
+    expect(woodColor('branch')).toBe(SPECIES_BY_ID.oak.palette.branch);
+    expect(woodColor('branch', 'nonesuch')).toBe(SPECIES_BY_ID.oak.palette.branch);
   });
 });

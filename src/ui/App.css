@@ -16,3 +16,8 @@
 .app-canvas--pruning {
   cursor: crosshair;
 }
+
+/* Graft mode is a different kind of two-step click, and says so the same way. */
+.app-canvas--grafting {
+  cursor: cell;
+}

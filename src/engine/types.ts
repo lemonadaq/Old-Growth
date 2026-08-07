@@ -7,6 +7,7 @@ import { createComboState, type ComboState } from './combo';
 import { dayCycle, type DayCycle } from './daylight';
 import type { Producer } from './economy';
 import { computeHydration, type HydrationState } from './hydration';
+import { STARTER_SPECIES_ID } from '../content/species';
 import { lightFactorAt, type LeafExposure } from './light';
 import { ModifierSet } from './modifiers';
 import { ResourceRegistry } from './resourceRegistry';
@@ -60,6 +61,18 @@ export interface GameState {
   buffs: BuffLedger;
   /** Totems planted at the tree base, in slot order. */
   totems: string[];
+  /** The species new parts are grown as — whatever the picker is showing. */
+  plantingSpecies: string;
+  /**
+   * Hybrids the player has ever made, by id.
+   *
+   * Discovery is knowledge, not inventory: it survives the limb being pruned,
+   * and (from STEP 13) it will survive prestige, which is what makes the Journal
+   * a record of the whole save rather than of the current tree.
+   */
+  discoveries: Set<string>;
+  /** Lifetime count of grafts made; prices the next one. */
+  grafts: number;
   /** Lifetime count of successful taps on the tree. */
   clicks: number;
   /** Lifetime count of limbs cut. */
@@ -107,6 +120,32 @@ export interface BuffSnapshot {
   readonly fraction: number;
 }
 
+/** One species' availability, as the picker and the Journal read it. */
+export interface SpeciesUnlockSnapshot {
+  readonly id: string;
+  readonly unlocked: boolean;
+  /** Progress toward the milestone, in `[0, 1]`. */
+  readonly fraction: number;
+  /** One line naming what is still needed. */
+  readonly hint: string;
+}
+
+/** Everything the UI needs to know about what the tree is made of. */
+export interface SpeciesSnapshot {
+  /** What new parts are being grown as. */
+  readonly planting: string;
+  /** Base species available to plant, in catalogue order. */
+  readonly unlocked: readonly string[];
+  /** Every base species with its unlock state, for the Journal. */
+  readonly unlocks: readonly SpeciesUnlockSnapshot[];
+  /** Parts per species currently on the tree, trunk included. */
+  readonly counts: ReadonlyMap<string, number>;
+  /** Hybrid ids the player has ever made. */
+  readonly discovered: readonly string[];
+  /** Lifetime grafts made. */
+  readonly grafts: number;
+}
+
 /** One upgrade's purchase state, resolved against the player's balance. */
 export interface UpgradeSnapshot {
   readonly id: string;
@@ -148,6 +187,8 @@ export interface GameSnapshot {
   readonly buffs: readonly BuffSnapshot[];
   /** Totems planted at the tree base, in slot order. */
   readonly totems: readonly string[];
+  /** What the tree is made of, and what the player may plant next. */
+  readonly species: SpeciesSnapshot;
   /** Lifetime count of successful taps on the tree. */
   readonly clicks: number;
   /** Lifetime count of limbs cut. */
@@ -189,6 +230,9 @@ export function createInitialState(now: number = Date.now()): GameState {
     upgrades: new UpgradeLedger(),
     buffs: new BuffLedger(),
     totems: [],
+    plantingSpecies: STARTER_SPECIES_ID,
+    discoveries: new Set(),
+    grafts: 0,
     clicks: 0,
     prunes: 0,
     tick: 0,

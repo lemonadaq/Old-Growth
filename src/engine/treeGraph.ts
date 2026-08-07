@@ -4,6 +4,7 @@ import {
   type GrowthRule,
   type TreeNodeType,
 } from '../content/growth';
+import { STARTER_SPECIES_ID } from '../content/species';
 import type { Vec2 } from './geometry';
 import { createSeededRandom } from './rng';
 import type { TreeSegment } from './tree';
@@ -34,8 +35,13 @@ export const TRUNK_DIRECTION = Math.PI / 2;
 /** Canonical heading roots leave the trunk on: straight down. */
 export const ROOT_DIRECTION = -Math.PI / 2;
 
-/** Species every part starts as until STEP 10 introduces the rest. */
-export const DEFAULT_SPECIES_ID = 'oak';
+/**
+ * Species a part is grown as when the caller names none.
+ *
+ * Re-exported from the species catalogue rather than restated, so the trunk of a
+ * new tree and the starter species can never drift apart.
+ */
+export const DEFAULT_SPECIES_ID = STARTER_SPECIES_ID;
 
 /** Seed behind the deterministic angle wobble. */
 export const DEFAULT_TREE_SEED = 20260806;
@@ -285,6 +291,7 @@ export function placeOption(parent: NodePlacement, option: GrowthOption): NodePl
 export class TreeGraph {
   private readonly nodes = new Map<string, TreeNode>();
   private readonly counts = new Map<TreeNodeType, number>();
+  private readonly speciesTally = new Map<string, number>();
   private nextId = 1;
 
   /** Bumped on every grow/prune, so consumers can cache derived geometry. */
@@ -332,6 +339,17 @@ export class TreeGraph {
   private insert(node: TreeNode): void {
     this.nodes.set(node.id, node);
     this.counts.set(node.type, (this.counts.get(node.type) ?? 0) + 1);
+    this.tallySpecies(node.speciesId, 1);
+  }
+
+  /** Keep the per-species tally in step. Zeroed entries are dropped entirely. */
+  private tallySpecies(speciesId: string, delta: number): void {
+    const next = (this.speciesTally.get(speciesId) ?? 0) + delta;
+    if (next > 0) {
+      this.speciesTally.set(speciesId, next);
+    } else {
+      this.speciesTally.delete(speciesId);
+    }
   }
 
   /** Id of the trunk. */
@@ -371,6 +389,41 @@ export class TreeGraph {
   /** How many parts of a type the tree currently carries. Drives pricing. */
   countOfType(type: TreeNodeType): number {
     return this.counts.get(type) ?? 0;
+  }
+
+  /**
+   * How many parts of each species the tree carries, trunk included. Drives the
+   * share a whole-tree species trait is worth.
+   */
+  countBySpecies(): ReadonlyMap<string, number> {
+    return this.speciesTally;
+  }
+
+  /**
+   * Re-species `nodeId` and everything hanging off it, returning the nodes that
+   * changed. This is what a graft does: the scion and every part it carries
+   * become the hybrid.
+   *
+   * Nodes are replaced rather than mutated — they are handed out by reference
+   * all over the renderer, and a node whose species changed under a consumer
+   * that had already read it would be a bug with no stack trace. Bumps the
+   * revision, so producers and projections are rebuilt.
+   */
+  respeciate(nodeId: string, speciesId: string): TreeNode[] {
+    const affected = this.subtree(nodeId).filter((node) => node.speciesId !== speciesId);
+    if (affected.length === 0) return [];
+
+    const updated: TreeNode[] = [];
+    for (const node of affected) {
+      this.tallySpecies(node.speciesId, -1);
+      const next: TreeNode = { ...node, speciesId };
+      this.nodes.set(node.id, next);
+      this.tallySpecies(speciesId, 1);
+      updated.push(next);
+    }
+
+    this.version += 1;
+    return updated;
   }
 
   /** Derived world positions, memoised until the next structural change. */
@@ -518,6 +571,7 @@ export class TreeGraph {
     for (const doomed of removed) {
       this.nodes.delete(doomed.id);
       this.counts.set(doomed.type, Math.max(0, (this.counts.get(doomed.type) ?? 0) - 1));
+      this.tallySpecies(doomed.speciesId, -1);
     }
 
     this.version += 1;
@@ -542,6 +596,7 @@ export class TreeGraph {
       segments.push({
         id: node.id,
         kind: node.type,
+        speciesId: node.speciesId,
         depth: node.level,
         a: placement.start,
         b: placement.end,

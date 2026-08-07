@@ -12,7 +12,10 @@ import { DAY_LENGTH_SECONDS } from '../content/daylight';
 import { dayCycle } from './daylight';
 import type { Vec2 } from './geometry';
 import { HYDRATION_SOURCE } from './hydration';
+import { graftCost } from './graft';
 import { partProducerId } from './growth';
+import { STARTER_SPECIES_ID } from '../content/species';
+import type { TreeNode } from './treeGraph';
 import { DAYLIGHT_SOURCE, lightFactorAt } from './light';
 import { BARREN_SOIL, depthAt, depthMultiplier } from './soil';
 
@@ -768,5 +771,219 @@ describe('the dawn Dew', () => {
       before + result.gain.toNumber() + (result.dew?.toNumber() ?? 0),
       9,
     );
+  });
+});
+
+describe('species and grafting', () => {
+  /** Sap and Water enough to build and join whatever a test needs. */
+  function funded(amount = 5000): Simulation {
+    const sim = new Simulation();
+    sim.state.resources.add('sap', new Decimal(amount));
+    sim.state.resources.add('water', new Decimal(amount));
+    return sim;
+  }
+
+  /**
+   * A rootstock and a scion of different species, each carrying a leaf, which is
+   * the minimum shape a graft is allowed to happen on.
+   */
+  function graftable(sim: Simulation, lowerSpecies = 'oak', upperSpecies = 'birch') {
+    const lower = sim.growPart(sim.state.tree.rootId, 'branch', lowerSpecies) as TreeNode;
+    const upper = sim.growPart(lower.id, 'branch', upperSpecies) as TreeNode;
+    sim.growPart(lower.id, 'leafCluster', lowerSpecies);
+    sim.growPart(upper.id, 'leafCluster', upperSpecies);
+    return { lower, upper };
+  }
+
+  it('starts planting the starter species, with nothing else on offer', () => {
+    const sim = new Simulation();
+    expect(sim.state.plantingSpecies).toBe(STARTER_SPECIES_ID);
+    expect(sim.unlockedSpecies()).toEqual([STARTER_SPECIES_ID]);
+    expect(sim.snapshot(0).species.planting).toBe(STARTER_SPECIES_ID);
+  });
+
+  it('refuses to plant a species that is still locked', () => {
+    const sim = new Simulation();
+    expect(sim.setPlantingSpecies('cherry')).toBe(false);
+    expect(sim.state.plantingSpecies).toBe(STARTER_SPECIES_ID);
+  });
+
+  it('lets a species be planted once its milestone is met', () => {
+    const sim = funded();
+    // Birch opens at 8 grown parts.
+    let parent = sim.state.tree.rootId;
+    for (let i = 0; i < 8; i += 1) {
+      const node = sim.growPart(parent, 'branch');
+      if (node) parent = node.id;
+    }
+
+    expect(sim.unlockedSpecies()).toContain('birch');
+    expect(sim.setPlantingSpecies('birch')).toBe(true);
+    expect(sim.growPart(parent, 'leafCluster')?.speciesId).toBe('birch');
+  });
+
+  it('never plants a hybrid from the grow menu', () => {
+    const sim = funded();
+    expect(sim.growPart(sim.state.tree.rootId, 'branch', 'ghostwood')).toBeNull();
+    expect(sim.state.tree.size).toBe(1);
+  });
+
+  it('charges a birch part less than an oak one', () => {
+    const oak = funded();
+    const birch = funded();
+
+    const before = oak.state.resources.amount('sap');
+    oak.growPart(oak.state.tree.rootId, 'branch', 'oak');
+    const oakSpend = before.sub(oak.state.resources.amount('sap')).toNumber();
+
+    birch.growPart(birch.state.tree.rootId, 'branch', 'birch');
+    const birchSpend = before.sub(birch.state.resources.amount('sap')).toNumber();
+
+    expect(birchSpend).toBeCloseTo(oakSpend * 0.7, 6);
+  });
+
+  it("scales a leaf's output by the species that grew it", () => {
+    const oak = funded();
+    const maple = funded();
+    const branchA = oak.growPart(oak.state.tree.rootId, 'branch', 'oak') as TreeNode;
+    const branchB = maple.growPart(maple.state.tree.rootId, 'branch', 'oak') as TreeNode;
+
+    const leafA = oak.growPart(branchA.id, 'leafCluster', 'oak') as TreeNode;
+    const leafB = maple.growPart(branchB.id, 'leafCluster', 'maple') as TreeNode;
+
+    const rateA = oak.state.producers.get(partProducerId(leafA.id))?.baseRate ?? 0;
+    const rateB = maple.state.producers.get(partProducerId(leafB.id))?.baseRate ?? 0;
+
+    // Same position, same shade: the whole difference is maple's broad leaves.
+    expect(Number(rateB)).toBeCloseTo(Number(rateA), 9);
+    oak.tick(1);
+    maple.tick(1);
+    expect(maple.state.resources.perSecond('light').toNumber()).toBeCloseTo(
+      oak.state.resources.perSecond('light').toNumber() * 1.25,
+      6,
+    );
+  });
+
+  it('pays more for a tap on oak wood than on birch', () => {
+    const sim = funded();
+    const birch = sim.growPart(sim.state.tree.rootId, 'branch', 'birch') as TreeNode;
+
+    const onOak = sim.click(0, NEVER_CRIT, sim.state.tree.rootId).gain.toNumber();
+    const onBirch = sim.click(0, NEVER_CRIT, birch.id).gain.toNumber();
+
+    // Same combo state on both taps; the difference is the wood.
+    expect(onOak).toBeGreaterThan(onBirch);
+  });
+
+  it('grafts two adjacent limbs into the hybrid the table names', () => {
+    const sim = funded();
+    const { lower, upper } = graftable(sim);
+
+    const result = sim.graft(lower.id, upper.id);
+    expect(result).not.toBeNull();
+    expect(result?.hybrid.id).toBe('ghostwood');
+    expect(result?.discovered).toBe(true);
+
+    // The scion and everything it carries; the rootstock untouched.
+    expect(sim.state.tree.node(upper.id)?.speciesId).toBe('ghostwood');
+    expect(sim.state.tree.node(lower.id)?.speciesId).toBe('oak');
+    for (const child of sim.state.tree.children(upper.id)) {
+      expect(child.speciesId).toBe('ghostwood');
+    }
+  });
+
+  it('charges the graft and refuses one it cannot pay for', () => {
+    const sim = funded();
+    const { lower, upper } = graftable(sim);
+
+    const sapBefore = sim.state.resources.amount('sap');
+    const waterBefore = sim.state.resources.amount('water');
+    const quote = sim.graftQuote(lower.id, upper.id);
+    expect(quote.ok).toBe(true);
+    if (!quote.ok) return;
+
+    sim.graft(lower.id, upper.id);
+    for (const line of quote.costs) {
+      const before = line.resource === 'sap' ? sapBefore : waterBefore;
+      expect(sim.state.resources.amount(line.resource).toNumber()).toBeCloseTo(
+        before.sub(line.amount).toNumber(),
+        6,
+      );
+    }
+
+    // Enough to build the pair, nothing left to join it with.
+    const broke = funded(200);
+    const pair = graftable(broke);
+    broke.state.resources.add('sap', broke.state.resources.amount('sap').neg());
+    broke.state.resources.add('water', broke.state.resources.amount('water').neg());
+    expect(broke.graft(pair.lower.id, pair.upper.id)).toBeNull();
+    expect(broke.state.tree.node(pair.upper.id)?.speciesId).toBe('birch');
+  });
+
+  it('records the discovery once, and prices the next graft higher', () => {
+    const sim = funded(50000);
+    const first = graftable(sim);
+    sim.graft(first.lower.id, first.upper.id);
+
+    expect(sim.state.discoveries.has('ghostwood')).toBe(true);
+    expect(sim.state.grafts).toBe(1);
+    expect(sim.snapshot(0).species.discovered).toEqual(['ghostwood']);
+
+    // A second pair of the same two species makes the same hybrid, but it is no
+    // longer news — and it costs more.
+    const lower = sim.growPart(sim.state.tree.rootId, 'branch', 'oak') as TreeNode;
+    const upper = sim.growPart(lower.id, 'branch', 'birch') as TreeNode;
+    sim.growPart(lower.id, 'leafCluster', 'oak');
+    sim.growPart(upper.id, 'leafCluster', 'birch');
+
+    const second = sim.graftQuote(lower.id, upper.id);
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.firstDiscovery).toBe(false);
+    expect(second.costs[0].amount.toNumber()).toBeGreaterThan(graftCost(0)[0].amount.toNumber());
+
+    sim.graft(lower.id, upper.id);
+    expect(sim.snapshot(0).species.discovered).toEqual(['ghostwood']);
+    expect(sim.state.grafts).toBe(2);
+  });
+
+  it('puts the hybrid’s trait on the limb, and only on that limb', () => {
+    const sim = funded(50000);
+    const { lower, upper } = graftable(sim, 'oak', 'birch');
+    const scionLeaf = sim.state.tree
+      .children(upper.id)
+      .find((node) => node.type === 'leafCluster') as TreeNode;
+    const rootstockLeaf = sim.state.tree
+      .children(lower.id)
+      .find((node) => node.type === 'leafCluster') as TreeNode;
+
+    const before = sim.state.producers.get(partProducerId(scionLeaf.id))?.baseRate ?? 0;
+    sim.graft(lower.id, upper.id);
+    sim.tick(0.1);
+
+    const scionRate = sim.state.leafLight.get(scionLeaf.id)?.rate.toNumber() ?? 0;
+    const rootstockRate = sim.state.leafLight.get(rootstockLeaf.id)?.rate.toNumber() ?? 0;
+
+    // Ghostwood is +20% on everything the limb makes, against the oak
+    // rootstock's leaf at ×1. The producer's *base* rate is untouched: the
+    // species rides the modifier pipeline, exactly as daylight and totems do.
+    expect(Number(sim.state.producers.get(partProducerId(scionLeaf.id))?.baseRate)).toBeCloseTo(
+      Number(before),
+      9,
+    );
+    expect(scionRate).toBeGreaterThan(rootstockRate);
+    expect(scionRate / rootstockRate).toBeCloseTo(1.2, 4);
+  });
+
+  it('takes a hybrid’s parts out of the tally when the limb is pruned', () => {
+    const sim = funded(50000);
+    const { lower, upper } = graftable(sim);
+    sim.graft(lower.id, upper.id);
+    expect(sim.state.tree.countBySpecies().get('ghostwood')).toBe(2);
+
+    sim.prunePart(upper.id);
+    expect(sim.state.tree.countBySpecies().has('ghostwood')).toBe(false);
+    // The discovery survives the limb: the Journal is a record of the save.
+    expect(sim.state.discoveries.has('ghostwood')).toBe(true);
   });
 });

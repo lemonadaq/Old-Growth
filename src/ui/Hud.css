@@ -53,6 +53,24 @@
   background: rgba(120, 34, 26, 0.7);
 }
 
+.hud-toggle--graft[aria-pressed='true'] {
+  color: #e2ffe8;
+  border-color: #8fd694;
+  background: rgba(30, 84, 44, 0.7);
+}
+
+/* Count of hybrids found, so the Journal advertises that it has filled up. */
+.hud-toggle__badge {
+  margin-left: 4px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: #2a1d10;
+  background: var(--hud-accent);
+  border-radius: 8px;
+}
+
 .hud-title {
   margin: 0;
   font-size: 20px;

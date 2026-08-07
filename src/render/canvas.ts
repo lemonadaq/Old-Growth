@@ -33,14 +33,23 @@ import {
   hitTestRadialMenu,
   isMenuArmed,
   layoutRadialMenu,
+  MENU_ARM_MS,
   type RadialMenuState,
 } from './radialMenu';
+import { PICKER_MIN_SPECIES } from '../content/species';
 import {
   drawPruneConfirm,
   drawPruneMark,
   markedPoints,
   type PruneSelection,
 } from './prune';
+import { drawGraftBadge, drawGraftMark, type GraftSelection } from './graft';
+import {
+  drawSpeciesPicker,
+  hitTestSpeciesPicker,
+  layoutSpeciesPicker,
+  type SpeciesChip,
+} from './speciesPicker';
 import { drawBackdrop } from './sky';
 import { drawTotems } from './totems';
 import { computeTreeLayout, drawGhostPart, drawTree } from './tree';
@@ -96,6 +105,17 @@ export class Renderer {
   private pruning = false;
   /** The subtree currently marked for cutting, if any. */
   private pruneSelection: PruneSelection | null = null;
+
+  /** Whether the knife is out. Graft mode owns every press while it is on. */
+  private grafting = false;
+  /** The limbs graft mode has picked and is pointing at. */
+  private graftSelection: GraftSelection | null = null;
+
+  /** Species the picker offers, and the one it is showing as chosen. */
+  private plantable: readonly string[] = [];
+  private planting = '';
+  private chips: readonly SpeciesChip[] = [];
+  private hoveredChip: number | null = null;
 
   /** Latest pointer position in CSS px, or `null` when the pointer has left. */
   private pointer: Vec2 | null = null;
@@ -168,6 +188,48 @@ export class Renderer {
     };
     this.hoveredItem = null;
     this.ghost = null;
+    this.layoutPicker();
+  }
+
+  /**
+   * Tell the renderer which species may be planted and which one is chosen.
+   *
+   * Kept here rather than passed per frame because it changes rarely (an unlock,
+   * a click on a chip) while the picker has to be hit-testable between frames.
+   */
+  setPlantableSpecies(unlocked: readonly string[], planting: string): void {
+    this.plantable = unlocked;
+    this.planting = planting;
+    this.layoutPicker();
+  }
+
+  /**
+   * Hang the picker off the open menu. Empty whenever there is no menu, or when
+   * there is nothing to choose between — a picker with one chip is a control
+   * that cannot do anything.
+   */
+  private layoutPicker(): void {
+    if (!this.menu || this.plantable.length < PICKER_MIN_SPECIES) {
+      this.chips = [];
+      this.hoveredChip = null;
+      return;
+    }
+    const rootward =
+      this.menuOptions.length > 0 && this.menuOptions.every((o) => o.rule.domain === 'root');
+    this.chips = layoutSpeciesPicker(this.menu.center, this.plantable, rootward);
+  }
+
+  /** The species chip under `point`, or `null`. */
+  pickerChipAt(point: Vec2): string | null {
+    const index = hitTestSpeciesPicker(point, this.chips);
+    return index === null ? null : this.chips[index].speciesId;
+  }
+
+  /** Highlight the chip under the pointer. Returns the species hovered, if any. */
+  hoverPicker(point: Vec2 | null): string | null {
+    const index = point === null ? null : hitTestSpeciesPicker(point, this.chips);
+    this.hoveredChip = index;
+    return index === null ? null : this.chips[index].speciesId;
   }
 
   /** Close the grow menu and drop any preview. */
@@ -176,6 +238,8 @@ export class Renderer {
     this.menuOptions = [];
     this.hoveredItem = null;
     this.ghost = null;
+    this.chips = [];
+    this.hoveredChip = null;
   }
 
   /**
@@ -197,6 +261,7 @@ export class Renderer {
       center: anchor,
       items: layoutRadialMenu(anchor, this.menuOptions),
     };
+    this.layoutPicker();
   }
 
   /** The open menu, if any. */
@@ -240,6 +305,31 @@ export class Renderer {
     this.pruning = on;
     this.pruneSelection = null;
     if (on) this.closeMenu();
+  }
+
+  /**
+   * Turn graft mode on or off. Like prune mode it closes the grow menu: three
+   * different intentions on one limb must never be live at once.
+   */
+  setGraftMode(on: boolean): void {
+    this.grafting = on;
+    this.graftSelection = null;
+    if (on) this.closeMenu();
+  }
+
+  /** Whether the knife is out. */
+  get isGrafting(): boolean {
+    return this.grafting;
+  }
+
+  /** Set what graft mode has picked and is pointing at, or clear it with `null`. */
+  setGraftSelection(selection: GraftSelection | null): void {
+    this.graftSelection = selection;
+  }
+
+  /** What graft mode currently has picked, if anything. */
+  get graftMark(): GraftSelection | null {
+    return this.graftSelection;
   }
 
   /** Whether the scissors are out. */
@@ -384,6 +474,9 @@ export class Renderer {
       {
         id: `ghost:${this.ghost.option.type}`,
         kind: this.ghost.option.type,
+        // The preview is drawn in the wood the purchase would actually be made
+        // of, so the picker's effect is visible before a Sap is spent.
+        speciesId: this.ghost.speciesId,
         depth: this.ghost.option.level,
         a: placement.start,
         b: placement.end,
@@ -429,10 +522,24 @@ export class Renderer {
       drawPruneConfirm(ctx, this.screenTree, this.pruneSelection);
     }
 
+    if (this.grafting && this.graftSelection) {
+      drawGraftMark(ctx, this.screenTree, this.graftSelection, now);
+      drawGraftBadge(ctx, this.screenTree, this.graftSelection);
+    }
+
     const ghost = this.ghostSegment();
     if (ghost) drawGhostPart(ctx, ghost);
 
-    if (this.menu) drawRadialMenu(ctx, this.menu, this.hoveredItem, now);
+    if (this.menu) {
+      drawRadialMenu(ctx, this.menu, this.hoveredItem, now);
+      drawSpeciesPicker(
+        ctx,
+        this.chips,
+        this.planting,
+        this.hoveredChip,
+        Math.min(1, Math.max(0, (now - this.menu.openedAt) / MENU_ARM_MS)),
+      );
+    }
 
     this.effects.draw(ctx, now);
 

@@ -1,6 +1,6 @@
 import Decimal from 'break_infinity.js';
 import { comboMultiplier } from './combo';
-import { applyModifiers, type ModifierSet } from './modifiers';
+import { applyModifiers, scopedTag, type ModifierSet } from './modifiers';
 
 /**
  * Active play: what one tap on the tree is worth.
@@ -57,11 +57,24 @@ export interface ClickResult {
  * Resolve the current click stats from the active modifiers, each stat reading
  * only its own tag with the standard `(base + Σadds) × Πmuls` stacking.
  *
+ * `scopes` narrows the resolution to a particular piece of wood: a tap knows
+ * which limb it landed on, so it also reads each stat scoped to that limb's
+ * species (`species:cherry::click.critChance`). Passing none — as the HUD does —
+ * resolves the tree-wide stats, which is what a readout should show.
+ *
  * Crit chance is clamped to `[0, 1]`; the cap is at least one whole stack.
  */
-export function resolveClickStats(modifiers: ModifierSet): ClickStats {
-  const stat = (tag: string, base: number): Decimal =>
-    applyModifiers(new Decimal(base), modifiers.matchingTag(tag));
+export function resolveClickStats(
+  modifiers: ModifierSet,
+  scopes: readonly string[] = [],
+): ClickStats {
+  const stat = (tag: string, base: number): Decimal => {
+    const mods = modifiers.matchingTag(tag);
+    for (const scope of scopes) {
+      mods.push(...modifiers.matchingTag(scopedTag(scope, tag)));
+    }
+    return applyModifiers(new Decimal(base), mods);
+  };
 
   const clickPower = stat(CLICK_STAT_TAG.clickPower, BASE_CLICK_STATS.clickPower);
   const critChance = stat(CLICK_STAT_TAG.critChance, BASE_CLICK_STATS.critChance).toNumber();

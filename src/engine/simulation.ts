@@ -1,8 +1,10 @@
 import Decimal from 'break_infinity.js';
 import { BUFF_BY_ID, LATERAL_SURGE_ID } from '../content/buffs';
 import { GROWTH_RULE_BY_TYPE, type TreeNodeType } from '../content/growth';
+import type { HybridDef } from '../content/hybrids';
 import { DEW_MIN_TAPS, DEW_SECONDS, EXPOSURE_INTERVAL_SECONDS } from '../content/light';
 import { RESOURCE_IDS } from '../content/resources';
+import { SPECIES } from '../content/species';
 import { TOTEM_BY_ID } from '../content/totems';
 import { UPGRADES, UPGRADE_BY_ID } from '../content/upgrades';
 import { buffModifiers, buffSource, type ActiveBuff } from './buffs';
@@ -27,9 +29,18 @@ import {
 } from './light';
 import { applyModifiers, type Modifier } from './modifiers';
 import { quotePrune, type PruneQuote } from './prune';
+import { quoteGraft, type GraftAssessment, type GraftQuote } from './graft';
 import type { RandomSource } from './rng';
+import {
+  clickScopes,
+  speciesModifiers,
+  unlockProgress,
+  unlockedSpeciesIds,
+  SPECIES_SOURCE,
+  type UnlockContext,
+} from './species';
 import { hasFreeSlot, totemCost, totemModifiers, TOTEM_SOURCE } from './totems';
-import { DEFAULT_SPECIES_ID, type TreeNode } from './treeGraph';
+import { type TreeNode } from './treeGraph';
 import { isMaxed, upgradeCost, upgradeModifiers, upgradeSource } from './upgrades';
 import {
   createInitialState,
@@ -38,6 +49,7 @@ import {
   type GameState,
   type LeafLight,
   type Resources,
+  type SpeciesSnapshot,
   type UpgradeSnapshot,
 } from './types';
 
@@ -45,6 +57,18 @@ import {
 export interface ClickOutcome extends ClickResult {
   /** Sap from the day's first tap, or `null` when this was not that tap. */
   readonly dew: Decimal | null;
+}
+
+/** What a completed graft joined, and whether it was the first of its kind. */
+export interface GraftResult {
+  /** The quote the graft was executed against — exactly what the preview showed. */
+  readonly quote: GraftQuote;
+  /** The hybrid the limb became. */
+  readonly hybrid: HybridDef;
+  /** Ids that changed species. */
+  readonly changed: readonly string[];
+  /** True when this hybrid had never been made before. */
+  readonly discovered: boolean;
 }
 
 /** What a completed cut removed and paid out. */
@@ -76,7 +100,10 @@ export class Simulation {
     this.state = initial;
     this.syncPartProducers();
     // Permanent auras and any running buffs first: they are inputs to everything
-    // measured below them, and a loaded save arrives with both already set.
+    // measured below them, and a loaded save arrives with both already set. The
+    // species mix is the same kind of standing input — it is a property of the
+    // tree that was just loaded, not an event.
+    this.republishSpecies();
     this.republishTotems();
     this.republishBuffs();
     this.updateDaylight();
@@ -117,9 +144,17 @@ export class Simulation {
    *
    * @param now    timestamp (ms) the tap landed; drives combo timing.
    * @param random source for the crit roll, injectable for tests.
+   * @param nodeId the part that was struck, when the caller knows it. A tap on a
+   *               limb resolves its stats against that limb's species too, which
+   *               is what makes a grafted limb worth *tapping* rather than
+   *               merely worth owning.
    */
-  click(now: number = Date.now(), random: RandomSource = Math.random): ClickOutcome {
-    const stats = resolveClickStats(this.state.modifiers);
+  click(
+    now: number = Date.now(),
+    random: RandomSource = Math.random,
+    nodeId?: string | null,
+  ): ClickOutcome {
+    const stats = resolveClickStats(this.state.modifiers, clickScopes(this.state.tree, nodeId));
     const stacks = registerComboClick(this.state.combo, now, stats.comboCap);
     const result = resolveClick(stats, stacks, random());
 
@@ -155,14 +190,64 @@ export class Simulation {
    * Everything growable on `nodeId` right now, priced against the player's
    * balances. This is what the radial grow menu renders.
    */
-  growthOptions(nodeId: string): PricedGrowthOption[] {
+  growthOptions(
+    nodeId: string,
+    speciesId: string = this.state.plantingSpecies,
+  ): PricedGrowthOption[] {
     return priceGrowthOptions(
       this.state.tree,
       nodeId,
       this.state.resources,
       this.state.modifiers,
       this.state.soil,
+      speciesId,
     );
+  }
+
+  /**
+   * Choose what new parts are grown as. Returns `false` for a species that is
+   * unknown, still locked, or a hybrid.
+   *
+   * This is the one place unlock gating is enforced, because it is the one place
+   * the player expresses the choice: {@link growPart} takes the species it is
+   * given, the way it takes the node it is given.
+   */
+  setPlantingSpecies(speciesId: string): boolean {
+    if (!this.unlockedSpecies().includes(speciesId)) return false;
+    this.state.plantingSpecies = speciesId;
+    return true;
+  }
+
+  /** Base species the player may currently plant, in catalogue order. */
+  unlockedSpecies(): string[] {
+    return unlockedSpeciesIds(this.unlockContext());
+  }
+
+  /** The live state the unlock milestones are evaluated against. */
+  private unlockContext(): UnlockContext {
+    const tree = this.state.tree;
+    return {
+      lifetime: (resource) => this.state.resources.total(resource),
+      // The trunk is not something the player grew, so it does not count toward
+      // a "grow N parts" milestone.
+      parts: Math.max(0, tree.size - 1),
+      partsOfType: (type) => tree.countOfType(type),
+      prunes: this.state.prunes,
+    };
+  }
+
+  /**
+   * Republish the modifiers the tree's current species mix grants.
+   *
+   * Called after anything that can change what the tree is made of — growing,
+   * pruning, grafting — because whole-tree traits are scaled by each species'
+   * *share*, and every one of those events moves the shares.
+   */
+  republishSpecies(): void {
+    this.state.modifiers.removeBySource(SPECIES_SOURCE);
+    for (const modifier of speciesModifiers(this.state.tree.countBySpecies())) {
+      this.state.modifiers.add(modifier);
+    }
   }
 
   /**
@@ -175,17 +260,21 @@ export class Simulation {
   growPart(
     nodeId: string,
     childType: TreeNodeType,
-    speciesId: string = DEFAULT_SPECIES_ID,
+    speciesId: string = this.state.plantingSpecies,
   ): TreeNode | null {
     const tree = this.state.tree;
     if (!tree.getValidGrowthOptions(nodeId).some((option) => option.type === childType)) {
       return null;
     }
 
+    // Hybrids are made at a fork, not bought from a menu; an unknown id is a
+    // caller bug and must not silently plant something else.
+    if (!SPECIES.some((def) => def.id === speciesId)) return null;
+
     const rule = GROWTH_RULE_BY_TYPE[childType];
-    // Priced through the modifiers, so a growth discount reaches the till and
-    // not just the menu label.
-    const cost = partCost(childType, tree.countOfType(childType), this.state.modifiers);
+    // Priced through the modifiers *and* the species, so a cheap species and a
+    // growth discount both reach the till and not just the menu label.
+    const cost = partCost(childType, tree.countOfType(childType), this.state.modifiers, speciesId);
     if (this.state.resources.amount(rule.costResource).lt(cost)) return null;
 
     const node = tree.grow(nodeId, childType, speciesId, this.state.tick);
@@ -198,6 +287,10 @@ export class Simulation {
       placement: tree.placements().get(node.id),
     });
     if (producer) this.addProducer(producer);
+
+    // The mix moved: a whole-tree trait is worth its species' share of the tree,
+    // and this part just changed the denominator for every species on it.
+    this.republishSpecies();
 
     // A new root (or a new leaf drinking from them) moves the hydration balance
     // immediately, so the HUD and the next tap agree with the purchase that was
@@ -248,9 +341,55 @@ export class Simulation {
 
     const surge = quote.apical ? this.grantBuff(LATERAL_SURGE_ID) : null;
 
+    this.republishSpecies();
     this.updateHydration();
     this.updateLightExposure();
     return { quote, removed, surge };
+  }
+
+  /**
+   * Assess a graft between two limbs: a full quote, or the reason it is refused.
+   * This is what the graft-mode tooltip renders.
+   */
+  graftQuote(aId: string, bId: string): GraftAssessment {
+    return quoteGraft(this.state.tree, aId, bId, this.state.grafts, this.state.discoveries);
+  }
+
+  /**
+   * Join two limbs into a hybrid: pay the price, turn the scion and everything
+   * it carries into the new species, and record the discovery if it is the first
+   * of its kind.
+   *
+   * Returns `null` and changes nothing when the pair cannot be grafted or the
+   * price cannot be met. As with pruning, the quote is taken before anything is
+   * touched, so the transaction is the preview the player was reading.
+   */
+  graft(aId: string, bId: string): GraftResult | null {
+    const quote = this.graftQuote(aId, bId);
+    if (!quote.ok) return null;
+
+    for (const line of quote.costs) {
+      if (this.state.resources.amount(line.resource).lt(line.amount)) return null;
+    }
+    for (const line of quote.costs) {
+      this.state.resources.add(line.resource, line.amount.neg());
+    }
+
+    const changed = this.state.tree.respeciate(quote.scionId, quote.hybrid.id);
+    this.state.grafts += 1;
+
+    const discovered = !this.state.discoveries.has(quote.hybrid.id);
+    this.state.discoveries.add(quote.hybrid.id);
+
+    // Every producer on the limb now carries different species tags, so they are
+    // rebuilt wholesale rather than patched — the same from-scratch path a load
+    // takes, and the only one that cannot leave a stale tag behind.
+    this.syncPartProducers();
+    this.republishSpecies();
+    this.updateHydration();
+    this.updateLightExposure();
+
+    return { quote, hybrid: quote.hybrid, changed: changed.map((node) => node.id), discovered };
   }
 
   /**
@@ -528,6 +667,17 @@ export class Simulation {
 
     const hydration = this.state.hydration;
 
+    const unlocks = this.unlockContext();
+    const species: SpeciesSnapshot = {
+      planting: this.state.plantingSpecies,
+      unlocked: unlockedSpeciesIds(unlocks),
+      unlocks: SPECIES.map((def) => ({ id: def.id, ...unlockProgress(def, unlocks) })),
+      // Copied: the graph keeps this tally live and mutates it in place.
+      counts: new Map(this.state.tree.countBySpecies()),
+      discovered: [...this.state.discoveries],
+      grafts: this.state.grafts,
+    };
+
     const elapsed = this.state.elapsedSeconds;
     const buffs: BuffSnapshot[] = this.state.buffs.entries().map((buff) => {
       const duration = Math.max(1e-9, buff.expiresAt - buff.grantedAt);
@@ -564,6 +714,7 @@ export class Simulation {
       buffs,
       // Copied, not shared: the engine pushes onto this array in place.
       totems: [...this.state.totems],
+      species,
       clicks: this.state.clicks,
       prunes: this.state.prunes,
       treeRevision: this.state.tree.revision,

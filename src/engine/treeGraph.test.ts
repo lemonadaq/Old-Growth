@@ -389,3 +389,78 @@ describe('toSegments', () => {
     }
   });
 });
+
+describe('species on the graph', () => {
+  it('tallies the trunk from the start and every part after it', () => {
+    const tree = TreeGraph.seedling();
+    expect(tree.countBySpecies().get('oak')).toBe(1);
+
+    tree.grow(tree.rootId, 'branch', 'birch');
+    expect(tree.countBySpecies().get('oak')).toBe(1);
+    expect(tree.countBySpecies().get('birch')).toBe(1);
+  });
+
+  it('drops a species from the tally entirely once its last part is gone', () => {
+    const tree = TreeGraph.seedling();
+    const branch = tree.grow(tree.rootId, 'branch', 'birch');
+    tree.prune(branch?.id ?? '');
+    expect(tree.countBySpecies().has('birch')).toBe(false);
+  });
+
+  it('re-species a subtree and nothing above it', () => {
+    const tree = TreeGraph.seedling();
+    const lower = tree.grow(tree.rootId, 'branch', 'oak');
+    const upper = tree.grow(lower?.id ?? '', 'branch', 'birch');
+    const leaf = tree.grow(upper?.id ?? '', 'leafCluster', 'birch');
+
+    const changed = tree.respeciate(upper?.id ?? '', 'ghostwood');
+
+    expect(changed.map((node) => node.id).sort()).toEqual([leaf?.id, upper?.id].sort());
+    expect(tree.node(upper?.id ?? '')?.speciesId).toBe('ghostwood');
+    expect(tree.node(leaf?.id ?? '')?.speciesId).toBe('ghostwood');
+    expect(tree.node(lower?.id ?? '')?.speciesId).toBe('oak');
+    expect(tree.node(tree.rootId)?.speciesId).toBe('oak');
+  });
+
+  it('keeps the tally straight across a re-species', () => {
+    const tree = TreeGraph.seedling();
+    const branch = tree.grow(tree.rootId, 'branch', 'birch');
+    tree.grow(branch?.id ?? '', 'leafCluster', 'birch');
+
+    tree.respeciate(branch?.id ?? '', 'ghostwood');
+
+    expect(tree.countBySpecies().has('birch')).toBe(false);
+    expect(tree.countBySpecies().get('ghostwood')).toBe(2);
+    expect(tree.countBySpecies().get('oak')).toBe(1);
+  });
+
+  it('bumps the revision only when something actually changed', () => {
+    const tree = TreeGraph.seedling();
+    const branch = tree.grow(tree.rootId, 'branch', 'birch');
+    const before = tree.revision;
+
+    expect(tree.respeciate(branch?.id ?? '', 'birch')).toEqual([]);
+    expect(tree.revision).toBe(before);
+
+    tree.respeciate(branch?.id ?? '', 'ghostwood');
+    expect(tree.revision).toBeGreaterThan(before);
+  });
+
+  it('carries the species out onto the drawable segments', () => {
+    const tree = TreeGraph.seedling();
+    tree.grow(tree.rootId, 'branch', 'birch');
+    const segments = tree.toSegments();
+    expect(segments.find((s) => s.kind === 'branch')?.speciesId).toBe('birch');
+    expect(segments.find((s) => s.kind === 'trunk')?.speciesId).toBe('oak');
+  });
+
+  it('round-trips species through JSON', () => {
+    const tree = TreeGraph.seedling();
+    const branch = tree.grow(tree.rootId, 'branch', 'birch');
+    tree.respeciate(branch?.id ?? '', 'ghostwood');
+
+    const restored = TreeGraph.fromJSON(JSON.parse(JSON.stringify(tree.toJSON())));
+    expect(restored.node(branch?.id ?? '')?.speciesId).toBe('ghostwood');
+    expect(restored.countBySpecies().get('ghostwood')).toBe(1);
+  });
+});

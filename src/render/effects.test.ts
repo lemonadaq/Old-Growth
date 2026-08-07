@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { EffectPool, FLOAT_DURATION_MS, RIPPLE_DURATION_MS } from './effects';
+import {
+  CONFETTI_DURATION_MS,
+  EffectPool,
+  FLOAT_DURATION_MS,
+  LEAF_FALL_DURATION_MS,
+  RIPPLE_DURATION_MS,
+} from './effects';
 
 describe('EffectPool', () => {
   it('tracks the effects it spawns', () => {
@@ -66,5 +72,28 @@ describe('EffectPool', () => {
     pool.clear();
     expect(pool.activeFloats).toBe(0);
     expect(pool.activeRipples).toBe(0);
+  });
+});
+
+describe('confetti', () => {
+  it('throws a burst and retires it after its duration', () => {
+    const pool = new EffectPool();
+    pool.spawnConfetti(50, 50, 0, 20);
+    expect(pool.activeConfetti).toBe(20);
+
+    pool.prune(CONFETTI_DURATION_MS - 1);
+    expect(pool.activeConfetti).toBe(20);
+    pool.prune(CONFETTI_DURATION_MS);
+    expect(pool.activeConfetti).toBe(0);
+  });
+
+  it('never outgrows its pool', () => {
+    const pool = new EffectPool(4, 4, 4, 6);
+    pool.spawnConfetti(0, 0, 0, 40);
+    expect(pool.activeConfetti).toBe(6);
+  });
+
+  it('outlives a prune burst, because a discovery should be the last thing left', () => {
+    expect(CONFETTI_DURATION_MS).toBeGreaterThan(LEAF_FALL_DURATION_MS);
   });
 });

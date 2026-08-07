@@ -17,6 +17,12 @@ export interface TreeSegment extends Segment {
   readonly id: string;
   /** The node's part type; decides how the renderer draws it. */
   readonly kind: TreeNodeType;
+  /**
+   * What the part is made of; decides the colours it is drawn in. Optional so a
+   * synthetic segment (a ghost preview, a test fixture) can leave it out and get
+   * the starter palette.
+   */
+  readonly speciesId?: string;
   /** Depth from the trunk (the trunk is 0). */
   readonly depth: number;
   /** Stroke width — or blob radius, for leaf clusters and blossoms. */

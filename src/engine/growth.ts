@@ -9,9 +9,11 @@ import {
 import { GROWTH_COST_TAG } from '../content/prune';
 import type { ResourceId } from '../content/resources';
 import type { Stratum } from '../content/soil';
+import { STARTER_SPECIES_ID } from '../content/species';
 import type { Producer } from './economy';
 import { canopyIndex, exposureAt } from './light';
 import { applyModifiers, type ModifierSet } from './modifiers';
+import { speciesCostMultiplier } from './species';
 import {
   BARREN_SOIL,
   soilConditionsAt,
@@ -60,9 +62,20 @@ export function partProducerId(nodeId: string): string {
  * or a test with no simulation behind it wants. A discount can never take a
  * price below zero.
  */
-export function partCost(type: TreeNodeType, owned: number, modifiers?: ModifierSet): Decimal {
+export function partCost(
+  type: TreeNodeType,
+  owned: number,
+  modifiers?: ModifierSet,
+  speciesId?: string,
+): Decimal {
   const rule = GROWTH_RULE_BY_TYPE[type];
-  const list = new Decimal(rule.baseCost).mul(Decimal.pow(PART_COST_GROWTH, Math.max(0, owned)));
+  let list = new Decimal(rule.baseCost).mul(Decimal.pow(PART_COST_GROWTH, Math.max(0, owned)));
+
+  // The species' own price break lands on the list price, *before* the
+  // `growth.cost` modifiers, so a cheap species and a growth buff compose
+  // instead of one swallowing the other.
+  if (speciesId) list = list.mul(speciesCostMultiplier(speciesId, type));
+
   if (!modifiers) return list;
 
   const priced = applyModifiers(list, modifiers.matchingTag(GROWTH_COST_TAG));
@@ -157,7 +170,7 @@ function siteProduction(type: TreeNodeType, ctx: PartContext): SitedProduction |
  * ground should stay barren even if a later global bonus adds a flat rate.
  */
 export function partProducer(
-  node: Pick<TreeNode, 'id' | 'type'>,
+  node: Pick<TreeNode, 'id' | 'type'> & Partial<Pick<TreeNode, 'speciesId'>>,
   ctx: PartContext = NO_PART_CONTEXT,
 ): Producer | null {
   const sited = siteProduction(node.type, ctx);
@@ -167,7 +180,7 @@ export function partProducer(
     id: partProducerId(node.id),
     resource: sited.resource,
     baseRate: sited.rate,
-    tags: partProducerTags(node.type),
+    tags: partProducerTags(node.type, node.speciesId),
   };
 }
 
@@ -202,11 +215,12 @@ export function partProductionDelta(
   type: TreeNodeType,
   modifiers: ModifierSet,
   ctx: PartContext = NO_PART_CONTEXT,
+  speciesId?: string,
 ): ProductionDelta | null {
   const sited = siteProduction(type, ctx);
   if (!sited) return null;
 
-  const mods = modifiers.matching(sited.resource, partProducerTags(type));
+  const mods = modifiers.matching(sited.resource, partProducerTags(type, speciesId));
   const vein = sited.conditions?.vein ?? null;
 
   return {
@@ -232,18 +246,21 @@ export interface PricedGrowthOption {
   readonly missing: Decimal;
   /** Production the part would add, or `null` for structural parts. */
   readonly production: ProductionDelta | null;
+  /** What the part would be grown as — whatever the species picker is showing. */
+  readonly speciesId: string;
 }
 
-/** Price one option against a balance. */
+/** Price one option against a balance, as a given species. */
 export function priceGrowthOption(
   option: GrowthOption,
   owned: number,
   balance: Decimal,
   modifiers: ModifierSet,
   ctx: PartContext = NO_PART_CONTEXT,
+  speciesId: string = STARTER_SPECIES_ID,
 ): PricedGrowthOption {
   const rule = GROWTH_RULE_BY_TYPE[option.type];
-  const cost = partCost(option.type, owned, modifiers);
+  const cost = partCost(option.type, owned, modifiers, speciesId);
   const affordable = balance.gte(cost);
 
   return {
@@ -253,7 +270,8 @@ export function priceGrowthOption(
     cost,
     affordable,
     missing: affordable ? new Decimal(0) : cost.sub(balance),
-    production: partProductionDelta(option.type, modifiers, ctx),
+    production: partProductionDelta(option.type, modifiers, ctx, speciesId),
+    speciesId,
   };
 }
 
@@ -279,6 +297,7 @@ export function priceGrowthOptions(
   balances: BalanceSource,
   modifiers: ModifierSet,
   soil: SoilMap = BARREN_SOIL,
+  speciesId: string = STARTER_SPECIES_ID,
 ): PricedGrowthOption[] {
   const parent = graph.placements().get(nodeId);
   // Built once for the whole menu rather than per option: the canopy does not
@@ -299,6 +318,7 @@ export function priceGrowthOptions(
         placement,
         exposure: shaded && placement ? exposureAt(placement.end, canopy).exposure : undefined,
       },
+      speciesId,
     );
   });
 }

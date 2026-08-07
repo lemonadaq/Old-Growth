@@ -1,4 +1,5 @@
 import type { ResourceId } from './resources';
+import { speciesResourceTag, speciesTag, STARTER_SPECIES_ID } from './species';
 
 /**
  * Growth rules as data: what each part of the tree is, what it may grow, where
@@ -243,11 +244,20 @@ export const OFFLINE_TAG = 'offline';
  * Producer tags a grown part carries, so modifiers can target "everything in
  * the canopy" or "every leaf cluster" without naming individual nodes.
  *
+ * A part also carries what it is *made of*: `species:willow`, and — when it
+ * produces — `species:willow/water`. The two-part tag is what lets a species
+ * trait reach one resource on its own parts and nothing else, since a modifier
+ * matches a producer by resource or by tag but never by both at once.
+ *
  * Underground parts additionally carry {@link OFFLINE_TAG}.
  */
-export function partProducerTags(type: TreeNodeType): readonly string[] {
+export function partProducerTags(
+  type: TreeNodeType,
+  speciesId: string = STARTER_SPECIES_ID,
+): readonly string[] {
   const rule = GROWTH_RULE_BY_TYPE[type];
-  const tags: string[] = [rule.domain, type];
+  const tags: string[] = [rule.domain, type, speciesTag(speciesId)];
+  if (rule.production) tags.push(speciesResourceTag(speciesId, rule.production.resource));
   if (rule.domain === 'root') tags.push(OFFLINE_TAG);
   return tags;
 }

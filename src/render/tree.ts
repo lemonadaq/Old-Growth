@@ -1,5 +1,7 @@
 import { GROWTH_RULE_BY_TYPE, type TreeNodeType } from '../content/growth';
+import { STARTER_SPECIES_ID } from '../content/species';
 import type { Viewport } from '../engine/camera';
+import { speciesPalette } from '../engine/species';
 import type { ScreenSegment, TreeBounds, TreeLayout } from '../engine/tree';
 import { lerpColor } from './color';
 import { HORIZON_RATIO, PALETTE } from './palette';
@@ -254,13 +256,14 @@ function drawLeafCluster(
 ): void {
   const radius = Math.max(3, segment.width) * t;
   const blobs = blobOffsets(segment.id, 4);
+  const leaves = speciesPalette(segment.speciesId ?? STARTER_SPECIES_ID);
 
   ctx.save();
   ctx.globalAlpha = alpha;
   for (let i = 0; i < blobs.length; i += 1) {
     const blob = blobs[i];
     const base =
-      i === 0 ? PALETTE.leafShade : i === blobs.length - 1 ? PALETTE.leafHighlight : PALETTE.leaf;
+      i === 0 ? leaves.leafShade : i === blobs.length - 1 ? leaves.leafHighlight : leaves.leaf;
     ctx.fillStyle = tint > 0 ? lerpColor(base, PALETTE.leafOccluded, tint) : base;
     ctx.beginPath();
     ctx.arc(
@@ -286,10 +289,11 @@ function drawBlossom(
   const radius = Math.max(2.5, segment.width) * t;
   const cx = segment.b.x + sway.dx;
   const cy = segment.b.y + sway.dy;
+  const petals = speciesPalette(segment.speciesId ?? STARTER_SPECIES_ID);
 
   ctx.save();
   ctx.globalAlpha = alpha;
-  ctx.fillStyle = PALETTE.blossom;
+  ctx.fillStyle = petals.blossom;
   for (let i = 0; i < 5; i += 1) {
     const angle = (i / 5) * Math.PI * 2;
     ctx.beginPath();
@@ -302,28 +306,36 @@ function drawBlossom(
     );
     ctx.fill();
   }
-  ctx.fillStyle = PALETTE.blossomCore;
+  ctx.fillStyle = petals.blossomCore;
   ctx.beginPath();
   ctx.arc(cx, cy, radius * 0.42, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
 
-/** Bark colour for a structural part. */
-function woodColor(kind: TreeNodeType): string {
+/**
+ * Bark colour for a structural part, in its own species' wood.
+ *
+ * A birch limb is pale, a cherry limb is red-brown, a grafted limb is neither of
+ * its parents — which is the only reason a species choice or a graft is visible
+ * at a glance rather than buried in a tooltip. An unspecified species (a ghost
+ * preview, a fixture) falls back to the starter's palette.
+ */
+export function woodColor(kind: TreeNodeType, speciesId?: string): string {
+  const palette = speciesPalette(speciesId ?? STARTER_SPECIES_ID);
   switch (kind) {
     case 'trunk':
-      return PALETTE.bark;
+      return palette.bark;
     case 'branch':
-      return PALETTE.branch;
+      return palette.branch;
     case 'twig':
-      return PALETTE.twig;
+      return palette.twig;
     case 'rootSegment':
-      return PALETTE.root;
+      return palette.root;
     case 'rootTip':
-      return PALETTE.rootTip;
+      return palette.rootTip;
     default:
-      return PALETTE.branch;
+      return palette.branch;
   }
 }
 
@@ -374,19 +386,19 @@ export function drawTree(
   for (const segment of segments) {
     const rule = GROWTH_RULE_BY_TYPE[segment.kind];
     if (rule.domain !== 'root') continue;
-    fillWood(ctx, at(segment), woodColor(segment.kind));
+    fillWood(ctx, at(segment), woodColor(segment.kind, segment.speciesId));
   }
 
   // Canopy wood.
   for (const segment of segments) {
     if (segment.kind !== 'trunk' && segment.kind !== 'branch' && segment.kind !== 'twig') continue;
-    fillWood(ctx, at(segment), woodColor(segment.kind));
+    fillWood(ctx, at(segment), woodColor(segment.kind, segment.speciesId));
   }
 
   // Sunlit edge: a thin offset stroke along the trunk only.
-  ctx.strokeStyle = PALETTE.barkHighlight;
   for (const segment of segments) {
     if (segment.kind !== 'trunk') continue;
+    ctx.strokeStyle = speciesPalette(segment.speciesId ?? STARTER_SPECIES_ID).barkHighlight;
     const drawn = at(segment);
     const offset = drawn.width * 0.26;
     ctx.lineWidth = Math.max(1, drawn.width * 0.22);

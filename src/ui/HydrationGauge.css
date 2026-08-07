@@ -1,0 +1,72 @@
+.hydration {
+  pointer-events: auto; /* the HUD ignores pointer events by default */
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 6px;
+  font-size: 12px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+  cursor: help;
+  /* `currentColor` drives the droplet fill, so the mood classes only set this. */
+  color: #6fb7e0;
+}
+
+.hydration--parched {
+  color: #b98a5a;
+  border-color: rgba(185, 138, 90, 0.55);
+}
+
+.hydration--thirsty {
+  color: #8aa8b8;
+}
+
+.hydration--steady {
+  color: #6fb7e0;
+}
+
+.hydration--overcharged {
+  color: #8fe0ff;
+  border-color: rgba(143, 224, 255, 0.55);
+}
+
+.hydration__drop {
+  width: 16px;
+  height: 21px;
+  display: block;
+  overflow: visible;
+}
+
+.hydration__drop-bed {
+  fill: rgba(12, 20, 26, 0.55);
+}
+
+.hydration__drop-fill {
+  fill: currentColor;
+}
+
+.hydration__drop-mark {
+  stroke: rgba(253, 243, 224, 0.55);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+}
+
+.hydration__drop-outline {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  opacity: 0.85;
+}
+
+.hydration__value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--hud-text);
+}
+
+.hydration--parched .hydration__value,
+.hydration--overcharged .hydration__value {
+  color: currentColor;
+}

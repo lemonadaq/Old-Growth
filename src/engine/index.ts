@@ -11,7 +11,27 @@ export {
   type ModifierType,
   type ModifierTargetKind,
 } from './modifiers';
-export { computeProduction, type Producer } from './economy';
+export { computeProduction, computeResourceRate, type Producer } from './economy';
+export {
+  BARREN_SOIL,
+  canonicalYAt,
+  createSoilMap,
+  depthAt,
+  depthMultiplier,
+  soilConditionsAt,
+  stratumAt,
+  veinAt,
+  type MineralVein,
+  type SoilConditions,
+  type SoilMap,
+} from './soil';
+export {
+  HYDRATION_SOURCE,
+  computeHydration,
+  hydrationModifiers,
+  waterNeed,
+  type HydrationState,
+} from './hydration';
 export { enableTestProducers, disableTestProducers } from './debugProducers';
 export { createSeededRandom, type RandomSource } from './rng';
 export {
@@ -46,12 +66,14 @@ export {
   type TreeNode,
 } from './treeGraph';
 export {
+  NO_SOIL_CONTEXT,
   partCost,
   partProducer,
   partProducerId,
   partProductionDelta,
   priceGrowthOption,
   priceGrowthOptions,
+  type PartSoilContext,
   type PricedGrowthOption,
   type ProductionDelta,
 } from './growth';
@@ -84,6 +106,7 @@ export {
   type GameState,
   type GameSnapshot,
   type ComboSnapshot,
+  type HydrationSnapshot,
   type UpgradeSnapshot,
   type Resources,
   type DebugStats,

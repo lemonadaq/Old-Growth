@@ -10,11 +10,13 @@ import {
   type TreeLayout,
   type TreeSegment,
 } from '../engine/tree';
+import { BARREN_SOIL, type SoilMap } from '../engine/soil';
 import { placeOption, type NodePlacement } from '../engine/treeGraph';
 import type { GameSnapshot } from '../engine/types';
 import { drawComboMeter } from './comboMeter';
 import { EffectPool } from './effects';
-import { HORIZON_RATIO, PALETTE } from './palette';
+import { PALETTE } from './palette';
+import { drawSoil } from './soil';
 import {
   drawRadialMenu,
   hitTestRadialMenu,
@@ -46,6 +48,7 @@ export class Renderer {
   readonly effects = new EffectPool();
 
   private tree: readonly TreeSegment[] = [];
+  private soil: SoilMap = BARREN_SOIL;
   private placements: ReadonlyMap<string, NodePlacement> = new Map();
   private bounds: TreeBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
   private screenTree: ScreenSegment[] = [];
@@ -97,6 +100,14 @@ export class Renderer {
     this.placements = placements;
     this.bounds = treeBounds(segments);
     this.projectTreeToScreen();
+  }
+
+  /**
+   * Supply the ground to draw. Generated once per world from a seed, so unlike
+   * the tree this never needs re-pushing.
+   */
+  setSoil(soil: SoilMap): void {
+    this.soil = soil;
   }
 
   /** Track the pointer so the combo meter can follow it. `null` hides it. */
@@ -231,7 +242,9 @@ export class Renderer {
    */
   draw(snapshot: GameSnapshot, _alpha: number, now: number = Date.now()): void {
     const { ctx, cssWidth: w, cssHeight: h } = this;
-    const horizonY = Math.round(h * HORIZON_RATIO);
+    // The soil surface is the trunk's own base, taken from the layout rather
+    // than recomputed, so the strata and the tree share one ground line.
+    const horizonY = this.layout.originY;
 
     // Sky.
     const sky = ctx.createLinearGradient(0, 0, 0, horizonY);
@@ -240,12 +253,8 @@ export class Renderer {
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, w, horizonY);
 
-    // Soil.
-    const soil = ctx.createLinearGradient(0, horizonY, 0, h);
-    soil.addColorStop(0, PALETTE.soilTop);
-    soil.addColorStop(1, PALETTE.soilBottom);
-    ctx.fillStyle = soil;
-    ctx.fillRect(0, horizonY, w, h - horizonY);
+    // Soil: strata bands and the mineral pockets buried in them.
+    drawSoil(ctx, w, h, this.layout, this.soil);
 
     // Horizon line where canopy air meets the ground.
     ctx.fillStyle = PALETTE.horizon;

@@ -17,8 +17,25 @@ export const PALETTE = {
   leaf: '#6f9e4a',
   leafShade: '#4f7a35',
   leafHighlight: '#93bd63',
+  /**
+   * Colour an over-shaded cluster is dragged toward. Cool and dim: a leaf
+   * starved of sun should read as *in shadow* at a glance, before the player has
+   * ever opened its tooltip.
+   */
+  leafOccluded: '#2f4a26',
   blossom: '#f0b6cd',
   blossomCore: '#fff0d2',
+  /**
+   * The sky's own lights. The sun warms toward the horizon the way the sky
+   * does; the moon carries a faint halo so it reads against deep night without
+   * being bright enough to compete with the tree.
+   */
+  sunLow: '#ffb765',
+  sunHigh: '#fff3c4',
+  sunGlow: 'rgba(255, 226, 150, 0.42)',
+  sunGlowEdge: 'rgba(255, 226, 150, 0)',
+  moon: '#f2f0e4',
+  moonHalo: 'rgba(226, 232, 245, 0.12)',
   /**
    * Underground: roots are the same wood, desaturated by the earth — but kept
    * clearly lighter than the soil behind them, or they vanish into it.

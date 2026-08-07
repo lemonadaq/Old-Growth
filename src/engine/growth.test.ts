@@ -288,3 +288,64 @@ describe('priceGrowthOptions', () => {
     expect(priced).toEqual([]);
   });
 });
+
+describe('light exposure in the part context', () => {
+  it('quotes a leaf in full sun when nothing is known about its position', () => {
+    const delta = partProductionDelta('leafCluster', new ModifierSet());
+    expect(delta?.exposure).toBe(1);
+    expect(delta?.rate.toNumber()).toBeCloseTo(0.4, 9);
+  });
+
+  it('scales a shaded leaf by its exposure', () => {
+    const delta = partProductionDelta('leafCluster', new ModifierSet(), {
+      soil: BARREN_SOIL,
+      exposure: 0.6,
+    });
+    expect(delta?.exposure).toBe(0.6);
+    expect(delta?.rate.toNumber()).toBeCloseTo(0.4 * 0.6, 9);
+  });
+
+  it('lets a blossom-boosted leaf go above full sun', () => {
+    const delta = partProductionDelta('leafCluster', new ModifierSet(), {
+      soil: BARREN_SOIL,
+      exposure: 1.5,
+    });
+    expect(delta?.rate.toNumber()).toBeCloseTo(0.6, 9);
+  });
+
+  it('applies exposure before modifiers, not after', () => {
+    const modifiers = new ModifierSet();
+    modifiers.add({
+      source: 'test',
+      type: 'add',
+      targetKind: 'resource',
+      target: 'light',
+      value: 1,
+    });
+    const delta = partProductionDelta('leafCluster', modifiers, {
+      soil: BARREN_SOIL,
+      exposure: 0.5,
+    });
+    // (0.4 × 0.5) + 1, not (0.4 + 1) × 0.5.
+    expect(delta?.rate.toNumber()).toBeCloseTo(1.2, 9);
+  });
+
+  it('leaves parts the sun does not reach without an exposure at all', () => {
+    const context = { soil: BARREN_SOIL, exposure: 0.5 };
+    // A blossom is not marked `shaded`, and a root is underground.
+    expect(partProductionDelta('blossom', new ModifierSet(), context)?.exposure).toBeNull();
+    expect(partProductionDelta('blossom', new ModifierSet(), context)?.rate.toNumber()).toBeCloseTo(
+      0.15,
+      9,
+    );
+    expect(partProductionDelta('rootSegment', new ModifierSet(), context)?.exposure).toBeNull();
+  });
+
+  it('registers a shaded leaf’s producer at its reduced base rate', () => {
+    const producer = partProducer(
+      { id: 'leafCluster-9', type: 'leafCluster' },
+      { soil: BARREN_SOIL, exposure: 0.25 },
+    );
+    expect(Number(producer?.baseRate)).toBeCloseTo(0.1, 9);
+  });
+});

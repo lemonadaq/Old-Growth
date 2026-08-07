@@ -1,6 +1,7 @@
 import { GROWTH_RULE_BY_TYPE, type TreeNodeType } from '../content/growth';
 import type { Viewport } from '../engine/camera';
 import type { ScreenSegment, TreeBounds, TreeLayout } from '../engine/tree';
+import { lerpColor } from './color';
 import { HORIZON_RATIO, PALETTE } from './palette';
 
 /**
@@ -215,6 +216,33 @@ function fillWood(
 /** No motion — for the ghost preview, which must sit exactly where it will land. */
 const STILL = { dx: 0, dy: 0 } as const;
 
+/**
+ * How far toward {@link PALETTE.leafOccluded} a fully shaded cluster is dragged.
+ *
+ * Short of the whole way on purpose: the tint is a *hint*, not a readout. It has
+ * to be obvious enough that a stacked canopy looks wrong from across the screen,
+ * and gentle enough that a shaded leaf still looks like a leaf.
+ */
+const SHADE_TINT_STRENGTH = 0.7;
+
+/**
+ * How dark a cluster is drawn, in `[0, 1]`, given its light exposure.
+ *
+ * Exposure of 1 (full sun) tints nothing; the floor tints most. Anything a
+ * blossom has lifted above 1 is simply untinted rather than brightened — the
+ * blossom itself is already visible next to it.
+ *
+ * The square root is what makes the lesson land. A single occluder costs only
+ * 15% of a leaf's light, and a linear tint of 15% is invisible against foliage
+ * that is already three shades of green — so the *first* mistake would look
+ * exactly like no mistake. The curve front-loads the response: any shade at all
+ * is visible, and piling more on deepens it without ever reaching black.
+ */
+export function shadeTint(exposure: number | undefined): number {
+  if (exposure === undefined) return 0;
+  return Math.sqrt(Math.min(1, Math.max(0, 1 - exposure))) * SHADE_TINT_STRENGTH;
+}
+
 /** A leaf cluster: overlapping soft circles around the twig's tip. */
 function drawLeafCluster(
   ctx: CanvasRenderingContext2D,
@@ -222,6 +250,7 @@ function drawLeafCluster(
   t: number,
   alpha = 1,
   sway: { dx: number; dy: number } = STILL,
+  tint = 0,
 ): void {
   const radius = Math.max(3, segment.width) * t;
   const blobs = blobOffsets(segment.id, 4);
@@ -230,8 +259,9 @@ function drawLeafCluster(
   ctx.globalAlpha = alpha;
   for (let i = 0; i < blobs.length; i += 1) {
     const blob = blobs[i];
-    ctx.fillStyle =
+    const base =
       i === 0 ? PALETTE.leafShade : i === blobs.length - 1 ? PALETTE.leafHighlight : PALETTE.leaf;
+    ctx.fillStyle = tint > 0 ? lerpColor(base, PALETTE.leafOccluded, tint) : base;
     ctx.beginPath();
     ctx.arc(
       segment.b.x + blob.dx * radius + sway.dx,
@@ -301,6 +331,12 @@ function woodColor(kind: TreeNodeType): string {
 export type SpawnTimes = ReadonlyMap<string, number>;
 
 /**
+ * Per-leaf light exposure, keyed by node id — the engine's own record, read
+ * structurally so the renderer needs nothing from it but the number.
+ */
+export type LeafExposures = ReadonlyMap<string, { readonly exposure: number }>;
+
+/**
  * Draw the whole tree.
  *
  * Roots go down first (they belong behind the soil's shading), then the wood of
@@ -309,6 +345,8 @@ export type SpawnTimes = ReadonlyMap<string, number>;
  *
  * Passing a `viewport` culls everything off-screen before any of those passes
  * run, so a zoomed-in camera pays only for the parts the player can see.
+ * Passing `exposures` darkens the clusters the canopy is shading, which is how
+ * a crowded tree tells on itself.
  */
 export function drawTree(
   ctx: CanvasRenderingContext2D,
@@ -316,6 +354,7 @@ export function drawTree(
   now: number,
   spawns: SpawnTimes = new Map(),
   viewport?: Viewport,
+  exposures?: LeafExposures,
 ): void {
   const segments = viewport ? cullSegments(allSegments, viewport) : allSegments;
   if (segments.length === 0) return;
@@ -362,8 +401,11 @@ export function drawTree(
     if (segment.kind !== 'leafCluster' && segment.kind !== 'blossom') continue;
     const t = progress.get(segment.id) ?? 1;
     const sway = swayOffset(segment.id, now, Math.max(3, segment.width) * t);
-    if (segment.kind === 'leafCluster') drawLeafCluster(ctx, segment, t, 1, sway);
-    else drawBlossom(ctx, segment, t, 1, sway);
+    if (segment.kind === 'leafCluster') {
+      drawLeafCluster(ctx, segment, t, 1, sway, shadeTint(exposures?.get(segment.id)?.exposure));
+    } else {
+      drawBlossom(ctx, segment, t, 1, sway);
+    }
   }
 
   ctx.restore();

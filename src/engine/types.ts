@@ -1,9 +1,12 @@
 import Decimal from 'break_infinity.js';
+import { EXPOSURE_INTERVAL_SECONDS } from '../content/light';
 import type { ResourceId } from '../content/resources';
 import type { ClickStats } from './clicker';
 import { createComboState, type ComboState } from './combo';
+import { dayCycle, type DayCycle } from './daylight';
 import type { Producer } from './economy';
 import { computeHydration, type HydrationState } from './hydration';
+import { lightFactorAt, type LeafExposure } from './light';
 import { ModifierSet } from './modifiers';
 import { ResourceRegistry } from './resourceRegistry';
 import { createSoilMap, type SoilMap } from './soil';
@@ -12,6 +15,19 @@ import { UpgradeLedger } from './upgrades';
 
 /** A plain per-resource record of `Decimal`s (used for immutable snapshots). */
 export type Resources = Record<ResourceId, Decimal>;
+
+/**
+ * One leaf cluster's light: its positional exposure plus what that is currently
+ * worth per second once every modifier has had its say.
+ *
+ * The rate is resolved on the exposure sweep's cadence rather than per frame —
+ * it feeds a tooltip, and a tooltip a second behind a passing cloud is a trade
+ * worth making against recomputing every leaf's modifiers 60 times a second.
+ */
+export interface LeafLight extends LeafExposure {
+  /** Light per second this leaf is contributing, after modifiers. */
+  readonly rate: Decimal;
+}
 
 /** The full mutable game state owned by the {@link Simulation}. */
 export interface GameState {
@@ -27,6 +43,14 @@ export interface GameState {
   soil: SoilMap;
   /** Latest hydration reading, recomputed every tick. */
   hydration: HydrationState;
+  /** Per-leaf light, recomputed on the exposure sweep and on every grow/prune. */
+  leafLight: ReadonlyMap<string, LeafLight>;
+  /** Multiplier the time of day is currently putting on Light. */
+  lightFactor: number;
+  /** Simulation time the next exposure sweep is due at, in seconds. */
+  nextExposureAt: number;
+  /** Day number the last Dew burst was collected on; `-1` before the first. */
+  lastDewDay: number;
   /** Click combo meter. */
   combo: ComboState;
   /** Levels owned per upgrade. */
@@ -92,6 +116,16 @@ export interface GameSnapshot {
   readonly clickStats: ClickStats;
   /** How well the roots are supplying the canopy. */
   readonly hydration: HydrationSnapshot;
+  /** Where the engine is in its day: phase, sun strength, day number. */
+  readonly day: DayCycle;
+  /** What that time of day multiplies Light by. */
+  readonly lightFactor: number;
+  /**
+   * Per-leaf light, keyed by node id. Shared by reference rather than cloned:
+   * the engine replaces this map wholesale on each sweep and never mutates it in
+   * place, so handing it out costs nothing and cannot be scribbled on.
+   */
+  readonly leafLight: ReadonlyMap<string, LeafLight>;
   readonly combo: ComboSnapshot;
   readonly upgrades: readonly UpgradeSnapshot[];
   /** Lifetime count of successful taps on the tree. */
@@ -123,6 +157,12 @@ export function createInitialState(now: number = Date.now()): GameState {
     tree: TreeGraph.seedling(),
     soil: createSoilMap(),
     hydration: computeHydration(new Decimal(0), 0),
+    leafLight: new Map(),
+    lightFactor: lightFactorAt(dayCycle(0).t),
+    nextExposureAt: EXPOSURE_INTERVAL_SECONDS,
+    // Before the first day: the very first tap of a new save is a dawn, and the
+    // tree ought to have dew on it.
+    lastDewDay: -1,
     combo: createComboState(),
     upgrades: new UpgradeLedger(),
     clicks: 0,

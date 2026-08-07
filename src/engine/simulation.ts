@@ -1,9 +1,11 @@
 import Decimal from 'break_infinity.js';
 import { GROWTH_RULE_BY_TYPE, type TreeNodeType } from '../content/growth';
+import { DEW_MIN_TAPS, DEW_SECONDS, EXPOSURE_INTERVAL_SECONDS } from '../content/light';
 import { RESOURCE_IDS } from '../content/resources';
 import { UPGRADES, UPGRADE_BY_ID } from '../content/upgrades';
-import { resolveClick, resolveClickStats, type ClickResult } from './clicker';
+import { resolveClick, resolveClickStats, type ClickResult, type ClickStats } from './clicker';
 import { comboFill, comboMultiplier, comboStacksAt, registerComboClick } from './combo';
+import { dayCycle } from './daylight';
 import { computeProduction, computeResourceRate, type Producer } from './economy';
 import {
   partCost,
@@ -13,7 +15,14 @@ import {
   type PricedGrowthOption,
 } from './growth';
 import { computeHydration, hydrationModifiers, HYDRATION_SOURCE } from './hydration';
-import type { Modifier } from './modifiers';
+import {
+  canopyIndex,
+  computeLeafExposures,
+  daylightModifiers,
+  lightFactorAt,
+  DAYLIGHT_SOURCE,
+} from './light';
+import { applyModifiers, type Modifier } from './modifiers';
 import type { RandomSource } from './rng';
 import { DEFAULT_SPECIES_ID, type TreeNode } from './treeGraph';
 import { isMaxed, upgradeCost, upgradeModifiers, upgradeSource } from './upgrades';
@@ -21,9 +30,16 @@ import {
   createInitialState,
   type GameSnapshot,
   type GameState,
+  type LeafLight,
   type Resources,
   type UpgradeSnapshot,
 } from './types';
+
+/** What one resolved tap did, including any dawn Dew it happened to collect. */
+export interface ClickOutcome extends ClickResult {
+  /** Sap from the day's first tap, or `null` when this was not that tap. */
+  readonly dew: Decimal | null;
+}
 
 /**
  * Owns the mutable {@link GameState} and advances it one fixed tick at a time.
@@ -43,7 +59,9 @@ export class Simulation {
   constructor(initial: GameState = createInitialState()) {
     this.state = initial;
     this.syncPartProducers();
+    this.updateDaylight();
     this.updateHydration();
+    this.updateLightExposure();
   }
 
   /** Register (or replace) a producer by its id. */
@@ -80,14 +98,37 @@ export class Simulation {
    * @param now    timestamp (ms) the tap landed; drives combo timing.
    * @param random source for the crit roll, injectable for tests.
    */
-  click(now: number = Date.now(), random: RandomSource = Math.random): ClickResult {
+  click(now: number = Date.now(), random: RandomSource = Math.random): ClickOutcome {
     const stats = resolveClickStats(this.state.modifiers);
     const stacks = registerComboClick(this.state.combo, now, stats.comboCap);
     const result = resolveClick(stats, stacks, random());
 
     this.state.resources.add('sap', result.gain);
     this.state.clicks += 1;
-    return result;
+    return { ...result, dew: this.collectDew(stats) };
+  }
+
+  /**
+   * The dawn bonus: the first tap of each new engine day finds Dew on the tree
+   * and cashes it for {@link DEW_SECONDS} of Sap income.
+   *
+   * Returns `null` on every other tap of that day, so it fires once and the
+   * caller knows whether to celebrate.
+   *
+   * The floor is doing the real work today — see {@link DEW_MIN_TAPS}: nothing
+   * makes Sap passively yet, so "60 seconds of income" would be nothing at all.
+   */
+  private collectDew(stats: ClickStats): Decimal | null {
+    const day = dayCycle(this.state.elapsedSeconds).dayNumber;
+    if (day <= this.state.lastDewDay) return null;
+    this.state.lastDewDay = day;
+
+    const income = this.state.resources.perSecond('sap').mul(DEW_SECONDS);
+    const floor = stats.clickPower.mul(DEW_MIN_TAPS);
+    const dew = income.gt(floor) ? income : floor;
+
+    this.state.resources.add('sap', dew);
+    return dew;
   }
 
   /**
@@ -138,8 +179,11 @@ export class Simulation {
 
     // A new root (or a new leaf drinking from them) moves the hydration balance
     // immediately, so the HUD and the next tap agree with the purchase that was
-    // just made rather than lagging a tick behind it.
+    // just made rather than lagging a tick behind it. The same goes for shade:
+    // a leaf dropped into a crowded canopy dims its neighbours the moment it
+    // lands, not on the next sweep.
     this.updateHydration();
+    this.updateLightExposure();
     return node;
   }
 
@@ -153,7 +197,10 @@ export class Simulation {
     for (const node of removed) {
       this.removeProducer(partProducerId(node.id));
     }
-    if (removed.length > 0) this.updateHydration();
+    if (removed.length > 0) {
+      this.updateHydration();
+      this.updateLightExposure();
+    }
     return removed;
   }
 
@@ -172,9 +219,70 @@ export class Simulation {
       const producer = partProducer(node, {
         soil: this.state.soil,
         placement: placements.get(node.id),
+        exposure: this.state.leafLight.get(node.id)?.exposure,
       });
       if (producer) this.addProducer(producer);
     }
+  }
+
+  /**
+   * Republish the time-of-day multiplier on Light.
+   *
+   * One `mul` on the Light resource, revoked and re-granted, so the canopy's
+   * output rides the sun without any producer having to know what time it is.
+   */
+  updateDaylight(): void {
+    this.state.modifiers.removeBySource(DAYLIGHT_SOURCE);
+
+    const factor = lightFactorAt(dayCycle(this.state.elapsedSeconds).t);
+    this.state.lightFactor = factor;
+
+    for (const modifier of daylightModifiers(factor)) {
+      this.state.modifiers.add(modifier);
+    }
+  }
+
+  /**
+   * Re-shade the canopy: recompute every leaf's exposure and re-register its
+   * producer at the rate that exposure earns.
+   *
+   * Exposure lives on the producer's *base rate* rather than in a modifier
+   * because it is per node — there is no tag that means "this leaf and no
+   * other". Rebuilding the producers wholesale keeps the pipeline itself
+   * unchanged: a leaf is still one ordinary producer summed with the rest.
+   *
+   * The per-leaf `/s` is banked at the same time, for the leaf tooltip.
+   */
+  updateLightExposure(): void {
+    const exposures = computeLeafExposures(canopyIndex(this.state.tree));
+    const placements = this.state.tree.placements();
+    const leafLight = new Map<string, LeafLight>();
+
+    for (const [nodeId, exposure] of exposures) {
+      const node = this.state.tree.node(nodeId);
+      if (!node) continue;
+
+      const producer = partProducer(node, {
+        soil: this.state.soil,
+        placement: placements.get(nodeId),
+        exposure: exposure.exposure,
+      });
+
+      let rate = new Decimal(0);
+      if (producer) {
+        this.addProducer(producer);
+        rate = applyModifiers(
+          new Decimal(producer.baseRate),
+          this.state.modifiers.matching(producer.resource, producer.tags),
+        );
+      } else {
+        this.removeProducer(partProducerId(nodeId));
+      }
+
+      leafLight.set(nodeId, { ...exposure, rate });
+    }
+
+    this.state.leafLight = leafLight;
   }
 
   /**
@@ -234,9 +342,17 @@ export class Simulation {
     this.state.elapsedSeconds += dtSeconds;
     this.state.lastUpdatedAt = Date.now();
 
-    // Hydration is resolved first: this tick's canopy output is paid at the
-    // rate the roots can currently support.
+    // Order matters. The sun sets the ceiling on what Light is worth this tick,
+    // hydration sets what the roots can pay for, and only then is it worth
+    // asking what each leaf is earning — so the rate banked for the tooltips is
+    // the one the tick actually pays out.
+    this.updateDaylight();
     this.updateHydration();
+
+    if (this.state.elapsedSeconds >= this.state.nextExposureAt) {
+      this.state.nextExposureAt = this.state.elapsedSeconds + EXPOSURE_INTERVAL_SECONDS;
+      this.updateLightExposure();
+    }
 
     const perSecond = computeProduction(this.state.producers.values(), this.state.modifiers);
     for (const id of RESOURCE_IDS) {
@@ -294,6 +410,9 @@ export class Simulation {
         ratio: hydration.ratio,
         value: hydration.value,
       },
+      day: dayCycle(this.state.elapsedSeconds),
+      lightFactor: this.state.lightFactor,
+      leafLight: this.state.leafLight,
       combo: {
         stacks,
         cap: clickStats.comboCap,

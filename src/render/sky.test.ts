@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { SUNLIT_FRACTION } from '../content/daylight';
 import { lerpColor, parseHex, toCss } from './color';
 import { SKY_KEYFRAMES } from './palette';
-import { hillHeightAt, skyColors } from './sky';
+import { celestialAt, hillHeightAt, skyColors } from './sky';
 
 describe('parseHex', () => {
   it('reads long and short forms alike', () => {
@@ -87,5 +88,52 @@ describe('hillHeightAt', () => {
 
   it('scales with the amplitude it is given', () => {
     expect(hillHeightAt(310, 0, 160)).toBeCloseTo(hillHeightAt(310, 0, 80) * 2);
+  });
+});
+
+describe('celestialAt', () => {
+  it('puts the sun up through the lit part of the day', () => {
+    expect(celestialAt(0.01).kind).toBe('sun');
+    expect(celestialAt(SUNLIT_FRACTION / 2).kind).toBe('sun');
+    expect(celestialAt(SUNLIT_FRACTION - 0.001).kind).toBe('sun');
+  });
+
+  it('hands over to the moon at sundown and keeps it up all night', () => {
+    expect(celestialAt(SUNLIT_FRACTION).kind).toBe('moon');
+    expect(celestialAt(0.9).kind).toBe('moon');
+  });
+
+  it('peaks each body halfway through its own arc', () => {
+    expect(celestialAt(SUNLIT_FRACTION / 2).altitude).toBeCloseTo(1, 6);
+    expect(celestialAt((1 + SUNLIT_FRACTION) / 2).altitude).toBeCloseTo(1, 6);
+  });
+
+  it('swaps bodies at the horizon, so the handover is never seen', () => {
+    expect(celestialAt(SUNLIT_FRACTION - 1e-9).altitude).toBeCloseTo(0, 6);
+    expect(celestialAt(SUNLIT_FRACTION).altitude).toBeCloseTo(0, 6);
+    expect(celestialAt(0).altitude).toBeCloseTo(0, 6);
+    expect(celestialAt(1 - 1e-9).altitude).toBeCloseTo(0, 6);
+  });
+
+  it('travels one way across the sky', () => {
+    let previous = -1;
+    for (let t = 0; t < SUNLIT_FRACTION; t += 0.02) {
+      const { progress } = celestialAt(t);
+      expect(progress).toBeGreaterThan(previous);
+      previous = progress;
+    }
+  });
+
+  it('keeps altitude inside the sky', () => {
+    for (let t = 0; t < 1; t += 0.01) {
+      const { altitude } = celestialAt(t);
+      expect(altitude).toBeGreaterThanOrEqual(0);
+      expect(altitude).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('wraps like the day does', () => {
+    expect(celestialAt(1.25)).toEqual(celestialAt(0.25));
+    expect(celestialAt(-0.25)).toEqual(celestialAt(0.75));
   });
 });

@@ -9,17 +9,30 @@ import { enableTestProducers, disableTestProducers } from '../engine/debugProduc
 import { Renderer } from '../render/canvas';
 import { GrowOptionTooltip } from './GrowOptionTooltip';
 import { Hud } from './Hud';
+import { LeafTooltip } from './LeafTooltip';
 import { Tooltip } from './Tooltip';
 import { UpgradePanel } from './UpgradePanel';
 import { attachTreeInput } from './treeInput';
 import './App.css';
 
-/** What the tooltip is currently pointing at, in viewport coordinates. */
-interface HoverState {
-  readonly priced: PricedGrowthOption;
-  readonly x: number;
-  readonly y: number;
-}
+/**
+ * What the tooltip is currently pointing at, in viewport coordinates.
+ *
+ * Two things on the canvas can explain themselves: a dial in the grow menu
+ * (what a part would cost and add) and a leaf cluster already on the tree (how
+ * much sky it can still see). The menu wins where they overlap.
+ */
+type HoverState =
+  | {
+      readonly kind: 'option';
+      readonly priced: PricedGrowthOption;
+      readonly x: number;
+      readonly y: number;
+    }
+  | { readonly kind: 'leaf'; readonly nodeId: string; readonly x: number; readonly y: number };
+
+/** How far above the tap the Dew number is spawned, so it clears the "+N". */
+const DEW_LABEL_OFFSET_PX = 26;
 
 export function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -99,6 +112,19 @@ export function App() {
           now,
         );
 
+        // The day's first tap shakes the Dew loose. Spawned a little above the
+        // tap and flagged as a crit so it lands gold — it is the same kind of
+        // event to the player, and it should not be mistaken for the tap itself.
+        if (result.dew) {
+          renderer.effects.spawnHit(
+            point.x,
+            point.y - DEW_LABEL_OFFSET_PX,
+            `Dew +${formatNumber(result.dew)}`,
+            true,
+            now,
+          );
+        }
+
         // Every part of the tree is also its own upgrade button.
         const segment = renderer.hitTest(point);
         if (segment) openMenuFor(segment.id, now);
@@ -108,13 +134,21 @@ export function App() {
 
       onPointerMove: (point) => {
         renderer.setPointer(point);
+        const client = toClient(point);
+
         const priced = renderer.hoverMenu(point);
-        if (!priced) {
-          setHover(null);
+        if (priced) {
+          setHover({ kind: 'option', priced, x: client.x, y: client.y });
           return;
         }
-        const client = toClient(point);
-        setHover({ priced, x: client.x, y: client.y });
+
+        // Nothing in the menu under the cursor — is there a leaf under it?
+        const segment = renderer.hitTest(point);
+        if (segment?.kind === 'leafCluster') {
+          setHover({ kind: 'leaf', nodeId: segment.id, x: client.x, y: client.y });
+          return;
+        }
+        setHover(null);
       },
 
       onPointerLeave: () => {
@@ -215,7 +249,13 @@ export function App() {
       />
       <UpgradePanel onBuy={handleBuy} />
       <Tooltip
-        content={hover ? <GrowOptionTooltip priced={hover.priced} /> : null}
+        content={
+          hover?.kind === 'option' ? (
+            <GrowOptionTooltip priced={hover.priced} />
+          ) : hover?.kind === 'leaf' ? (
+            <LeafTooltip nodeId={hover.nodeId} />
+          ) : null
+        }
         x={hover?.x ?? 0}
         y={hover?.y ?? 0}
       />

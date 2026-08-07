@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEW_MIN_TAPS } from '../content/light';
 import { CLICK_TOLERANCE_PX } from '../engine/clicker';
 import { COMBO_FULL_STACKS } from '../engine/combo';
 import { hitTestSegments, type Vec2 } from '../engine/geometry';
@@ -224,12 +225,16 @@ describe('zero missed inputs', () => {
 
     // 100 ms between taps is well inside the 1500 ms window: nothing decays.
     expect(t.sim.state.combo.stacks).toBe(COMBO_FULL_STACKS);
-    // First 50 taps ramp 1→50 stacks, the remaining 50 all pay the ×2 cap.
+    // First 50 taps ramp 1→50 stacks, the remaining 50 all pay the ×2 cap —
+    // plus the dawn Dew the very first tap of a save shakes loose.
     const ramp = Array.from({ length: 50 }, (_, i) => 1 + (i + 1) * 0.02).reduce(
       (a, b) => a + b,
       0,
     );
-    expect(t.sim.state.resources.amount('sap').toNumber()).toBeCloseTo(ramp + 50 * 2, 6);
+    expect(t.sim.state.resources.amount('sap').toNumber()).toBeCloseTo(
+      ramp + 50 * 2 + DEW_MIN_TAPS,
+      6,
+    );
   });
 
   it('does not coalesce taps that share a timestamp', () => {

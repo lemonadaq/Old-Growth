@@ -1,6 +1,6 @@
 /** Public surface of the pure game engine (no React imports anywhere here). */
 export { GameLoop, TICK_RATE, MS_PER_TICK, MAX_FRAME_MS, type LoopCallbacks } from './loop';
-export { Simulation } from './simulation';
+export { Simulation, type ClickOutcome } from './simulation';
 export { gameStore, type GameStoreState } from './store';
 export { formatNumber } from './format';
 export { ResourceRegistry, type ResourceEntry } from './resourceRegistry';
@@ -66,17 +66,34 @@ export {
   type TreeNode,
 } from './treeGraph';
 export {
-  NO_SOIL_CONTEXT,
+  NO_PART_CONTEXT,
   partCost,
   partProducer,
   partProducerId,
   partProductionDelta,
   priceGrowthOption,
   priceGrowthOptions,
-  type PartSoilContext,
+  type PartContext,
   type PricedGrowthOption,
   type ProductionDelta,
 } from './growth';
+export {
+  DAYLIGHT_SOURCE,
+  EMPTY_CANOPY,
+  MAX_COUNTED_OCCLUDERS,
+  blossomBoost,
+  canopyIndex,
+  computeLeafExposures,
+  daylightModifiers,
+  exposureAt,
+  lightFactorAt,
+  occludes,
+  shadeFactor,
+  type CanopyIndex,
+  type CanopyLeaf,
+  type LeafExposure,
+} from './light';
+export { dayCycle, dayFraction, daylightAt, phaseAt, type DayCycle } from './daylight';
 export {
   COMBO_BONUS_AT_FULL,
   COMBO_BONUS_PER_STACK,
@@ -107,6 +124,7 @@ export {
   type GameSnapshot,
   type ComboSnapshot,
   type HydrationSnapshot,
+  type LeafLight,
   type UpgradeSnapshot,
   type Resources,
   type DebugStats,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeProduction, type Producer } from './economy';
+import { computeProduction, computeResourceRate, type Producer } from './economy';
 import { ModifierSet } from './modifiers';
 import { RESOURCE_IDS } from '../content/resources';
 
@@ -40,5 +40,29 @@ describe('computeProduction', () => {
     const result = computeProduction(producers, mods);
     expect(result.light.toNumber()).toBe(12); // 4 × 3
     expect(result.water.toNumber()).toBe(4); // untouched
+  });
+});
+
+describe('computeResourceRate', () => {
+  const producers: Producer[] = [
+    { id: 'leaf', resource: 'light', baseRate: 4, tags: ['canopy'] },
+    { id: 'root-a', resource: 'water', baseRate: 3, tags: ['root'] },
+    { id: 'root-b', resource: 'water', baseRate: 2, tags: ['root'] },
+  ];
+
+  it('sums only the producers of the resource asked for', () => {
+    expect(computeResourceRate(producers, new ModifierSet(), 'water').toNumber()).toBe(5);
+  });
+
+  it('is zero when nothing produces it', () => {
+    expect(computeResourceRate(producers, new ModifierSet(), 'seeds').toNumber()).toBe(0);
+  });
+
+  it('agrees with the full pipeline, modifiers and all', () => {
+    const mods = new ModifierSet();
+    mods.add({ source: 'rain', type: 'mul', targetKind: 'tag', target: 'root', value: 3 });
+    expect(computeResourceRate(producers, mods, 'water').toNumber()).toBe(
+      computeProduction(producers, mods).water.toNumber(),
+    );
   });
 });

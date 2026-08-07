@@ -33,9 +33,27 @@ export function GrowOptionTooltip({ priced }: GrowOptionTooltipProps) {
         {priced.production && produced && (
           <div className="tooltip__row">
             <dt>Produces</dt>
-            <dd className="tooltip__gain">
+            <dd className={priced.production.rate.lte(0) ? 'tooltip__short' : 'tooltip__gain'}>
               +{formatNumber(priced.production.rate)} {produced.label}/s
             </dd>
+          </div>
+        )}
+
+        {priced.production?.stratum && priced.production.depth !== null && (
+          <div className="tooltip__row">
+            <dt>Depth</dt>
+            <dd>
+              {Math.round(priced.production.depth)}
+              <span className="tooltip__note"> {priced.production.stratum.label}</span> ×
+              {priced.production.depthMultiplier.toFixed(2)}
+            </dd>
+          </div>
+        )}
+
+        {priced.production?.vein && (
+          <div className="tooltip__row">
+            <dt>Mineral vein</dt>
+            <dd className="tooltip__gain">×{priced.production.vein.richness.toFixed(2)}</dd>
           </div>
         )}
 
@@ -48,6 +66,12 @@ export function GrowOptionTooltip({ priced }: GrowOptionTooltipProps) {
           </div>
         )}
       </dl>
+
+      {priced.production?.missingVein && (
+        <p className="tooltip__hint">
+          No vein here — this tip would find no Minerals. Try another root.
+        </p>
+      )}
 
       {!priced.production && (
         <p className="tooltip__hint">Structural — grow leaves or roots on it to produce.</p>

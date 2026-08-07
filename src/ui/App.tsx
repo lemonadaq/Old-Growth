@@ -34,6 +34,7 @@ export function App() {
     const sim = new Simulation();
     simRef.current = sim;
     const renderer = new Renderer(canvas);
+    renderer.setSoil(sim.state.soil);
 
     // The renderer caches the projected tree; re-push it only when the graph's
     // structure actually changed, never per frame.

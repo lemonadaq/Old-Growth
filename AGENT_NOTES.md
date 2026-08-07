@@ -15,6 +15,145 @@ Do not refactor unrelated code.
 
 ## Changelog
 
+### 2026-08-07 — STEP 7: Roots, soil strata and the idle economy
+
+The underground stops being empty brown. There is a *column* down there — four
+layers with mineral pockets buried in the clay and rock — and a root is now worth
+what the ground it reached is worth. The two halves of the tree are wired
+together: the canopy runs at whatever rate the roots can water it.
+
+- `src/content/soil.ts` — **new**. The strata table as data: Topsoil `0…300`,
+  Clay `300…800`, Rock `800…1600`, Bedrock below, each with its own fill colours
+  and a `veinWeight`. Plus the vein-generation tunables and
+  `DEPTH_PRODUCTION_SCALE` (500). **Units:** depth is quoted in *soil units*
+  where the surface is 0 and depth grows downward, related to the graph's
+  canonical units by `SOIL_UNITS_PER_CANONICAL` = 1000. That is what lets the
+  table read exactly as the design does while the geometry stays
+  resolution-independent.
+- `src/content/hydration.ts` — **new**. `WATER_NEED_PER_LEAF` (0.35) and the
+  clamp bounds (0.25 / 1.5).
+- `src/engine/soil.ts` — **new**. `depthAt` / `canonicalYAt` / `stratumAt`
+  (half-open bands, so exactly 300 is Clay) / `depthMultiplier` (`1 + depth/500`,
+  never a penalty above ground) / `createSoilMap` / `veinAt` /
+  `soilConditionsAt`. A `SoilMap` is 24 seeded pockets and nothing else, so the
+  whole underground serialises to one number.
+- **Veins pick their layer before their depth**, weighted by `veinWeight`
+  (clay and rock carry 8 of 9.5), which is what makes the scatter read as
+  geology rather than as uniform noise. Overlapping pockets award the *richest*,
+  so a tip is never punished for landing in two.
+- `src/engine/growth.ts` — production is now sited. `partProducer` and
+  `partProductionDelta` take a `PartSoilContext` (`{ soil, placement }`) and
+  resolve the rate at the part's **far end** — the tip that is actually in the
+  ore, not the joint it grew from. Roots earn `×(1 + depth/500)`; a part whose
+  catalogue entry says `requiresVein` (only `rootTip`, for Minerals) earns
+  `× richness` inside a pocket and **nothing at all** outside one.
+  `priceGrowthOptions` places every option where growing it would put it, so the
+  ghost preview's tooltip quotes the real number — "+0.43 Water/s, Depth 224
+  Topsoil ×1.45" — before a single Sap is spent.
+- A root tip with no vein registers **no producer**, rather than a zero one. A
+  zero producer would start earning the moment some later global `+add` landed
+  on Minerals; barren ground should stay barren.
+- `src/engine/hydration.ts` — **new**. `waterNeed(leaves)` is purely
+  proportional (no floor), `computeHydration` is
+  `clamp(income / need, 0.25, 1.5)`, and `hydrationModifiers` publishes it as two
+  ordinary `mul` modifiers — one on the `canopy` tag, one on `click.power` — under
+  a single revocable source. Nothing bespoke: hydration stacks in the normal
+  `(base + Σadds) × Πmuls` order like everything else.
+- `src/engine/simulation.ts` — `updateHydration()` runs at the top of every tick
+  and again immediately after any grow or prune, so the HUD and the *next tap*
+  agree with the purchase that was just made instead of lagging up to 100 ms.
+  It revokes the old hydration modifiers **before** measuring Water income, which
+  makes the absence of a feedback loop structural rather than a coincidence of
+  tagging.
+- `src/engine/economy.ts` — `computeResourceRate(producers, modifiers, resource)`,
+  a single-resource pass so the mid-tick hydration read does not cost a full
+  pipeline evaluation.
+- `src/content/growth.ts` — root producers now carry an `'offline'` tag
+  (`OFFLINE_TAG`) alongside their domain and type, ready for STEP 14. `rootTip`'s
+  production gained `requiresVein: true`.
+- `src/render/soil.ts` — **new**. `soilBands()` is pure (clip to the visible
+  soil, keep the *unclipped* edges as gradient stops so a half-visible band still
+  shades across its whole depth) and therefore tested without a canvas.
+  `drawSoil()` fills the bands, draws the bedding planes and the layer names, and
+  glows every on-screen pocket. Positioned through the same `TreeLayout` the tree
+  is projected with, so a root you can *see* entering the clay really is earning
+  the clay's bonus.
+- Ore grains are clamped to 0.9–2.6 px whatever the zoom. The first pass scaled
+  them with the pocket radius and the clay came out looking like a bubble bath;
+  grains that stay grain-sized read as mineral in the ground.
+- `src/ui/HydrationGauge.tsx` + `.css` — **new**. A droplet that fills toward the
+  ceiling with a dashed tick at break-even, coloured by mood
+  (parched/thirsty/watered/overcharged), and a tooltip writing out the whole sum:
+  what the roots draw, what the canopy wants, the ratio, and the applied
+  multiplier with a line saying which clamp bit. Hydration is the one HUD number
+  that is a *multiplier* rather than a resource, so it gets a shape.
+- `src/ui/GrowOptionTooltip.tsx` — root options now show depth, layer and the
+  depth bonus; a mineral part shows its vein's richness, or a plain warning that
+  there is no vein there and the tip would find nothing.
+- Tests: 303 pass (up from 224). New: `soil.test.ts` (25 — conversions,
+  band boundaries, the multiplier, determinism, generation bounds, the
+  clay/rock bias, vein hit-testing incl. edges and overlaps),
+  `hydration.test.ts` (16 — the need curve, both clamps, the neutral
+  no-leaves case, and the modifiers driving Light and click power without
+  touching Water), `render/soil.test.ts` (10 — band clipping, the bottomless
+  band, no gaps, gradient spans). `growth.test.ts` gained 10 soil cases and
+  `simulation.test.ts` 15, including **the acceptance case**: one leaf with no
+  roots produces `0.4 × 0.25`, and three roots take it to `0.4 × 1.5` — a 6×
+  lift, asserted as exactly `HYDRATION_MAX / HYDRATION_MIN`.
+- Verified in a real browser (Chromium/Playwright against the production build,
+  1280×800): strata bands and vein pockets render at 60 fps; 90 taps → 173.5 Sap;
+  a branch and a leaf with no roots put **Light 0.1/s** in the HUD with the gauge
+  amber at **×0.25** and "Per tap 0.25"; hovering the Root Segment dial quoted
+  "+0.43 Water/s / Depth 224 Topsoil ×1.45"; three roots took it to **Water
+  1.3/s, Light 0.6/s** and the gauge to **×1.50**, with the droplet's tooltip
+  showing `1.3 ÷ 0.35 = 3.70 → ×1.50, capped`. No page errors beyond the
+  pre-existing favicon 404.
+
+**Design decisions worth knowing**
+
+- `waterNeed` has **no base term**. With one, a seedling with no leaves would sit
+  at the 0.25 floor and the opening of the game (before any canopy exists) would
+  be four times slower for no reason the player could see. Proportional need
+  means hydration is exactly 1.0 until the first leaf is bought, and the throttle
+  arrives at the moment it can be understood — and one root segment (~0.44/s
+  after its depth bonus) already over-supplies that first leaf, so the lesson
+  costs 12 Sap to learn.
+- Hydration multiplies **click Sap as well as Light**, per the spec. That is a
+  sharp edge: buy a leaf with no roots and your taps drop to a quarter. The gauge
+  going amber and the tooltip naming the fix are the whole mitigation for now;
+  STEP 17's onboarding and STEP 19's balance pass own the rest.
+- The depth a part is judged at is its **end**, not its midpoint. A long root is
+  worth what it reached, which is the reading that makes chaining segments
+  downward feel like digging.
+- Bands are half-open (`top ≤ depth < bottom`). Without a rule the boundary
+  depths are ambiguous, and "300 is where the clay starts" is the intuitive one.
+
+**Open TODOs**
+
+- [ ] **STEP 4 is still owed** and it now bites harder: with no camera, the deep
+      strata are only visible once the layout has zoomed out far enough, so Rock
+      and Bedrock are effectively unseen in the early game. Pan/zoom is what makes
+      the column explorable.
+- [ ] Blossoms produce Light but are not counted in `waterNeed`. Either they
+      should drink too or the fiction should explain why not.
+- [ ] Vein *discovery* is free: every pocket is drawn from the first frame. The
+      Mycorrhiza symbiont (STEP 11) is supposed to extend "detection radius",
+      which implies undetected veins should be hidden until then.
+- [ ] A root tip cannot be aimed — its angle is fixed by its slot — so hitting a
+      vein is a matter of which segment you extend, not a placement decision.
+      Once pruning has UI (STEP 9) that becomes retry-able; a steerable tip may
+      still be worth it.
+- [ ] `soilConditionsAt` is evaluated per part at grow time only. Correct today
+      (placements never change once grown), but a future mechanic that *moves*
+      geometry would silently stale every root's rate.
+- [ ] Root production is tagged `'offline'` but nothing consumes the tag yet
+      (STEP 14).
+- [ ] Mineral base rate (0.12), vein richness (1–2.2) and the depth scale (500)
+      are first-pass guesses; STEP 19 owns real balance.
+- [ ] `src/content/resources.ts` and `src/index.css` fail `prettier --check`.
+      Pre-existing, left alone rather than sweeping unrelated files into this diff.
+- [ ] Everything STEP 6 left open below still stands.
+
 ### 2026-08-07 — STEP 4 (backfill): Camera, backdrop, sway and culling
 
 STEP 6's entry recorded that STEPs 3 and 4 were only partly delivered: STEP 3's
@@ -51,7 +190,7 @@ were left alone. What was missing:
     left the first clicks producing nothing.
 - **Distant hills**, two bands of summed sines on the horizon with horizontal
   parallax, dimmed toward night. Reserved for the Old Growth forest (STEP 13).
-- **Backdrop follows the camera.** Sky, hills and soil are drawn against the
+- **Backdrop follows the camera.** Sky and hills are drawn against the
   *projected* ground line, so panning to the roots takes the horizon off the top
   of the screen the way a real horizon goes.
 - **Viewport culling** before every draw pass, which is what keeps a 500-node
@@ -68,15 +207,25 @@ console errors, wheel-pan reaches the roots, pinch-zoom holds the cursor point,
 panning up stops at the cloud ceiling, branches taper and roots read against the
 soil.
 
+**Merge note.** STEP 7 landed on this branch in parallel. Where the two met —
+what gets drawn below the ground line — STEP 7 wins: `drawBackdrop` now owns the
+sky and hills only, `drawSoil` owns the strata, and the horizon line is drawn
+once between them. The draw order in `Renderer.draw` is the seam.
+
 **Open TODOs from this step**
 
 - [ ] STEP 4 asks for bark colour *per species*; species do not exist until STEP
       10. `woodColor()` still keys off node type — give it a species argument
       there.
-- [ ] `CLOUD_LEVEL_Y` / `BEDROCK_Y` are in canonical units (±2.4). STEP 7
-      specifies soil strata in pixels (Topsoil 0…−300, Bedrock below −1600);
-      reconcile the two scales when the strata land, and expect the empty sky
-      and soil at the clamp limits to fill in over STEPs 7–8.
+- [ ] `CLOUD_LEVEL_Y` / `BEDROCK_Y` are in canonical units (±2.4). STEP 7 landed
+      in parallel with this and quotes strata in *soil units*
+      (`SOIL_UNITS_PER_CANONICAL` = 1000, Bedrock below 1600 — i.e. −1.6
+      canonical), so the camera's floor clears the bedrock with room to spare.
+      Worth folding both into `balance.ts` at STEP 19 rather than leaving two
+      unit systems facing each other.
+- [ ] The sky at the cloud ceiling is still empty — STEP 8's sun and moon fill
+      it. (The soil half was empty when this step was written; STEP 7's strata
+      have since filled it.)
 - [ ] Sway and parallax should respect `prefers-reduced-motion` (STEP 16 owns
       this).
 - [ ] No demo tree was added for STEP 4's acceptance wording — the real tree is

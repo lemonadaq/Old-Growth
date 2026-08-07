@@ -1,15 +1,16 @@
-import { BEDROCK_Y, CLOUD_LEVEL_Y, type Viewport } from '../engine/camera';
+import { CLOUD_LEVEL_Y, type Viewport } from '../engine/camera';
 import type { DayCycle } from '../engine/daylight';
 import type { TreeLayout } from '../engine/tree';
 import { lerpColor } from './color';
 import { PALETTE, SKY_KEYFRAMES, type SkyColors } from './palette';
 
 /**
- * The world behind the tree: sky, distant hills, and the soil cross-section.
+ * Everything above the ground line: the sky and the distant hills. What lies
+ * below it belongs to `./soil.ts`.
  *
- * Everything here is drawn relative to the *projected* ground line rather than
- * a fixed fraction of the canvas, because the camera moves: pan to the roots
- * and the horizon has to leave the top of the screen like a real horizon does.
+ * Both are drawn relative to the *projected* ground line rather than a fixed
+ * fraction of the canvas, because the camera moves: pan to the roots and the
+ * horizon has to leave the top of the screen like a real horizon does.
  */
 
 /** The sky gradient at a given point in the day. */
@@ -89,11 +90,10 @@ function drawHillBand(
 }
 
 /**
- * Draw the backdrop.
+ * Draw the sky and the hills standing on the horizon.
  *
- * Order matters and is fixed: sky, then hills against it, then the soil
- * cross-section over their feet, then (by the caller) the tree in front of all
- * of it.
+ * Order matters and is fixed: sky, then hills against it, then (by the caller)
+ * the soil cross-section over their feet, and the tree in front of all of it.
  */
 export function drawBackdrop(
   ctx: CanvasRenderingContext2D,
@@ -143,22 +143,5 @@ export function drawBackdrop(
       lerpColor(PALETTE.hillNear, PALETTE.hillNearNight, night),
     );
     ctx.restore();
-  }
-
-  // Soil cross-section, anchored to the bedrock so the strata stay put in the
-  // world while the camera travels down them.
-  if (skyBottom < h) {
-    const bedrockY = groundY - BEDROCK_Y * layout.scale;
-    const soil = ctx.createLinearGradient(0, groundY, 0, bedrockY);
-    soil.addColorStop(0, PALETTE.soilTop);
-    soil.addColorStop(1, PALETTE.soilBottom);
-    ctx.fillStyle = soil;
-    ctx.fillRect(0, skyBottom, w, h - skyBottom);
-  }
-
-  // The line where air meets earth.
-  if (groundY >= -2 && groundY <= h + 2) {
-    ctx.fillStyle = PALETTE.horizon;
-    ctx.fillRect(0, groundY - 1, w, 2);
   }
 }

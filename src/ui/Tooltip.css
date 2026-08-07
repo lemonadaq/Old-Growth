@@ -48,6 +48,11 @@
   color: #e0a458;
 }
 
+.tooltip__note {
+  opacity: 0.6;
+  font-weight: 400;
+}
+
 .tooltip__hint {
   margin: 6px 0 0;
   opacity: 0.6;

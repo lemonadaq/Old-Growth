@@ -22,10 +22,13 @@ import {
   type TreeLayout,
   type TreeSegment,
 } from '../engine/tree';
+import { BARREN_SOIL, type SoilMap } from '../engine/soil';
 import { placeOption, type NodePlacement } from '../engine/treeGraph';
 import type { GameSnapshot } from '../engine/types';
 import { drawComboMeter } from './comboMeter';
 import { EffectPool } from './effects';
+import { PALETTE } from './palette';
+import { drawSoil } from './soil';
 import {
   drawRadialMenu,
   hitTestRadialMenu,
@@ -67,6 +70,7 @@ export class Renderer {
   readonly effects = new EffectPool();
 
   private tree: readonly TreeSegment[] = [];
+  private soil: SoilMap = BARREN_SOIL;
   private placements: ReadonlyMap<string, NodePlacement> = new Map();
   private bounds: TreeBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
   private screenTree: ScreenSegment[] = [];
@@ -120,6 +124,14 @@ export class Renderer {
     this.placements = placements;
     this.bounds = treeBounds(segments);
     this.projectTreeToScreen();
+  }
+
+  /**
+   * Supply the ground to draw. Generated once per world from a seed, so unlike
+   * the tree this never needs re-pushing.
+   */
+  setSoil(soil: SoilMap): void {
+    this.soil = soil;
   }
 
   /** Track the pointer so the combo meter can follow it. `null` hides it. */
@@ -342,12 +354,22 @@ export class Renderer {
    * @param now      timestamp (ms) driving the time-based click effects.
    */
   draw(snapshot: GameSnapshot, _alpha: number, now: number = Date.now()): void {
-    const { ctx } = this;
+    const { ctx, cssWidth: w, cssHeight: h } = this;
     const viewport = this.viewport;
+    // The soil surface is the trunk's own base, taken from the layout rather
+    // than recomputed, so the sky, the strata and the tree share one ground
+    // line — and all three travel together under the camera.
+    const horizonY = this.layout.originY;
 
-    // Sky, hills, then the soil cross-section — all keyed off the projected
-    // ground line, so the whole world moves together under the camera.
+    // Sky and the hills standing on the horizon.
     drawBackdrop(ctx, viewport, this.layout, dayCycle(snapshot.elapsedSeconds));
+
+    // Soil: strata bands and the mineral pockets buried in them.
+    drawSoil(ctx, w, h, this.layout, this.soil);
+
+    // Horizon line where canopy air meets the ground.
+    ctx.fillStyle = PALETTE.horizon;
+    ctx.fillRect(0, horizonY - 1, w, 2);
 
     drawTree(ctx, this.screenTree, now, this.spawns, viewport);
 

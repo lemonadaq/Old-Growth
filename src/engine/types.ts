@@ -3,8 +3,10 @@ import type { ResourceId } from '../content/resources';
 import type { ClickStats } from './clicker';
 import { createComboState, type ComboState } from './combo';
 import type { Producer } from './economy';
+import { computeHydration, type HydrationState } from './hydration';
 import { ModifierSet } from './modifiers';
 import { ResourceRegistry } from './resourceRegistry';
+import { createSoilMap, type SoilMap } from './soil';
 import { TreeGraph } from './treeGraph';
 import { UpgradeLedger } from './upgrades';
 
@@ -21,6 +23,10 @@ export interface GameState {
   modifiers: ModifierSet;
   /** The player's tree: the growth graph that is also the skill tree. */
   tree: TreeGraph;
+  /** The ground the roots grow through: strata and mineral veins. */
+  soil: SoilMap;
+  /** Latest hydration reading, recomputed every tick. */
+  hydration: HydrationState;
   /** Click combo meter. */
   combo: ComboState;
   /** Levels owned per upgrade. */
@@ -47,6 +53,20 @@ export interface ComboSnapshot {
   readonly fill: number;
 }
 
+/** The hydration link as the HUD reads it. */
+export interface HydrationSnapshot {
+  /** Water per second the roots draw. */
+  readonly income: Decimal;
+  /** Water per second the canopy wants. */
+  readonly need: Decimal;
+  /** Leaf clusters currently drinking. */
+  readonly leaves: number;
+  /** Raw supply ÷ demand, before clamping. */
+  readonly ratio: number;
+  /** The multiplier applied to Light and to Sap per tap. */
+  readonly value: number;
+}
+
 /** One upgrade's purchase state, resolved against the player's balance. */
 export interface UpgradeSnapshot {
   readonly id: string;
@@ -70,6 +90,8 @@ export interface GameSnapshot {
   readonly perSecond: Readonly<Resources>;
   /** Current click stats after modifiers. */
   readonly clickStats: ClickStats;
+  /** How well the roots are supplying the canopy. */
+  readonly hydration: HydrationSnapshot;
   readonly combo: ComboSnapshot;
   readonly upgrades: readonly UpgradeSnapshot[];
   /** Lifetime count of successful taps on the tree. */
@@ -99,6 +121,8 @@ export function createInitialState(now: number = Date.now()): GameState {
     producers: new Map(),
     modifiers: new ModifierSet(),
     tree: TreeGraph.seedling(),
+    soil: createSoilMap(),
+    hydration: computeHydration(new Decimal(0), 0),
     combo: createComboState(),
     upgrades: new UpgradeLedger(),
     clicks: 0,

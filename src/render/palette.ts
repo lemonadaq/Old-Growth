@@ -26,6 +26,16 @@ export const PALETTE = {
   root: '#a8875e',
   rootShade: '#7d6244',
   rootTip: '#d3bd99',
+  /**
+   * Underground detail. The band fills themselves are content (see
+   * `src/content/soil.ts`); these are the lines and ore drawn over them.
+   */
+  stratumEdge: 'rgba(20, 14, 9, 0.35)',
+  stratumLabel: 'rgba(253, 243, 224, 0.34)',
+  /** Mineral pockets: the soft halo, the ore specks, and the specks' shadow. */
+  veinGlow: 'rgba(214, 190, 126, 0.22)',
+  vein: '#cbb478',
+  veinCore: '#f2e4b6',
   /** Feedback: ordinary gain, critical gain, and the click ripple. */
   gain: '#fdf3e0',
   crit: '#ffcc4d',

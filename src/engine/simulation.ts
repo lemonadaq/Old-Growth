@@ -4,7 +4,8 @@ import { GROWTH_RULE_BY_TYPE, type TreeNodeType } from '../content/growth';
 import type { HybridDef } from '../content/hybrids';
 import { DEW_MIN_TAPS, DEW_SECONDS, EXPOSURE_INTERVAL_SECONDS } from '../content/light';
 import { RESOURCE_IDS } from '../content/resources';
-import { SPECIES } from '../content/species';
+import { SPECIES, STARTER_SPECIES_ID } from '../content/species';
+import { SYMBIONTS, SYMBIONT_BY_ID } from '../content/symbionts';
 import { TOTEM_BY_ID } from '../content/totems';
 import { UPGRADES, UPGRADE_BY_ID } from '../content/upgrades';
 import { buffModifiers, buffSource, type ActiveBuff } from './buffs';
@@ -39,6 +40,16 @@ import {
   SPECIES_SOURCE,
   type UnlockContext,
 } from './species';
+import {
+  conditionProgress,
+  isSymbiontMaxed,
+  symbiontContext,
+  symbiontLevelCost,
+  symbiontModifiers,
+  symbiontProgressAll,
+  veinReachOf,
+  SYMBIONT_SOURCE,
+} from './symbionts';
 import { hasFreeSlot, totemCost, totemModifiers, TOTEM_SOURCE } from './totems';
 import { type TreeNode } from './treeGraph';
 import { isMaxed, upgradeCost, upgradeModifiers, upgradeSource } from './upgrades';
@@ -50,6 +61,7 @@ import {
   type LeafLight,
   type Resources,
   type SpeciesSnapshot,
+  type SymbiontSnapshot,
   type UpgradeSnapshot,
 } from './types';
 
@@ -96,19 +108,41 @@ export interface PruneResult {
 export class Simulation {
   readonly state: GameState;
 
-  constructor(initial: GameState = createInitialState()) {
+  /**
+   * The free roots the squirrel's buried nuts sprouted into on the way in.
+   *
+   * Empty on a fresh tree, and empty today on every tree — nothing persists yet
+   * (STEP 15), so no nut has ever survived to a second session. It is the hook
+   * the "While you were away" summary (STEP 14) will read.
+   */
+  readonly sproutedNuts: readonly TreeNode[];
+
+  constructor(initial: GameState = createInitialState(), random: RandomSource = Math.random) {
     this.state = initial;
+
+    // Before anything is measured: a nut buried before the tab closed sprouts
+    // now, so the free root is part of the tree that loads rather than something
+    // that appears on top of it a moment later.
+    this.sproutedNuts = this.sproutNuts(random);
+
     this.syncPartProducers();
     // Permanent auras and any running buffs first: they are inputs to everything
     // measured below them, and a loaded save arrives with both already set. The
     // species mix is the same kind of standing input — it is a property of the
-    // tree that was just loaded, not an event.
+    // tree that was just loaded, not an event. So are the residents: a symbiont
+    // is not an event either, and its vein reach has to be known before the
+    // first root tip is priced.
+    this.publishSymbiontModifiers();
     this.republishSpecies();
     this.republishTotems();
     this.republishBuffs();
+    // Producers are rebuilt once the reach is known: a root tip that only finds
+    // its pocket through the fungus would otherwise load barren.
+    this.syncPartProducers();
     this.updateDaylight();
     this.updateHydration();
     this.updateLightExposure();
+    this.updateSymbionts();
   }
 
   /** Register (or replace) a producer by its id. */
@@ -201,6 +235,7 @@ export class Simulation {
       this.state.modifiers,
       this.state.soil,
       speciesId,
+      this.state.veinReach,
     );
   }
 
@@ -285,6 +320,7 @@ export class Simulation {
     const producer = partProducer(node, {
       soil: this.state.soil,
       placement: tree.placements().get(node.id),
+      veinReach: this.state.veinReach,
     });
     if (producer) this.addProducer(producer);
 
@@ -299,6 +335,10 @@ export class Simulation {
     // lands, not on the next sweep.
     this.updateHydration();
     this.updateLightExposure();
+    // Growing is the only thing that can *satisfy* an attraction condition, so
+    // the third blossom brings the bees on the purchase rather than up to a
+    // tenth of a second later.
+    this.updateSymbionts();
     return node;
   }
 
@@ -344,6 +384,10 @@ export class Simulation {
     this.republishSpecies();
     this.updateHydration();
     this.updateLightExposure();
+    // A cut cannot evict anyone, but it moves the progress bars of everyone who
+    // has not arrived yet, and the panel should not read a tenth of a second
+    // stale.
+    this.updateSymbionts();
     return { quote, removed, surge };
   }
 
@@ -388,6 +432,8 @@ export class Simulation {
     this.republishSpecies();
     this.updateHydration();
     this.updateLightExposure();
+    // The scion changed species, and the squirrel counts oak branches.
+    this.updateSymbionts();
 
     return { quote, hybrid: quote.hybrid, changed: changed.map((node) => node.id), discovered };
   }
@@ -472,6 +518,191 @@ export class Simulation {
   }
 
   /**
+   * Settle in any creature the tree has become worth living in, and refresh
+   * every symbiont's standing for the panel.
+   *
+   * Arrivals are queued rather than returned, because they happen inside the
+   * tick and the thing that wants to celebrate them is a React component two
+   * layers away — see {@link drainSymbiontArrivals}.
+   *
+   * A resident is never evicted. Pruning the blossoms that drew the bees does
+   * not send them away: the conditions are an *attraction* mechanic, and a
+   * creature that has to be maintained would turn every cut into a hostage
+   * negotiation.
+   */
+  updateSymbionts(): string[] {
+    const ctx = symbiontContext(this.state.tree, (resource) => this.state.resources.total(resource));
+
+    const arrived: string[] = [];
+    for (const def of SYMBIONTS) {
+      if (this.state.symbionts.has(def.id)) continue;
+      if (!conditionProgress(def.condition, ctx).met) continue;
+      if (this.state.symbionts.arrive(def, this.state.elapsedSeconds)) arrived.push(def.id);
+    }
+
+    if (arrived.length > 0) {
+      this.state.symbiontArrivals.push(...arrived);
+      this.republishSymbionts();
+    }
+
+    this.state.symbiontProgress = symbiontProgressAll(
+      this.state.symbionts,
+      ctx,
+      this.state.elapsedSeconds,
+    );
+    return arrived;
+  }
+
+  /**
+   * Take the arrivals nobody has celebrated yet. Draining is the point: an
+   * arrival is a one-off event, and a queue the UI empties cannot replay a
+   * toast on the next frame the way a flag on the snapshot would.
+   */
+  drainSymbiontArrivals(): string[] {
+    if (this.state.symbiontArrivals.length === 0) return [];
+    return this.state.symbiontArrivals.splice(0, this.state.symbiontArrivals.length);
+  }
+
+  /**
+   * Settle the payouts that run on a clock: the songbird's Seed Fragments and
+   * the squirrel's buried nuts.
+   *
+   * Counted in whole intervals rather than once per call, so the same code is
+   * correct for a 100 ms tick and for STEP 14's offline catch-up.
+   */
+  private collectSymbiontPayouts(): void {
+    for (const { id, count } of this.state.symbionts.claimDue(this.state.elapsedSeconds)) {
+      const payout = SYMBIONT_BY_ID[id]?.cadence?.payout;
+      if (!payout) continue;
+
+      const earned = count * payout.perLevel * this.state.symbionts.level(id);
+      if (payout.kind === 'seedFragments') {
+        this.state.seedFragments += earned;
+      } else {
+        this.state.buriedNuts += earned;
+      }
+    }
+  }
+
+  /**
+   * Publish the residents' modifiers and re-read the reach they lend to
+   * mineral detection. Returns whether that reach moved.
+   *
+   * Split out from {@link republishSymbionts} so construction can order the
+   * refresh itself: at that point there are no producers to rebuild yet.
+   */
+  private publishSymbiontModifiers(): boolean {
+    this.state.modifiers.removeBySource(SYMBIONT_SOURCE);
+
+    const living = this.state.symbionts.entries();
+    for (const modifier of symbiontModifiers(living)) {
+      this.state.modifiers.add(modifier);
+    }
+
+    const reach = veinReachOf(living);
+    const moved = reach !== this.state.veinReach;
+    this.state.veinReach = reach;
+    return moved;
+  }
+
+  /**
+   * Republish every resident's effects after an arrival or a level-up.
+   *
+   * A wider vein reach can turn a barren root tip into a producing one, and a
+   * producer that does not exist cannot be patched — so the whole part
+   * pipeline is rebuilt whenever the reach moves, the same from-scratch path a
+   * graft takes.
+   */
+  republishSymbionts(): void {
+    if (this.publishSymbiontModifiers()) this.syncPartProducers();
+    this.updateHydration();
+    this.updateLightExposure();
+  }
+
+  /**
+   * Buy one level of a symbiont's track, paying every line of its price.
+   *
+   * Returns `false` and changes nothing when it has not arrived, is already at
+   * the top of its track, or any one line cannot be met — prices are mixed on
+   * purpose, and a partial payment would be worse than a refusal.
+   */
+  upgradeSymbiont(id: string): boolean {
+    const def = SYMBIONT_BY_ID[id];
+    if (!def) return false;
+
+    const level = this.state.symbionts.level(id);
+    if (level <= 0 || isSymbiontMaxed(level)) return false;
+
+    const cost = symbiontLevelCost(def, level);
+    if (!cost) return false;
+
+    for (const line of cost) {
+      if (this.state.resources.amount(line.resource).lt(line.amount)) return false;
+    }
+    for (const line of cost) {
+      this.state.resources.add(line.resource, line.amount.neg());
+    }
+
+    this.state.symbionts.setLevel(id, level + 1);
+    this.republishSymbionts();
+    // The panel reads the banked progress rows, so they have to move with the
+    // purchase: a level pip that fills a tenth of a second after the click reads
+    // as the button not having worked.
+    this.updateSymbionts();
+    return true;
+  }
+
+  /**
+   * Grow the buried nuts into free root segments, without touching anything
+   * else. The low-level half of {@link plantBuriedNuts}, so the constructor can
+   * order the refresh that follows for itself.
+   *
+   * A nut that has nowhere to sprout is *kept*, not spent: the ground is full
+   * today and will not be after the next prune.
+   */
+  private sproutNuts(random: RandomSource): TreeNode[] {
+    const grown: TreeNode[] = [];
+
+    while (this.state.buriedNuts > 0) {
+      const hosts = this.state.tree
+        .allNodes()
+        .filter((node) =>
+          this.state.tree.getValidGrowthOptions(node.id).some((o) => o.type === 'rootSegment'),
+        );
+      if (hosts.length === 0) break;
+
+      const host = hosts[Math.min(hosts.length - 1, Math.floor(random() * hosts.length))];
+      // A squirrel buries acorns, and it took up residence in an oak — so what
+      // comes up is oak, whatever the player happens to be planting today.
+      const node = this.state.tree.grow(host.id, 'rootSegment', STARTER_SPECIES_ID, this.state.tick);
+      if (!node) break;
+
+      this.state.buriedNuts -= 1;
+      grown.push(node);
+    }
+
+    return grown;
+  }
+
+  /**
+   * Sprout every buried nut into a free root segment and bring the economy back
+   * into step. Returns the new roots.
+   *
+   * Called once on the way into a session (see the constructor). Exposed so a
+   * test — and, later, the offline calculator — can drive it directly.
+   */
+  plantBuriedNuts(random: RandomSource = Math.random): TreeNode[] {
+    const grown = this.sproutNuts(random);
+    if (grown.length === 0) return grown;
+
+    this.syncPartProducers();
+    this.republishSpecies();
+    this.updateHydration();
+    this.updateLightExposure();
+    return grown;
+  }
+
+  /**
    * Rebuild every part producer from the tree graph.
    *
    * Growth and pruning keep producers in step incrementally; this is the
@@ -487,6 +718,7 @@ export class Simulation {
         soil: this.state.soil,
         placement: placements.get(node.id),
         exposure: this.state.leafLight.get(node.id)?.exposure,
+        veinReach: this.state.veinReach,
       });
       if (producer) this.addProducer(producer);
     }
@@ -533,6 +765,7 @@ export class Simulation {
         soil: this.state.soil,
         placement: placements.get(nodeId),
         exposure: exposure.exposure,
+        veinReach: this.state.veinReach,
       });
 
       let rate = new Decimal(0);
@@ -610,11 +843,15 @@ export class Simulation {
     this.state.lastUpdatedAt = Date.now();
 
     // Order matters. Lapsed buffs go first — a tick must not pay out through a
-    // modifier whose time ran out before it started. Then the sun sets the
-    // ceiling on what Light is worth, hydration sets what the roots can pay for,
-    // and only then is it worth asking what each leaf is earning — so the rate
-    // banked for the tooltips is the one the tick actually pays out.
+    // modifier whose time ran out before it started. Residents follow, because
+    // one arriving is a standing input to everything below it and not an event
+    // the tick should pay around. Then the sun sets the ceiling on what Light is
+    // worth, hydration sets what the roots can pay for, and only then is it
+    // worth asking what each leaf is earning — so the rate banked for the
+    // tooltips is the one the tick actually pays out.
     this.updateBuffs();
+    this.updateSymbionts();
+    this.collectSymbiontPayouts();
     this.updateDaylight();
     this.updateHydration();
 
@@ -689,6 +926,18 @@ export class Simulation {
       };
     });
 
+    const symbionts: SymbiontSnapshot[] = this.state.symbiontProgress.map((progress) => {
+      const def = SYMBIONT_BY_ID[progress.id];
+      const nextCost = def ? symbiontLevelCost(def, progress.level) : null;
+      return {
+        ...progress,
+        maxed: progress.active && isSymbiontMaxed(progress.level),
+        nextCost,
+        affordable:
+          nextCost !== null && nextCost.every((line) => resources[line.resource].gte(line.amount)),
+      };
+    });
+
     return {
       resources,
       totals,
@@ -712,6 +961,10 @@ export class Simulation {
       },
       upgrades,
       buffs,
+      symbionts,
+      veinReach: this.state.veinReach,
+      seedFragments: this.state.seedFragments,
+      buriedNuts: this.state.buriedNuts,
       // Copied, not shared: the engine pushes onto this array in place.
       totems: [...this.state.totems],
       species,

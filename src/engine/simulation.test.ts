@@ -15,6 +15,11 @@ import { HYDRATION_SOURCE } from './hydration';
 import { graftCost } from './graft';
 import { partProducerId } from './growth';
 import { STARTER_SPECIES_ID } from '../content/species';
+import {
+  SONGBIRD_INTERVAL_SECONDS,
+  SYMBIONT_BY_ID,
+  SYMBIONT_MAX_LEVEL,
+} from '../content/symbionts';
 import type { TreeNode } from './treeGraph';
 import { DAYLIGHT_SOURCE, lightFactorAt } from './light';
 import { BARREN_SOIL, depthAt, depthMultiplier } from './soil';
@@ -985,5 +990,239 @@ describe('species and grafting', () => {
     expect(sim.state.tree.countBySpecies().has('ghostwood')).toBe(false);
     // The discovery survives the limb: the Journal is a record of the save.
     expect(sim.state.discoveries.has('ghostwood')).toBe(true);
+  });
+});
+
+describe('symbionts', () => {
+  /** A simulation with money to spend and, by default, no ore in the ground. */
+  function funded(soil = BARREN_SOIL): Simulation {
+    const state = createInitialState();
+    state.soil = soil;
+    const sim = new Simulation(state);
+    sim.state.resources.add('sap', new Decimal(500_000));
+    return sim;
+  }
+
+  /** The snapshot row for one creature. */
+  function row(sim: Simulation, id: string) {
+    return sim.snapshot().symbionts.find((entry) => entry.id === id);
+  }
+
+  /** Grow `n` blossoms, which is what the bees are waiting for. */
+  function blossoms(sim: Simulation, n: number): void {
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+    for (let i = 0; i < n; i += 1) {
+      sim.growPart(branch?.id ?? '', 'blossom');
+    }
+  }
+
+  it('leaves a fresh seedling alone — nobody lives in a stick', () => {
+    const sim = new Simulation();
+    expect(sim.snapshot().symbionts.every((entry) => !entry.active)).toBe(true);
+  });
+
+  it('brings the bees on the third blossom and not before', () => {
+    const sim = funded();
+
+    blossoms(sim, 2);
+    expect(row(sim, 'bees')?.active).toBe(false);
+    expect(row(sim, 'bees')?.fraction).toBeCloseTo(2 / 3, 9);
+
+    blossoms(sim, 1);
+    expect(row(sim, 'bees')?.active).toBe(true);
+    expect(row(sim, 'bees')?.level).toBe(1);
+  });
+
+  it('lifts crit chance the moment the hive arrives', () => {
+    const sim = funded();
+    const before = sim.snapshot().clickStats.critChance;
+
+    blossoms(sim, 3);
+    expect(sim.snapshot().clickStats.critChance).toBeCloseTo(before + 0.03, 9);
+  });
+
+  it('keeps a resident after the thing that drew it is cut away', () => {
+    const sim = funded();
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+    for (let i = 0; i < 3; i += 1) sim.growPart(branch?.id ?? '', 'blossom');
+    expect(row(sim, 'bees')?.active).toBe(true);
+
+    sim.prunePart(branch?.id ?? '');
+    expect(sim.state.tree.countOfType('blossom')).toBe(0);
+    expect(row(sim, 'bees')?.active).toBe(true);
+    expect(sim.snapshot().clickStats.critChance).toBeCloseTo(0.05, 9);
+  });
+
+  it('brings the ants on five lifetime Deadwood, and they reach the taps', () => {
+    const sim = funded();
+    expect(row(sim, 'ants')?.active).toBe(false);
+
+    sim.state.resources.add('deadwood', new Decimal(5));
+    sim.tick(0.1);
+
+    expect(row(sim, 'ants')?.active).toBe(true);
+    expect(sim.snapshot().clickStats.clickPower.toNumber()).toBeCloseTo(1.05, 9);
+  });
+
+  it('announces an arrival once, then stops', () => {
+    const sim = funded();
+    // The squirrel comes with the oak branch the blossoms are grown on — it is
+    // the earliest resident in the game, and deliberately so: the first creature
+    // should turn up while the player is still learning what a branch is.
+    blossoms(sim, 3);
+
+    expect(sim.drainSymbiontArrivals()).toEqual(['squirrel', 'bees']);
+    expect(sim.drainSymbiontArrivals()).toEqual([]);
+  });
+
+  it('brings the fungus when a root tip reaches the clay, and widens what a tip can find', () => {
+    // Deterministic geometry: a barren scout tells us exactly where the tip
+    // lands, so the ore can be buried just out of its reach.
+    const scout = funded();
+    let parent = scout.state.tree.rootId;
+    for (let i = 0; i < 3; i += 1) {
+      parent = scout.growPart(parent, 'rootSegment')?.id ?? parent;
+    }
+    const scoutTip = scout.growPart(parent, 'rootTip');
+    const end = scout.state.tree.placements().get(scoutTip?.id ?? '')?.end as Vec2;
+    expect(scout.snapshot().symbionts.find((e) => e.id === 'mycorrhiza')?.active).toBe(true);
+
+    // A pocket 1.4 radii away: out of a bare root's reach, inside the fungus's.
+    const radius = 0.05;
+    const sim = funded({
+      seed: 2,
+      veins: [
+        {
+          id: 'planted',
+          center: { x: end.x + radius * 1.4, y: end.y },
+          radius,
+          richness: 2,
+        },
+      ],
+    });
+
+    // Before the tip exists there is no fungus, so the pocket is out of reach.
+    let chain = sim.state.tree.rootId;
+    for (let i = 0; i < 3; i += 1) {
+      chain = sim.growPart(chain, 'rootSegment')?.id ?? chain;
+    }
+    expect(sim.state.veinReach).toBe(1);
+
+    const tip = sim.growPart(chain, 'rootTip');
+    // The tip is what attracts the fungus, and the fungus is what finds the ore
+    // — so the same purchase does both.
+    expect(sim.state.veinReach).toBeCloseTo(1.5, 9);
+    expect(sim.state.producers.has(partProducerId(tip?.id ?? ''))).toBe(true);
+
+    sim.tick(1);
+    expect(sim.state.resources.perSecond('minerals').toNumber()).toBeGreaterThan(0);
+  });
+
+  it('drops a Seed Fragment on the songbird’s clock, scaled by its level', () => {
+    const sim = funded();
+    sim.state.symbionts.arrive(SYMBIONT_BY_ID.songbird, 0);
+
+    // Whole-second ticks: the payout lands on an exact engine second, and 1800
+    // additions of 0.1 do not.
+    for (let i = 0; i < SONGBIRD_INTERVAL_SECONDS - 1; i += 1) sim.tick(1);
+    expect(sim.state.seedFragments).toBe(0);
+
+    sim.tick(1);
+    expect(sim.state.seedFragments).toBe(1);
+
+    sim.state.symbionts.setLevel('songbird', 3);
+    for (let i = 0; i < SONGBIRD_INTERVAL_SECONDS; i += 1) sim.tick(1);
+    expect(sim.state.seedFragments).toBe(4);
+  });
+
+  it('buries a nut a day, and sprouts it into a free root next session', () => {
+    const sim = funded();
+    sim.state.symbionts.arrive(SYMBIONT_BY_ID.squirrel, 0);
+
+    // A day passes in one jump, the way an offline catch-up will.
+    sim.tick(DAY_LENGTH_SECONDS);
+    expect(sim.state.buriedNuts).toBe(1);
+    // Nothing has grown yet: the nut is in the ground, not in the tree.
+    const before = sim.state.tree.countOfType('rootSegment');
+
+    const next = new Simulation(sim.state);
+    expect(next.sproutedNuts).toHaveLength(1);
+    expect(next.sproutedNuts[0].type).toBe('rootSegment');
+    expect(next.sproutedNuts[0].speciesId).toBe(STARTER_SPECIES_ID);
+    expect(next.state.tree.countOfType('rootSegment')).toBe(before + 1);
+    expect(next.state.buriedNuts).toBe(0);
+    // Free means free: the root produces without anything having been spent.
+    expect(next.state.producers.has(partProducerId(next.sproutedNuts[0].id))).toBe(true);
+  });
+
+  it('keeps a nut it has nowhere to sprout', () => {
+    const state = createInitialState();
+    state.buriedNuts = 2;
+    // A trunk with every child slot taken has no room for a root.
+    const sim = new Simulation(state);
+    for (const nut of sim.sproutedNuts) expect(nut.type).toBe('rootSegment');
+    expect(sim.state.buriedNuts + sim.sproutedNuts.length).toBe(2);
+  });
+
+  it('buys a level, paying every line of a mixed price', () => {
+    const sim = funded();
+    blossoms(sim, 3);
+    sim.state.resources.add('light', new Decimal(1000));
+
+    const sapBefore = sim.state.resources.amount('sap');
+    const lightBefore = sim.state.resources.amount('light');
+    const [light, sap] = SYMBIONT_BY_ID.bees.upgrades[0];
+
+    expect(sim.upgradeSymbiont('bees')).toBe(true);
+    expect(sim.state.symbionts.level('bees')).toBe(2);
+    expect(sim.state.resources.amount('light').toNumber()).toBeCloseTo(
+      lightBefore.toNumber() - light.amount,
+      9,
+    );
+    expect(sim.state.resources.amount('sap').toNumber()).toBeCloseTo(
+      sapBefore.toNumber() - sap.amount,
+      9,
+    );
+    expect(sim.snapshot().clickStats.critChance).toBeCloseTo(0.02 + 0.06, 9);
+  });
+
+  it('refuses a level it cannot pay for in full, and spends nothing', () => {
+    const sim = funded();
+    blossoms(sim, 3);
+    // Plenty of Sap, no Light: half a mixed price is not a price.
+    const sapBefore = sim.state.resources.amount('sap').toNumber();
+
+    expect(sim.upgradeSymbiont('bees')).toBe(false);
+    expect(sim.state.symbionts.level('bees')).toBe(1);
+    expect(sim.state.resources.amount('sap').toNumber()).toBe(sapBefore);
+  });
+
+  it('refuses a creature that has not arrived, and one already at the top', () => {
+    const sim = funded();
+    expect(sim.upgradeSymbiont('bees')).toBe(false);
+
+    blossoms(sim, 3);
+    sim.state.resources.add('light', new Decimal(1e6));
+    sim.state.resources.add('minerals', new Decimal(1e6));
+    for (let i = 1; i < SYMBIONT_MAX_LEVEL; i += 1) {
+      expect(sim.upgradeSymbiont('bees')).toBe(true);
+    }
+    expect(sim.state.symbionts.level('bees')).toBe(SYMBIONT_MAX_LEVEL);
+    expect(sim.upgradeSymbiont('bees')).toBe(false);
+    expect(row(sim, 'bees')?.maxed).toBe(true);
+    expect(row(sim, 'bees')?.nextCost).toBeNull();
+  });
+
+  it('refuses an unknown creature', () => {
+    expect(funded().upgradeSymbiont('dragon')).toBe(false);
+  });
+
+  it('quotes affordability against live balances', () => {
+    const sim = funded();
+    blossoms(sim, 3);
+    expect(row(sim, 'bees')?.affordable).toBe(false);
+
+    sim.state.resources.add('light', new Decimal(1000));
+    expect(row(sim, 'bees')?.affordable).toBe(true);
   });
 });

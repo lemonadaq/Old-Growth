@@ -1,0 +1,193 @@
+/* STEP 11's residents. The final UI (STEP 18) folds this into the dock. */
+.symbionts {
+  pointer-events: auto; /* the HUD ignores pointer events by default */
+  position: absolute;
+  top: 56px;
+  right: 12px;
+  width: 300px;
+  max-height: calc(100% - 96px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 10px;
+  backdrop-filter: blur(4px);
+}
+
+.symbionts__title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hud-muted);
+}
+
+.symbionts__count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  color: var(--hud-accent);
+}
+
+.symbionts__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.symbiont {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 9px;
+  background: rgba(255, 240, 214, 0.06);
+  border: 1px solid var(--hud-border);
+  border-left: 3px solid var(--hud-accent);
+  border-radius: 8px;
+}
+
+/* Still being courted: present and legible, but plainly not here yet. */
+.symbiont--locked {
+  border-left-color: rgba(253, 243, 224, 0.25);
+  background: rgba(253, 243, 224, 0.03);
+  opacity: 0.78;
+}
+
+.symbiont__name {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.symbiont__level {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--hud-muted);
+}
+
+.symbiont__flavor {
+  margin: 0;
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1.35;
+  color: var(--hud-muted);
+}
+
+.symbiont__effect {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.symbiont__pips {
+  display: flex;
+  gap: 3px;
+  margin-top: 2px;
+}
+
+.symbiont__pip {
+  width: 100%;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(253, 243, 224, 0.15);
+}
+
+.symbiont__pip--filled {
+  background: var(--hud-accent);
+}
+
+.symbiont__timer {
+  margin: 0;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--hud-muted);
+}
+
+.symbiont__buy {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+  padding: 5px 7px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  color: var(--hud-text);
+  background: rgba(255, 240, 214, 0.06);
+  border: 1px solid var(--hud-border);
+  border-radius: 6px;
+  transition: background-color 120ms ease;
+}
+
+.symbiont__buy:hover:not(:disabled) {
+  background: rgba(255, 210, 122, 0.16);
+}
+
+.symbiont__buy:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.symbiont__cost {
+  display: flex;
+  gap: 7px;
+  font-variant-numeric: tabular-nums;
+  color: var(--hud-accent);
+}
+
+.symbiont__maxed {
+  margin: 2px 0 0;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--hud-muted);
+}
+
+.symbiont__locked {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--hud-muted);
+}
+
+.symbiont__bar {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(253, 243, 224, 0.15);
+  overflow: hidden;
+}
+
+.symbiont__bar > span {
+  display: block;
+  height: 100%;
+  background: var(--hud-accent);
+}
+
+.symbionts__footer {
+  margin: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.35;
+  color: var(--hud-muted);
+  opacity: 0.85;
+}

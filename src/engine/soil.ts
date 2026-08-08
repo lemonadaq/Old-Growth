@@ -149,25 +149,34 @@ export const BARREN_SOIL: SoilMap = { seed: 0, veins: [] };
 /**
  * The pocket containing `point`, or `null`. When pockets overlap the richest
  * one wins, so a root tip is never punished for landing in two at once.
+ *
+ * `reach` widens every pocket's radius without moving it or changing what it is
+ * worth — a root that could not *find* the ore now can. It is how the
+ * mycorrhiza's hyphae are modelled: a fungal network does not create minerals,
+ * it extends how far a root can feel for them. `1` is a root's own senses.
  */
-export function veinAt(soil: SoilMap, point: Vec2): MineralVein | null {
+export function veinAt(soil: SoilMap, point: Vec2, reach = 1): MineralVein | null {
+  const scale = Math.max(0, reach);
   let best: MineralVein | null = null;
+
   for (const vein of soil.veins) {
     const dx = point.x - vein.center.x;
     const dy = point.y - vein.center.y;
-    if (dx * dx + dy * dy > vein.radius * vein.radius) continue;
+    const radius = vein.radius * scale;
+    if (dx * dx + dy * dy > radius * radius) continue;
     if (best === null || vein.richness > best.richness) best = vein;
   }
+
   return best;
 }
 
 /** Everything the economy needs to know about one point in the ground. */
-export function soilConditionsAt(soil: SoilMap, point: Vec2): SoilConditions {
+export function soilConditionsAt(soil: SoilMap, point: Vec2, reach = 1): SoilConditions {
   const depth = depthAt(point.y);
   return {
     depth,
     stratum: stratumAt(depth),
     multiplier: depthMultiplier(depth),
-    vein: veinAt(soil, point),
+    vein: veinAt(soil, point, reach),
   };
 }

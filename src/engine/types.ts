@@ -12,6 +12,7 @@ import { lightFactorAt, type LeafExposure } from './light';
 import { ModifierSet } from './modifiers';
 import { ResourceRegistry } from './resourceRegistry';
 import { createSoilMap, type SoilMap } from './soil';
+import { SymbiontLedger, type SymbiontCost, type SymbiontProgress } from './symbionts';
 import { TreeGraph } from './treeGraph';
 import { UpgradeLedger } from './upgrades';
 
@@ -59,6 +60,30 @@ export interface GameState {
   upgrades: UpgradeLedger;
   /** Timed buffs currently running, keyed by id. */
   buffs: BuffLedger;
+  /** Creatures living in the tree, at their levels. */
+  symbionts: SymbiontLedger;
+  /** Latest reading of who has arrived and who is still being courted. */
+  symbiontProgress: readonly SymbiontProgress[];
+  /**
+   * How far out a root tip currently feels for ore, as a multiplier on every
+   * pocket's radius. Cached because it is an input to every root tip's producer
+   * and to the way the ground is drawn, and it only moves when the mycorrhiza
+   * does.
+   */
+  veinReach: number;
+  /**
+   * Seed Fragments the songbird has dropped. A hundred make a Seed at prestige
+   * (STEP 13); until then they simply accrue.
+   */
+  seedFragments: number;
+  /**
+   * Nuts the squirrel has buried and not dug up. They sprout into free root
+   * segments on the way into the *next* session — see
+   * `Simulation.plantBuriedNuts`.
+   */
+  buriedNuts: number;
+  /** Symbionts that arrived since the UI last looked, oldest first. */
+  symbiontArrivals: string[];
   /** Totems planted at the tree base, in slot order. */
   totems: string[];
   /** The species new parts are grown as — whatever the picker is showing. */
@@ -146,6 +171,19 @@ export interface SpeciesSnapshot {
   readonly grafts: number;
 }
 
+/**
+ * One symbiont as the panel reads it: whether it has arrived, how close the
+ * tree is to attracting it, and what the next level of it would cost.
+ */
+export interface SymbiontSnapshot extends SymbiontProgress {
+  /** True when its track has no further levels. */
+  readonly maxed: boolean;
+  /** Price of the next level, or `null` when there is no next level. */
+  readonly nextCost: readonly SymbiontCost[] | null;
+  /** Whether that price can be met right now. */
+  readonly affordable: boolean;
+}
+
 /** One upgrade's purchase state, resolved against the player's balance. */
 export interface UpgradeSnapshot {
   readonly id: string;
@@ -185,6 +223,14 @@ export interface GameSnapshot {
   readonly upgrades: readonly UpgradeSnapshot[];
   /** Buffs running right now, with the time left on each. */
   readonly buffs: readonly BuffSnapshot[];
+  /** Every symbiont in catalogue order, resident or not. */
+  readonly symbionts: readonly SymbiontSnapshot[];
+  /** How far out root tips currently feel for ore, as a radius multiplier. */
+  readonly veinReach: number;
+  /** Seed Fragments banked toward a Seed at prestige. */
+  readonly seedFragments: number;
+  /** Nuts waiting in the ground for next session. */
+  readonly buriedNuts: number;
   /** Totems planted at the tree base, in slot order. */
   readonly totems: readonly string[];
   /** What the tree is made of, and what the player may plant next. */
@@ -229,6 +275,12 @@ export function createInitialState(now: number = Date.now()): GameState {
     combo: createComboState(),
     upgrades: new UpgradeLedger(),
     buffs: new BuffLedger(),
+    symbionts: new SymbiontLedger(),
+    symbiontProgress: [],
+    veinReach: 1,
+    seedFragments: 0,
+    buriedNuts: 0,
+    symbiontArrivals: [],
     totems: [],
     plantingSpecies: STARTER_SPECIES_ID,
     discoveries: new Set(),

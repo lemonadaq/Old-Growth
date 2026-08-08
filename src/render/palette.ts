@@ -92,6 +92,33 @@ export const PALETTE = {
   graftPanel: 'rgba(20, 40, 24, 0.92)',
   /** Confetti thrown by a first-time hybrid discovery. */
   confetti: ['#ffd27a', '#8fd694', '#f0b6cd', '#fdf3e0', '#6fb7e0'] as readonly string[],
+  /**
+   * The creatures. Each is drawn in two or three flat colours and nothing else:
+   * they are a few pixels across at any sane zoom, and detail at that size reads
+   * as noise. What has to survive is the *silhouette* — a bee is a striped dot
+   * with wings, a bird is a body and a beak — plus enough contrast against the
+   * wood or sky behind it.
+   */
+  bee: '#f2c341',
+  beeStripe: '#3c2a12',
+  beeWing: 'rgba(253, 243, 224, 0.55)',
+  ant: '#3a2416',
+  antTrail: 'rgba(58, 36, 22, 0.35)',
+  /**
+   * The fungal web. Violet rather than pale, and deliberately so: a light sheath
+   * around a root bleaches it into a bare stick against the brown, while a
+   * violet one reads as *something growing on it*.
+   */
+  mycelium: 'rgba(203, 160, 233, 0.72)',
+  myceliumGlow: 'rgba(138, 88, 190, 0.34)',
+  myceliumSpore: '#e6d2f4',
+  songbird: '#5aa7d6',
+  songbirdBelly: '#f6e6c4',
+  songbirdBeak: '#e0a458',
+  squirrel: '#b5713a',
+  squirrelBelly: '#e8cfa8',
+  /** The ring that expands under a creature the moment it turns up. */
+  arrivalRing: 'rgba(253, 243, 224, 0.8)',
   /** Deadwood, and the falling foliage a cut shakes loose. */
   deadwood: '#8a6a4a',
   leafFall: '#8aab55',

@@ -51,6 +51,7 @@ import {
   type SpeciesChip,
 } from './speciesPicker';
 import { drawBackdrop } from './sky';
+import { drawSymbionts, symbiontScene, EMPTY_SCENE, type SymbiontScene } from './symbionts';
 import { drawTotems } from './totems';
 import { computeTreeLayout, drawGhostPart, drawTree } from './tree';
 
@@ -90,6 +91,12 @@ export class Renderer {
   private bounds: TreeBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
   private screenTree: ScreenSegment[] = [];
   private layout: TreeLayout = { originX: 0, originY: 0, scale: 1 };
+
+  /**
+   * Where the creatures live, derived from the projection rather than per frame:
+   * the tree does not move between frames, only the animals on it do.
+   */
+  private scene: SymbiontScene = EMPTY_SCENE;
 
   /** Wall-clock time each node first appeared, driving its scale-in. */
   private readonly spawns = new Map<string, number>();
@@ -415,6 +422,7 @@ export class Renderer {
     }
     this.layout = cameraLayout(this.camera, this.viewport);
     this.screenTree = projectTree(this.tree, this.layout);
+    this.scene = symbiontScene(this.screenTree);
   }
 
   /** Apply a camera change: the player now owns the framing. */
@@ -504,8 +512,9 @@ export class Renderer {
     // Sky, the sun or moon crossing it, and the hills on the horizon.
     drawBackdrop(ctx, viewport, this.layout, snapshot.day);
 
-    // Soil: strata bands and the mineral pockets buried in them.
-    drawSoil(ctx, w, h, this.layout, this.soil);
+    // Soil: strata bands and the mineral pockets buried in them, drawn at
+    // whatever radius the roots can currently feel them from.
+    drawSoil(ctx, w, h, this.layout, this.soil, snapshot.veinReach);
 
     // Horizon line where canopy air meets the ground.
     ctx.fillStyle = PALETTE.horizon;
@@ -516,6 +525,15 @@ export class Renderer {
     drawTotems(ctx, snapshot.totems, this.layout);
 
     drawTree(ctx, this.screenTree, now, this.spawns, viewport, snapshot.leafLight);
+
+    // The creatures go over the tree they live in, and under the mode overlays:
+    // a bee must never obscure the limb the player is about to cut.
+    drawSymbionts(
+      ctx,
+      snapshot.symbionts.filter((s) => s.active),
+      this.scene,
+      snapshot.elapsedSeconds,
+    );
 
     if (this.pruning && this.pruneSelection) {
       drawPruneMark(ctx, this.screenTree, this.pruneSelection, now);

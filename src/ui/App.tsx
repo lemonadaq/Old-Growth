@@ -8,6 +8,7 @@ import type { GraftAssessment } from '../engine/graft';
 import type { PricedGrowthOption } from '../engine/growth';
 import type { PruneQuote } from '../engine/prune';
 import { RESOURCE_BY_ID } from '../content/resources';
+import { SYMBIONT_BY_ID } from '../content/symbionts';
 import { enableTestProducers, disableTestProducers } from '../engine/debugProducers';
 import { Renderer } from '../render/canvas';
 import { GraftTooltip } from './GraftTooltip';
@@ -16,6 +17,7 @@ import { Hud } from './Hud';
 import { Journal } from './Journal';
 import { LeafTooltip } from './LeafTooltip';
 import { PruneTooltip } from './PruneTooltip';
+import { Symbionts } from './Symbionts';
 import { Toast } from './Toast';
 import { Tooltip } from './Tooltip';
 import { UpgradePanel } from './UpgradePanel';
@@ -49,7 +51,7 @@ type HoverState =
       readonly y: number;
     };
 
-/** The one-off card a first-time hybrid throws up. */
+/** The one-off card a first-time hybrid — or a newly arrived creature — throws up. */
 interface DiscoveryToast {
   readonly title: string;
   readonly body: string;
@@ -73,6 +75,7 @@ export function App() {
   const [pruneMode, setPruneMode] = useState(false);
   const [graftMode, setGraftMode] = useState(false);
   const [journalOpen, setJournalOpen] = useState(false);
+  const [symbiontsOpen, setSymbiontsOpen] = useState(false);
   const [toast, setToast] = useState<DiscoveryToast | null>(null);
   const [hover, setHover] = useState<HoverState | null>(null);
 
@@ -99,7 +102,24 @@ export function App() {
       }),
     [],
   );
-  const toggleJournal = useCallback(() => setJournalOpen((open) => !open), []);
+  // The right-hand slot holds one panel at a time; opening either closes the
+  // other rather than stacking two sheets of glass over the tree.
+  const toggleJournal = useCallback(
+    () =>
+      setJournalOpen((open) => {
+        if (!open) setSymbiontsOpen(false);
+        return !open;
+      }),
+    [],
+  );
+  const toggleSymbionts = useCallback(
+    () =>
+      setSymbiontsOpen((open) => {
+        if (!open) setJournalOpen(false);
+        return !open;
+      }),
+    [],
+  );
   const dismissToast = useCallback(() => setToast(null), []);
 
   useEffect(() => {
@@ -523,6 +543,10 @@ export function App() {
         toggleJournal();
         return;
       }
+      if (event.key === 's' || event.key === 'S') {
+        toggleSymbionts();
+        return;
+      }
       // Zoom from the keyboard, for mice with no pinch gesture to offer.
       if (event.key === '+' || event.key === '=') {
         renderer.zoomBy(ZOOM_STEP);
@@ -547,6 +571,22 @@ export function App() {
         syncSpecies(snapshot);
         gameStore.getState().setSnapshot(snapshot);
         renderer.draw(snapshot, alpha, now);
+
+        // A creature turning up is the one thing the engine does entirely on its
+        // own, without the player having pressed anything — so it announces
+        // itself. Drained rather than read off the snapshot: an arrival is an
+        // event, and a flag would re-fire the toast every frame.
+        for (const id of sim.drainSymbiontArrivals()) {
+          const def = SYMBIONT_BY_ID[id];
+          if (!def) continue;
+          setToast({
+            title: `${def.glyph} ${def.name}`,
+            body: def.arrival,
+            glyph: '✦',
+            color: def.color,
+            key: now + id.length,
+          });
+        }
       },
       onStats: (stats) => {
         gameStore.getState().setStats(stats);
@@ -569,7 +609,7 @@ export function App() {
       simRef.current = null;
       rendererRef.current = null;
     };
-  }, [togglePrune, toggleGraft, toggleJournal]);
+  }, [togglePrune, toggleGraft, toggleJournal, toggleSymbionts]);
 
   // Mirror the canvas modes into the places that cannot read React state: the
   // input handlers (through a ref) and the renderer (which draws the marks).
@@ -604,6 +644,10 @@ export function App() {
     simRef.current?.craftTotem(totemId);
   }, []);
 
+  const handleSymbiontUpgrade = useCallback((id: string) => {
+    simRef.current?.upgradeSymbiont(id);
+  }, []);
+
   return (
     <div className="app">
       <canvas
@@ -621,9 +665,17 @@ export function App() {
         onToggleGraft={toggleGraft}
         journalOpen={journalOpen}
         onToggleJournal={toggleJournal}
+        symbiontsOpen={symbiontsOpen}
+        onToggleSymbionts={toggleSymbionts}
       />
       <Workshop onCraft={handleCraft} />
-      {journalOpen ? <Journal /> : <UpgradePanel onBuy={handleBuy} />}
+      {journalOpen ? (
+        <Journal />
+      ) : symbiontsOpen ? (
+        <Symbionts onUpgrade={handleSymbiontUpgrade} />
+      ) : (
+        <UpgradePanel onBuy={handleBuy} />
+      )}
       {toast && (
         <Toast
           key={toast.key}

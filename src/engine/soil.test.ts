@@ -157,6 +157,28 @@ describe('veinAt', () => {
   it('finds nothing at all in barren ground', () => {
     expect(veinAt(BARREN_SOIL, { x: 0, y: -0.5 })).toBeNull();
   });
+
+  it('feels a pocket further out when something widens the reach', () => {
+    // 0.14 out from a 0.1 pocket: beyond a bare root, inside a 1.5× reach.
+    const point = { x: -0.14, y: -0.5 };
+    expect(veinAt(soil, point)).toBeNull();
+    expect(veinAt(soil, point, 1.5)?.id).toBe('a');
+  });
+
+  it('leaves the ore where it is — reach changes what is found, not what is there', () => {
+    // The far pocket is 5 units away and stays out of reach at every level the
+    // mycorrhiza can reach.
+    expect(veinAt(soil, { x: 0, y: -0.5 }, 3.5)?.id).toBe('rich');
+    expect(veinAt(soil, { x: 2.5, y: -0.5 }, 3.5)).toBeNull();
+  });
+
+  it('never lets a negative reach act like a positive one', () => {
+    // The radius is compared squared, so an unclamped -3 would find everything
+    // a 3× reach does.
+    const point = { x: -0.2, y: -0.5 };
+    expect(veinAt(soil, point, 3)).not.toBeNull();
+    expect(veinAt(soil, point, -3)).toBeNull();
+  });
 });
 
 describe('soilConditionsAt', () => {

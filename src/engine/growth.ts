@@ -188,7 +188,9 @@ export function partProducer(
     id: partProducerId(node.id),
     resource: sited.resource,
     baseRate: sited.rate,
-    tags: partProducerTags(node.type, node.speciesId),
+    // The layer goes on the producer, so weather that spares the deep roots can
+    // find the shallow ones. A part with no placement has no layer to name.
+    tags: partProducerTags(node.type, node.speciesId, sited.conditions?.stratum.id),
   };
 }
 
@@ -228,7 +230,10 @@ export function partProductionDelta(
   const sited = siteProduction(type, ctx);
   if (!sited) return null;
 
-  const mods = modifiers.matching(sited.resource, partProducerTags(type, speciesId));
+  const mods = modifiers.matching(
+    sited.resource,
+    partProducerTags(type, speciesId, sited.conditions?.stratum.id),
+  );
   const vein = sited.conditions?.vein ?? null;
 
   return {

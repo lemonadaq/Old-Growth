@@ -40,8 +40,18 @@ export interface UpgradeDef {
 }
 
 /**
- * The first three purchasable upgrades — one per active-play stat, so a player
- * can push raw tap value, crit frequency, or how much combo they can bank.
+ * Id of the Rake: the one upgrade that grants no modifiers at all.
+ *
+ * It buys a *capability* — autumn's leaf-litter piles sweep themselves up — and
+ * the engine reads its level directly. Bending that into a modifier would need a
+ * stat that does not exist to carry a number nobody reads.
+ */
+export const RAKE_ID = 'rake';
+
+/**
+ * The purchasable upgrades — one per active-play stat, so a player can push raw
+ * tap value, crit frequency, or how much combo they can bank; plus the Rake,
+ * which autumn pays for.
  */
 export const UPGRADES: readonly UpgradeDef[] = [
   {
@@ -70,6 +80,18 @@ export const UPGRADES: readonly UpgradeDef[] = [
     baseCost: 250,
     costGrowth: 2,
     effects: [{ type: 'add', target: 'combo.cap', valuePerLevel: 10 }],
+  },
+  {
+    id: RAKE_ID,
+    name: 'Rake',
+    description: 'Sweep the base without stooping. Autumn leaf litter collects itself.',
+    // Paid for in the thing it collects: a few piles swept by hand buy the tool
+    // that sweeps the rest, which is the only price a rake should have.
+    costResource: 'leafLitter',
+    baseCost: 40,
+    costGrowth: 1,
+    maxLevel: 1,
+    effects: [],
   },
 ] as const;
 

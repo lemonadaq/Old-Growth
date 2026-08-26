@@ -1,6 +1,6 @@
 /** Public surface of the pure game engine (no React imports anywhere here). */
 export { GameLoop, TICK_RATE, MS_PER_TICK, MAX_FRAME_MS, type LoopCallbacks } from './loop';
-export { Simulation, type ClickOutcome, type PruneResult } from './simulation';
+export { Simulation, type ClickOutcome, type PruneResult, type TickOptions } from './simulation';
 export { gameStore, type GameStoreState } from './store';
 export { formatNumber } from './format';
 export { ResourceRegistry, type ResourceEntry } from './resourceRegistry';
@@ -95,6 +95,45 @@ export {
 } from './light';
 export { dayCycle, dayFraction, daylightAt, phaseAt, type DayCycle } from './daylight';
 export {
+  RING_SOURCE,
+  SEASON_SOURCE,
+  absoluteSeasonIndex,
+  ringModifiers,
+  ringMultiplier,
+  ringsEarnedBetween,
+  seasonAt,
+  seasonDefAt,
+  seasonModifiers,
+  type SeasonCycle,
+  type SeasonEvent,
+} from './seasons';
+export {
+  MAX_WEATHER_STEPS,
+  WEATHER_SOURCE,
+  WeatherScheduler,
+  braceFraction,
+  chooseSnappedLimbs,
+  eligibleWeather,
+  isWideLimb,
+  limbDeviation,
+  pickWeather,
+  snapChance,
+  weatherGap,
+  weatherModifiers,
+  wideLimbs,
+  type ActiveWeather,
+  type PendingWeather,
+  type StormReport,
+  type WeatherEvent,
+  type WeatherLogEntry,
+} from './weather';
+export {
+  LitterGround,
+  litterAmount,
+  litterPosition,
+  type LitterPile,
+} from './litter';
+export {
   COMBO_BONUS_AT_FULL,
   COMBO_BONUS_PER_STACK,
   COMBO_DECAY_MS,
@@ -139,7 +178,9 @@ export {
   type ComboSnapshot,
   type HydrationSnapshot,
   type LeafLight,
+  type LitterSnapshot,
   type UpgradeSnapshot,
   type Resources,
   type DebugStats,
+  type WeatherSnapshot,
 } from './types';

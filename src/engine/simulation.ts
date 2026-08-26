@@ -1,4 +1,5 @@
 import Decimal from 'break_infinity.js';
+import { LITTER_INTERVAL_SECONDS, STORM_BRACE_TAPS } from '../content/balance';
 import { BUFF_BY_ID, LATERAL_SURGE_ID } from '../content/buffs';
 import { GROWTH_RULE_BY_TYPE, type TreeNodeType } from '../content/growth';
 import type { HybridDef } from '../content/hybrids';
@@ -7,7 +8,8 @@ import { RESOURCE_IDS } from '../content/resources';
 import { SPECIES, STARTER_SPECIES_ID } from '../content/species';
 import { SYMBIONTS, SYMBIONT_BY_ID } from '../content/symbionts';
 import { TOTEM_BY_ID } from '../content/totems';
-import { UPGRADES, UPGRADE_BY_ID } from '../content/upgrades';
+import { RAKE_ID, UPGRADES, UPGRADE_BY_ID } from '../content/upgrades';
+import { WEATHER_BY_ID } from '../content/weather';
 import { buffModifiers, buffSource, type ActiveBuff } from './buffs';
 import { resolveClick, resolveClickStats, type ClickResult, type ClickStats } from './clicker';
 import { comboFill, comboMultiplier, comboStacksAt, registerComboClick } from './combo';
@@ -28,10 +30,21 @@ import {
   lightFactorAt,
   DAYLIGHT_SOURCE,
 } from './light';
+import { litterAmount, litterPosition, type LitterPile } from './litter';
 import { applyModifiers, type Modifier } from './modifiers';
-import { quotePrune, type PruneQuote } from './prune';
+import { deadwoodFor, quotePrune, woodVolume, type PruneQuote } from './prune';
 import { quoteGraft, type GraftAssessment, type GraftQuote } from './graft';
 import type { RandomSource } from './rng';
+import {
+  ringModifiers,
+  ringMultiplier,
+  ringsEarnedBetween,
+  seasonAt,
+  seasonModifiers,
+  RING_SOURCE,
+  SEASON_SOURCE,
+  type SeasonEvent,
+} from './seasons';
 import {
   clickScopes,
   speciesModifiers,
@@ -54,15 +67,26 @@ import { hasFreeSlot, totemCost, totemModifiers, TOTEM_SOURCE } from './totems';
 import { type TreeNode } from './treeGraph';
 import { isMaxed, upgradeCost, upgradeModifiers, upgradeSource } from './upgrades';
 import {
+  braceFraction,
+  chooseSnappedLimbs,
+  weatherModifiers,
+  wideLimbs,
+  WEATHER_SOURCE,
+  type StormReport,
+  type WeatherLogEntry,
+} from './weather';
+import {
   createInitialState,
   type BuffSnapshot,
   type GameSnapshot,
   type GameState,
   type LeafLight,
+  type LitterSnapshot,
   type Resources,
   type SpeciesSnapshot,
   type SymbiontSnapshot,
   type UpgradeSnapshot,
+  type WeatherSnapshot,
 } from './types';
 
 /** What one resolved tap did, including any dawn Dew it happened to collect. */
@@ -81,6 +105,18 @@ export interface GraftResult {
   readonly changed: readonly string[];
   /** True when this hybrid had never been made before. */
   readonly discovered: boolean;
+}
+
+/** How one tick differs from an ordinary one. */
+export interface TickOptions {
+  /**
+   * True while catching up on time the player was away for.
+   *
+   * The only thing that reads it today is the weather: a storm is a minigame,
+   * and one that blew while the tab was shut is just damage taken in the dark.
+   * STEP 14 owns the calculator that will pass it.
+   */
+  readonly offline?: boolean;
 }
 
 /** What a completed cut removed and paid out. */
@@ -117,8 +153,18 @@ export class Simulation {
    */
   readonly sproutedNuts: readonly TreeNode[];
 
+  /**
+   * The source behind every roll the simulation makes on its own: which weather
+   * comes next, where a pile of leaves lands, which limb the wind takes.
+   *
+   * Held rather than passed per call because none of those happen in response to
+   * an input — they happen in the tick, and a tick has no caller to ask.
+   */
+  private readonly random: RandomSource;
+
   constructor(initial: GameState = createInitialState(), random: RandomSource = Math.random) {
     this.state = initial;
+    this.random = random;
 
     // Before anything is measured: a nut buried before the tab closed sprouts
     // now, so the free root is part of the tree that loads rather than something
@@ -136,6 +182,15 @@ export class Simulation {
     this.republishSpecies();
     this.republishTotems();
     this.republishBuffs();
+    // The season and the rings are the widest standing inputs of all: one is a
+    // condition the whole tree is living in, the other a record of the winters
+    // it has already come through. The season is *re-derived* from elapsed time
+    // rather than trusted from the state, and the index is marked as seen, so a
+    // save loaded in mid-winter does not pay out for the winters before it.
+    this.state.season = seasonAt(this.state.elapsedSeconds, this.state.seasonLengthSeconds);
+    this.state.seasonIndexSeen = this.state.season.index;
+    this.republishSeason();
+    this.republishRings();
     // Producers are rebuilt once the reach is known: a root tip that only finds
     // its pocket through the fungus would otherwise load barren.
     this.syncPartProducers();
@@ -725,6 +780,247 @@ export class Simulation {
   }
 
   /**
+   * Republish the standing modifiers of whichever season it is.
+   *
+   * One revocable source, so a season can never leave anything behind when the
+   * wheel turns — the same contract a buff keeps, on a much slower clock.
+   */
+  republishSeason(): void {
+    this.state.modifiers.removeBySource(SEASON_SOURCE);
+    for (const modifier of seasonModifiers(this.state.season.def)) {
+      this.state.modifiers.add(modifier);
+    }
+  }
+
+  /** Republish what the trunk's rings are worth on everything the tree makes. */
+  republishRings(): void {
+    this.state.modifiers.removeBySource(RING_SOURCE);
+    for (const modifier of ringModifiers(this.state.rings)) {
+      this.state.modifiers.add(modifier);
+    }
+  }
+
+  /**
+   * Turn the wheel: re-read the season and, when it has moved, hand out the
+   * rings owed for every winter that came through in between.
+   *
+   * The reading is derived from elapsed time, so it is right whether the last
+   * call was a tenth of a second ago or a week; `seasonIndexSeen` exists only so
+   * a *boundary* can be noticed. Rings are counted over the whole span rather
+   * than one per call, which is what makes an offline jump pay exactly what
+   * sitting through it would have.
+   */
+  updateSeason(): SeasonEvent[] {
+    const cycle = seasonAt(this.state.elapsedSeconds, this.state.seasonLengthSeconds);
+    this.state.season = cycle;
+    if (cycle.index === this.state.seasonIndexSeen) return [];
+
+    const events: SeasonEvent[] = [];
+    const rings = ringsEarnedBetween(this.state.seasonIndexSeen, cycle.index);
+    this.state.seasonIndexSeen = cycle.index;
+
+    if (rings > 0) {
+      this.state.rings += rings;
+      this.republishRings();
+      events.push({ kind: 'ring', rings, total: this.state.rings });
+    }
+
+    events.push({ kind: 'season', id: cycle.id, index: cycle.index });
+    this.republishSeason();
+    // Prices and the value of a leaf both just moved. The banked per-leaf rates
+    // feed a tooltip, and a tooltip that still quotes summer in October is the
+    // kind of thing a player reads as the season not having taken effect.
+    this.updateLightExposure();
+
+    this.state.seasonEvents.push(...events);
+    return events;
+  }
+
+  /**
+   * Take the season turns and rings nobody has celebrated yet.
+   *
+   * Drained rather than read off the snapshot, for the same reason symbiont
+   * arrivals are: a flag would replay the toast on every frame.
+   */
+  drainSeasonEvents(): SeasonEvent[] {
+    if (this.state.seasonEvents.length === 0) return [];
+    return this.state.seasonEvents.splice(0, this.state.seasonEvents.length);
+  }
+
+  /**
+   * Advance the sky, publish whatever it is doing, and settle a storm that has
+   * just blown itself out.
+   *
+   * `offline` is passed straight through to the scheduler as "no storms": one
+   * is never drawn while the player is away, and one already announced when they
+   * left is dropped rather than run.
+   */
+  updateWeather(offline = false): WeatherLogEntry[] {
+    const events = this.state.weather.update(
+      this.state.elapsedSeconds,
+      this.random,
+      !offline,
+    );
+    if (events.length === 0) return [];
+
+    const logged: WeatherLogEntry[] = [];
+    for (const event of events) {
+      if (event.kind === 'start' && event.id === 'storm') this.state.stormTaps = 0;
+      logged.push(
+        event.kind === 'end' && event.id === 'storm'
+          ? { ...event, storm: this.resolveStorm() }
+          : event,
+      );
+    }
+
+    this.publishWeather();
+    this.state.weatherEvents.push(...logged);
+    return logged;
+  }
+
+  /** Take the weather nobody has reacted to yet. */
+  drainWeatherEvents(): WeatherLogEntry[] {
+    if (this.state.weatherEvents.length === 0) return [];
+    return this.state.weatherEvents.splice(0, this.state.weatherEvents.length);
+  }
+
+  /**
+   * Republish the running event's modifiers, or clear them for a clear sky.
+   *
+   * Called from inside the tick ahead of hydration, so the Water a rain triples
+   * is the Water the canopy is measured against on the very tick it starts.
+   */
+  publishWeather(): void {
+    this.state.modifiers.removeBySource(WEATHER_SOURCE);
+    const active = this.state.weather.active;
+    if (!active) return;
+
+    const def = WEATHER_BY_ID[active.id];
+    if (!def) return;
+    for (const modifier of weatherModifiers(def)) {
+      this.state.modifiers.add(modifier);
+    }
+  }
+
+  /**
+   * Hold the trunk. One tap on the anchor, banked against the storm currently
+   * blowing; `false` when there is no storm to brace against.
+   *
+   * Resolved immediately and outside the tick, exactly as a tap on the tree is:
+   * a brace is a burst of clicks, and a burst the frame loop could coalesce
+   * would make the minigame a lie.
+   */
+  braceStorm(): boolean {
+    const active = this.state.weather.active;
+    if (!active || active.id !== 'storm') return false;
+    this.state.stormTaps += 1;
+    return true;
+  }
+
+  /**
+   * Settle what the storm took on its way out.
+   *
+   * Every wide limb rolls separately against how well the tree was braced, and
+   * at most {@link STORM_MAX_SNAPS} come off however the rolls fall. What snaps
+   * pays **Deadwood only** — a storm is not a harvest, and there is no refund
+   * for wood the player did not choose to cut.
+   */
+  private resolveStorm(): StormReport {
+    const taps = this.state.stormTaps;
+    const brace = braceFraction(taps);
+    const exposed = wideLimbs(this.state.tree);
+
+    const snapped: string[] = [];
+    let wood = 0;
+
+    for (const limb of chooseSnappedLimbs(exposed, brace, this.random)) {
+      // A limb that went with its parent is already gone; the wind cannot take
+      // it twice.
+      if (!this.state.tree.node(limb.id)) continue;
+
+      const removed = this.state.tree.prune(limb.id);
+      if (removed.length === 0) continue;
+
+      for (const node of removed) this.removeProducer(partProducerId(node.id));
+      wood += woodVolume(removed);
+      snapped.push(limb.id);
+    }
+
+    const deadwood = deadwoodFor(wood);
+    if (snapped.length > 0) {
+      this.state.resources.add('deadwood', deadwood);
+      this.syncPartProducers();
+      this.republishSpecies();
+      this.updateHydration();
+      this.updateLightExposure();
+      this.updateSymbionts();
+    }
+
+    this.state.stormTaps = 0;
+    return { taps, brace, exposed: exposed.length, snapped, deadwood };
+  }
+
+  /**
+   * Shed a pile of leaves at the base, if it is autumn and one is due.
+   *
+   * Outside autumn the clock is simply kept level with now, so the first pile of
+   * a new autumn lands one interval in rather than the instant the wheel turns —
+   * and a season spent elsewhere never banks a backlog.
+   */
+  updateLitter(): LitterPile | null {
+    const elapsed = this.state.elapsedSeconds;
+
+    if (!this.state.season.def.shedsLitter) {
+      this.state.nextLitterAt = elapsed + LITTER_INTERVAL_SECONDS;
+      return null;
+    }
+    if (elapsed < this.state.nextLitterAt) return null;
+    this.state.nextLitterAt = elapsed + LITTER_INTERVAL_SECONDS;
+
+    // A bare tree sheds nothing. There is no minimum pile for a tree with no
+    // leaves on it — the floor is for a *thin* canopy, not for an absent one.
+    const leaves = this.state.tree.countOfType('leafCluster');
+    if (leaves <= 0) return null;
+
+    const pile = this.state.litter.spawn(
+      litterAmount(leaves),
+      litterPosition(this.random),
+      elapsed,
+    );
+    if (pile && this.hasRake()) {
+      this.collectLitter(pile.id);
+      return null;
+    }
+    return pile;
+  }
+
+  /** Whether the Rake has been bought — autumn's piles sweep themselves. */
+  hasRake(): boolean {
+    return this.state.upgrades.level(RAKE_ID) > 0;
+  }
+
+  /**
+   * Sweep one pile up. Returns what it was worth, or `null` when there is no
+   * pile by that id — a second click on the same heap must not pay twice.
+   */
+  collectLitter(id: string): LitterPile | null {
+    const pile = this.state.litter.collect(id);
+    if (!pile) return null;
+    this.state.resources.add('leafLitter', pile.amount);
+    return pile;
+  }
+
+  /** Sweep the whole base at once. What the Rake does, and what buying it does. */
+  sweepLitter(): Decimal {
+    let total = new Decimal(0);
+    for (const pile of this.state.litter.collectAll()) {
+      this.state.resources.add('leafLitter', pile.amount);
+      total = total.add(pile.amount);
+    }
+    return total;
+  }
+
+  /**
    * Republish the time-of-day multiplier on Light.
    *
    * One `mul` on the Light resource, revoked and re-granted, so the canopy's
@@ -833,23 +1129,31 @@ export class Simulation {
     for (const mod of upgradeModifiers(def, level + 1)) {
       this.state.modifiers.add(mod);
     }
+    // Buying the Rake sweeps the base on the spot. A tool that only works on
+    // leaves shed *after* it was bought would be a strange tool.
+    if (def.id === RAKE_ID) this.sweepLitter();
     return true;
   }
 
   /** Advance the simulation by one fixed step of `dtSeconds`. */
-  tick(dtSeconds: number): void {
+  tick(dtSeconds: number, options: TickOptions = {}): void {
     this.state.tick += 1;
     this.state.elapsedSeconds += dtSeconds;
     this.state.lastUpdatedAt = Date.now();
 
     // Order matters. Lapsed buffs go first — a tick must not pay out through a
-    // modifier whose time ran out before it started. Residents follow, because
-    // one arriving is a standing input to everything below it and not an event
-    // the tick should pay around. Then the sun sets the ceiling on what Light is
-    // worth, hydration sets what the roots can pay for, and only then is it
-    // worth asking what each leaf is earning — so the rate banked for the
-    // tooltips is the one the tick actually pays out.
+    // modifier whose time ran out before it started. The season and the sky
+    // follow, because they are the widest standing conditions there are: a rain
+    // that starts on this tick must be worth its triple *on* this tick, and a
+    // winter that turns on it must not pay out a single second at summer's
+    // rates. Residents come next for the same reason. Then the sun sets the
+    // ceiling on what Light is worth, hydration sets what the roots can pay for,
+    // and only then is it worth asking what each leaf is earning — so the rate
+    // banked for the tooltips is the one the tick actually pays out.
     this.updateBuffs();
+    this.updateSeason();
+    this.updateWeather(options.offline === true);
+    this.updateLitter();
     this.updateSymbionts();
     this.collectSymbiontPayouts();
     this.updateDaylight();
@@ -938,6 +1242,42 @@ export class Simulation {
       };
     });
 
+    const active = this.state.weather.active;
+    const pending = this.state.weather.pending;
+    const activeDef = active ? WEATHER_BY_ID[active.id] : null;
+    const weather: WeatherSnapshot = {
+      active:
+        active && activeDef
+          ? {
+              id: active.id,
+              remainingSeconds: Math.max(0, active.endsAt - elapsed),
+              fraction: Math.min(
+                1,
+                Math.max(0, (active.endsAt - elapsed) / Math.max(1e-9, activeDef.durationSeconds)),
+              ),
+            }
+          : null,
+      pending: pending ? { id: pending.id, inSeconds: Math.max(0, pending.startsAt - elapsed) } : null,
+      storm:
+        active?.id === 'storm'
+          ? {
+              taps: this.state.stormTaps,
+              target: STORM_BRACE_TAPS,
+              brace: braceFraction(this.state.stormTaps),
+            }
+          : null,
+    };
+
+    // Cloned: the ground hands out its own records and the engine splices them.
+    const litter: LitterSnapshot[] = this.state.litter
+      .entries()
+      .map((pile) => ({
+        id: pile.id,
+        x: pile.x,
+        amount: new Decimal(pile.amount),
+        spawnedAt: pile.spawnedAt,
+      }));
+
     return {
       resources,
       totals,
@@ -952,6 +1292,11 @@ export class Simulation {
       },
       day: dayCycle(this.state.elapsedSeconds),
       lightFactor: this.state.lightFactor,
+      season: this.state.season,
+      rings: this.state.rings,
+      ringMultiplier: ringMultiplier(this.state.rings),
+      weather,
+      litter,
       leafLight: this.state.leafLight,
       combo: {
         stacks,

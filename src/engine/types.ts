@@ -1,20 +1,25 @@
 import Decimal from 'break_infinity.js';
+import { SEASON_LENGTH_SECONDS } from '../content/balance';
 import { EXPOSURE_INTERVAL_SECONDS } from '../content/light';
 import type { ResourceId } from '../content/resources';
+import type { WeatherId } from '../content/weather';
 import { BuffLedger } from './buffs';
 import type { ClickStats } from './clicker';
 import { createComboState, type ComboState } from './combo';
 import { dayCycle, type DayCycle } from './daylight';
 import type { Producer } from './economy';
 import { computeHydration, type HydrationState } from './hydration';
+import { LitterGround } from './litter';
 import { STARTER_SPECIES_ID } from '../content/species';
 import { lightFactorAt, type LeafExposure } from './light';
 import { ModifierSet } from './modifiers';
 import { ResourceRegistry } from './resourceRegistry';
+import { seasonAt, type SeasonCycle, type SeasonEvent } from './seasons';
 import { createSoilMap, type SoilMap } from './soil';
 import { SymbiontLedger, type SymbiontCost, type SymbiontProgress } from './symbionts';
 import { TreeGraph } from './treeGraph';
 import { UpgradeLedger } from './upgrades';
+import { WeatherScheduler, type WeatherLogEntry } from './weather';
 
 /** A plain per-resource record of `Decimal`s (used for immutable snapshots). */
 export type Resources = Record<ResourceId, Decimal>;
@@ -50,6 +55,35 @@ export interface GameState {
   leafLight: ReadonlyMap<string, LeafLight>;
   /** Multiplier the time of day is currently putting on Light. */
   lightFactor: number;
+  /** Latest reading of where the year is. Derived from `elapsedSeconds`. */
+  season: SeasonCycle;
+  /**
+   * How long one season runs, in engine seconds.
+   *
+   * On the state rather than read from the content constant so a test can run a
+   * whole year in milliseconds — and so STEP 13's Tempo heirloom ("seasons 10%
+   * shorter") has one number to scale.
+   */
+  seasonLengthSeconds: number;
+  /**
+   * The last season the simulation actually saw. Only ever compared against the
+   * derived index, to notice a boundary being crossed.
+   */
+  seasonIndexSeen: number;
+  /** Rings in the trunk: one per winter survived, each `×1.05` on production. */
+  rings: number;
+  /** Seasons turned and rings laid down since the UI last looked. */
+  seasonEvents: SeasonEvent[];
+  /** What the sky is doing, and what it is about to do. */
+  weather: WeatherScheduler;
+  /** Weather that started, ended or was announced since the UI last looked. */
+  weatherEvents: WeatherLogEntry[];
+  /** Taps banked on the anchor during the storm currently blowing. */
+  stormTaps: number;
+  /** Leaf-litter piles waiting at the base of the trunk. */
+  litter: LitterGround;
+  /** Engine time the next autumn pile is due at. */
+  nextLitterAt: number;
   /** Simulation time the next exposure sweep is due at, in seconds. */
   nextExposureAt: number;
   /** Day number the last Dew burst was collected on; `-1` before the first. */
@@ -184,6 +218,43 @@ export interface SymbiontSnapshot extends SymbiontProgress {
   readonly affordable: boolean;
 }
 
+/** The sky, as the banner reads it. */
+export interface WeatherSnapshot {
+  /** The event running now, or `null` for clear skies. */
+  readonly active: {
+    readonly id: WeatherId;
+    /** Engine seconds until it lifts. */
+    readonly remainingSeconds: number;
+    /** How much of it is left, in `[0, 1]`, for a drain bar. */
+    readonly fraction: number;
+  } | null;
+  /** The event the sky has announced but which has not landed, or `null`. */
+  readonly pending: {
+    readonly id: WeatherId;
+    /** Engine seconds until it lands. */
+    readonly inSeconds: number;
+  } | null;
+  /** The brace minigame, present only while a storm is actually blowing. */
+  readonly storm: {
+    /** Taps banked on the anchor so far. */
+    readonly taps: number;
+    /** Taps that count as a full brace. */
+    readonly target: number;
+    /** How well braced the tree is, in `[0, 1]`. */
+    readonly brace: number;
+  } | null;
+}
+
+/** One leaf-litter pile as the canvas draws it. */
+export interface LitterSnapshot {
+  readonly id: string;
+  /** Position in canonical units either side of the trunk. */
+  readonly x: number;
+  readonly amount: Decimal;
+  /** Engine seconds it formed at, so the canvas can settle it in. */
+  readonly spawnedAt: number;
+}
+
 /** One upgrade's purchase state, resolved against the player's balance. */
 export interface UpgradeSnapshot {
   readonly id: string;
@@ -213,6 +284,16 @@ export interface GameSnapshot {
   readonly day: DayCycle;
   /** What that time of day multiplies Light by. */
   readonly lightFactor: number;
+  /** Where the engine is in its year: season, day of season, year number. */
+  readonly season: SeasonCycle;
+  /** Rings in the trunk — winters survived. */
+  readonly rings: number;
+  /** What those rings multiply all production by. */
+  readonly ringMultiplier: number;
+  /** What the sky is doing, and what it is about to do. */
+  readonly weather: WeatherSnapshot;
+  /** Leaf-litter piles waiting to be swept up. */
+  readonly litter: readonly LitterSnapshot[];
   /**
    * Per-leaf light, keyed by node id. Shared by reference rather than cloned:
    * the engine replaces this map wholesale on each sweep and never mutates it in
@@ -268,6 +349,18 @@ export function createInitialState(now: number = Date.now()): GameState {
     hydration: computeHydration(new Decimal(0), 0),
     leafLight: new Map(),
     lightFactor: lightFactorAt(dayCycle(0).t),
+    // A new tree sprouts into Spring: the first thing a new save should be told
+    // about the year is that growth is cheap right now.
+    season: seasonAt(0),
+    seasonLengthSeconds: SEASON_LENGTH_SECONDS,
+    seasonIndexSeen: 0,
+    rings: 0,
+    seasonEvents: [],
+    weather: new WeatherScheduler(),
+    weatherEvents: [],
+    stormTaps: 0,
+    litter: new LitterGround(),
+    nextLitterAt: 0,
     nextExposureAt: EXPOSURE_INTERVAL_SECONDS,
     // Before the first day: the very first tap of a new save is a dawn, and the
     // tree ought to have dew on it.

@@ -54,6 +54,16 @@ import { drawBackdrop } from './sky';
 import { drawSymbionts, symbiontScene, EMPTY_SCENE, type SymbiontScene } from './symbionts';
 import { drawTotems } from './totems';
 import { computeTreeLayout, drawGhostPart, drawTree } from './tree';
+import { drawLitter, hitTestLitter, layoutLitter, type LaidPile } from './litter';
+import {
+  braceAnchorLayout,
+  drawBraceAnchor,
+  drawWeather,
+  hitTestBraceAnchor,
+  seasonLeafCast,
+  seasonSoilCast,
+  skyCasts,
+} from './weather';
 
 /**
  * Canvas 2D renderer: the sky-to-soil scene, the player's tree, the radial grow
@@ -126,6 +136,17 @@ export class Renderer {
 
   /** Latest pointer position in CSS px, or `null` when the pointer has left. */
   private pointer: Vec2 | null = null;
+
+  /**
+   * The leaf-litter piles as they were last drawn, and whether the storm anchor
+   * was up.
+   *
+   * Both are hit-testable between frames, like the menu, so they are laid out in
+   * `draw` and kept — a press must be tested against what the player can
+   * actually see, not against what the next frame will show.
+   */
+  private piles: readonly LaidPile[] = [];
+  private bracing = false;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext('2d');
@@ -373,6 +394,22 @@ export class Renderer {
     return hitTestSegments(point, this.screenTree, CLICK_TOLERANCE_PX);
   }
 
+  /** Id of the leaf-litter pile under a press, or `null`. */
+  litterPileAt(point: Vec2): string | null {
+    return hitTestLitter(point, this.piles)?.id ?? null;
+  }
+
+  /**
+   * Whether a press landed on the storm's brace anchor.
+   *
+   * `false` whenever no storm is blowing, so the anchor cannot swallow a tap on
+   * the trunk it happens to be sitting in front of.
+   */
+  isBracePress(point: Vec2): boolean {
+    if (!this.bracing) return false;
+    return hitTestBraceAnchor(point, braceAnchorLayout(this.viewport, this.layout));
+  }
+
   /** Match the backing store to the element's CSS size × devicePixelRatio. */
   resize(): void {
     const dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -509,12 +546,27 @@ export class Renderer {
     // line — and all three travel together under the camera.
     const horizonY = this.layout.originY;
 
-    // Sky, the sun or moon crossing it, and the hills on the horizon.
-    drawBackdrop(ctx, viewport, this.layout, snapshot.day);
+    // Sky, the sun or moon crossing it, and the hills on the horizon — under
+    // whatever the season and the weather are casting over them.
+    drawBackdrop(
+      ctx,
+      viewport,
+      this.layout,
+      snapshot.day,
+      skyCasts(snapshot.season.id, snapshot.weather),
+    );
 
     // Soil: strata bands and the mineral pockets buried in them, drawn at
     // whatever radius the roots can currently feel them from.
-    drawSoil(ctx, w, h, this.layout, this.soil, snapshot.veinReach);
+    drawSoil(
+      ctx,
+      w,
+      h,
+      this.layout,
+      this.soil,
+      snapshot.veinReach,
+      seasonSoilCast(snapshot.season.id),
+    );
 
     // Horizon line where canopy air meets the ground.
     ctx.fillStyle = PALETTE.horizon;
@@ -524,7 +576,20 @@ export class Renderer {
     // *at* the base rather than in front of it.
     drawTotems(ctx, snapshot.totems, this.layout);
 
-    drawTree(ctx, this.screenTree, now, this.spawns, viewport, snapshot.leafLight);
+    // Autumn's piles lie on the ground in front of the totems and behind the
+    // trunk, where they fell from.
+    this.piles = layoutLitter(snapshot.litter, this.layout);
+    drawLitter(ctx, this.piles, snapshot.elapsedSeconds);
+
+    drawTree(
+      ctx,
+      this.screenTree,
+      now,
+      this.spawns,
+      viewport,
+      snapshot.leafLight,
+      seasonLeafCast(snapshot.season.id),
+    );
 
     // The creatures go over the tree they live in, and under the mode overlays:
     // a bee must never obscure the limb the player is about to cut.
@@ -556,6 +621,23 @@ export class Renderer {
         this.planting,
         this.hoveredChip,
         Math.min(1, Math.max(0, (now - this.menu.openedAt) / MENU_ARM_MS)),
+      );
+    }
+
+    // The weather goes over the whole scene — rain falls in front of the tree,
+    // not behind it — but under the click feedback, which must stay readable
+    // through a downpour.
+    drawWeather(ctx, viewport, this.layout, snapshot.weather, snapshot.elapsedSeconds);
+
+    // The anchor is the last thing drawn before the feedback: for fifteen
+    // seconds it is the most important thing on the canvas.
+    this.bracing = snapshot.weather.storm !== null;
+    if (this.bracing && snapshot.weather.storm) {
+      drawBraceAnchor(
+        ctx,
+        braceAnchorLayout(viewport, this.layout),
+        snapshot.weather.storm.brace,
+        snapshot.elapsedSeconds,
       );
     }
 

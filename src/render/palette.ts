@@ -142,6 +142,31 @@ export const PALETTE = {
   hillNear: '#7f9c7e',
   hillFarNight: '#2c3a4a',
   hillNearNight: '#232f3d',
+  /**
+   * Weather. Rain is drawn as pale streaks rather than blue ones — a blue line
+   * over a blue sky is a line nobody sees — and the storm's flash is white light
+   * thrown over the whole canvas for a few frames.
+   */
+  raindrop: 'rgba(226, 240, 248, 0.55)',
+  raindropBright: 'rgba(255, 255, 255, 0.75)',
+  stormShade: 'rgba(24, 28, 40, 0.34)',
+  stormFlash: 'rgba(233, 240, 255, 0.5)',
+  droughtHaze: 'rgba(238, 220, 170, 0.3)',
+  /**
+   * The brace anchor: a ring at the base of the trunk that flashes for the
+   * fifteen seconds of a storm and fills as it is hammered.
+   */
+  anchor: 'rgba(28, 20, 12, 0.72)',
+  anchorRing: '#ffd27a',
+  anchorFill: '#8fd694',
+  anchorText: '#fdf3e0',
+  /**
+   * Leaf litter: a heap of dry foliage at the base, and the pale rim that lifts
+   * it off the soil it is lying on.
+   */
+  litter: '#c08a3a',
+  litterDark: '#96682a',
+  litterRim: 'rgba(253, 243, 224, 0.35)',
 } as const;
 
 /** Fraction of the canvas height occupied by sky (above the soil line). */

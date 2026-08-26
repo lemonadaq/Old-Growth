@@ -13,6 +13,8 @@
  * while all the geometry stays resolution-independent.
  */
 
+import type { ResourceId } from './resources';
+
 /** Stable identifiers for the layers of soil, surface downward. */
 export type StratumId = 'topsoil' | 'clay' | 'rock' | 'bedrock';
 
@@ -96,6 +98,30 @@ export const STRATA: readonly Stratum[] = [
 export const STRATUM_BY_ID: Readonly<Record<StratumId, Stratum>> = Object.fromEntries(
   STRATA.map((s) => [s.id, s]),
 ) as Record<StratumId, Stratum>;
+
+/**
+ * Producer tag naming the layer an underground part is working in.
+ *
+ * Carried by every root producer, so a modifier can reach "the roots in the
+ * rock" without naming a single node — which is the whole of the drought's
+ * immunity rule (see `src/content/weather.ts`).
+ */
+export function stratumTag(id: StratumId): string {
+  return `soil:${id}`;
+}
+
+/**
+ * The same tag narrowed to one resource: `soil:clay/water`.
+ *
+ * A root segment draws Water and a root tip worries out Minerals, and both sit
+ * in the same layer — so a drought that only takes Water has to say so. The
+ * two-part tag is the same trick `speciesResourceTag` plays, for the same
+ * reason: a modifier matches a producer by resource *or* by tag, never by both
+ * at once.
+ */
+export function stratumResourceTag(id: StratumId, resource: ResourceId): string {
+  return `${stratumTag(id)}/${resource}`;
+}
 
 /** Seed behind the mineral vein layout. One world, one arrangement of ore. */
 export const DEFAULT_SOIL_SEED = 19470322;

@@ -5,6 +5,26 @@ import { createInitialState } from './types';
 import { disableTestProducers, enableTestProducers } from './debugProducers';
 import { COMBO_DECAY_MS, COMBO_FULL_STACKS } from './combo';
 import { RESOURCE_IDS } from '../content/resources';
+import {
+  DROUGHT_WATER_MULTIPLIER,
+  LITTER_INTERVAL_SECONDS,
+  LITTER_PER_LEAF,
+  RAIN_DURATION_SECONDS,
+  RAIN_WATER_MULTIPLIER,
+  RING_PRODUCTION_BONUS,
+  SPRING_GROWTH_DISCOUNT,
+  STORM_BRACE_TAPS,
+  STORM_DURATION_SECONDS,
+  STORM_MAX_SNAPS,
+  SUMMER_LIGHT_BONUS,
+  WEATHER_MIN_GAP_SECONDS,
+  WEATHER_TELEGRAPH_SECONDS,
+  WINTER_PENALTY,
+} from '../content/balance';
+import { RAKE_ID } from '../content/upgrades';
+import { applyModifiers } from './modifiers';
+import { partCost } from './growth';
+import { createSeededRandom, type RandomSource } from './rng';
 import { HYDRATION_MAX, HYDRATION_MIN, WATER_NEED_PER_LEAF } from '../content/hydration';
 import { OFFLINE_TAG } from '../content/growth';
 import { DEW_MIN_TAPS, DEW_SECONDS, MOONLIGHT_FRACTION } from '../content/light';
@@ -23,6 +43,15 @@ import {
 import type { TreeNode } from './treeGraph';
 import { DAYLIGHT_SOURCE, lightFactorAt } from './light';
 import { BARREN_SOIL, depthAt, depthMultiplier } from './soil';
+
+/**
+ * What a list price actually costs a fresh save.
+ *
+ * A new tree sprouts into Spring, and Spring is a standing growth discount
+ * (STEP 12) — so every price quoted in this file is the catalogue number through
+ * the season the simulation opens in.
+ */
+const inSpring = (listPrice: number) => listPrice * (1 - SPRING_GROWTH_DISCOUNT);
 
 /** Rolls that never / always crit. */
 const NEVER_CRIT = () => 1;
@@ -237,7 +266,7 @@ describe('growing the tree', () => {
     const branch = sim.growPart(sim.state.tree.rootId, 'branch');
     expect(branch).not.toBeNull();
     expect(sim.state.tree.size).toBe(2);
-    expect(sim.state.resources.amount('sap').toNumber()).toBeCloseTo(before - 15, 9);
+    expect(sim.state.resources.amount('sap').toNumber()).toBeCloseTo(before - inSpring(15), 9);
   });
 
   it('refuses a purchase there is not enough Sap for, and spends nothing', () => {
@@ -261,8 +290,8 @@ describe('growing the tree', () => {
     sim.growPart(sim.state.tree.rootId, 'branch');
     const afterSecond = sim.state.resources.amount('sap').toNumber();
 
-    expect(first - afterFirst).toBeCloseTo(15, 9);
-    expect(afterFirst - afterSecond).toBeCloseTo(15 * 1.15, 9);
+    expect(first - afterFirst).toBeCloseTo(inSpring(15), 9);
+    expect(afterFirst - afterSecond).toBeCloseTo(inSpring(15 * 1.15), 9);
   });
 
   it('runs the full loop: tap for Sap, grow a branch, grow a leaf, gain Light/s', () => {
@@ -1224,5 +1253,434 @@ describe('symbionts', () => {
 
     sim.state.resources.add('light', new Decimal(1000));
     expect(row(sim, 'bees')?.affordable).toBe(true);
+  });
+});
+
+/* ----------------------------------------------- STEP 12: seasons & weather */
+
+/**
+ * A simulation whose year is four seconds long.
+ *
+ * The real year is a little under eleven hours (four seasons of twenty engine
+ * days), which is exactly right for a game and impossible for a test — so the
+ * season length lives on the state rather than in a constant. This is the
+ * "accelerated test mode" the step's acceptance asks for, and it is the same
+ * knob STEP 13's Tempo heirloom will turn.
+ */
+function accelerated(seasonLengthSeconds = 4, random: RandomSource = () => 0.99): Simulation {
+  const state = createInitialState();
+  state.seasonLengthSeconds = seasonLengthSeconds;
+  return new Simulation(state, random);
+}
+
+/** A random source that plays a script and then holds a steady value forever. */
+function scripted(values: readonly number[], fallback = 0.99): RandomSource {
+  let index = 0;
+  return () => (index < values.length ? values[index++] : fallback);
+}
+
+/** Run `seconds` of simulation in fixed steps, optionally away from the tab. */
+function run(sim: Simulation, seconds: number, step = 0.1, offline = false): void {
+  const ticks = Math.round(seconds / step);
+  for (let i = 0; i < ticks; i += 1) sim.tick(step, { offline });
+}
+
+/** What one unit of Light production is currently worth, all modifiers in. */
+const lightWorth = (sim: Simulation) =>
+  applyModifiers(new Decimal(1), sim.state.modifiers.matching('light', ['canopy'])).toNumber();
+
+describe('the year', () => {
+  it('opens a new save in Spring, on day one, with no rings', () => {
+    const sim = new Simulation();
+    const snapshot = sim.snapshot(0);
+
+    expect(snapshot.season.id).toBe('spring');
+    expect(snapshot.season.day).toBe(1);
+    expect(snapshot.season.year).toBe(0);
+    expect(snapshot.rings).toBe(0);
+    expect(snapshot.ringMultiplier).toBe(1);
+  });
+
+  it('cycles a full year in order and comes out the other side with a ring', () => {
+    const sim = accelerated();
+    const seen: string[] = [];
+
+    // Four seasons of four seconds, and one tick over the line into the next
+    // year — a whole year in a sixth of a second of test time.
+    for (let i = 0; i < 161; i += 1) {
+      sim.tick(0.1);
+      const id = sim.state.season.id;
+      if (seen[seen.length - 1] !== id) seen.push(id);
+    }
+
+    expect(seen).toEqual(['spring', 'summer', 'autumn', 'winter', 'spring']);
+    expect(sim.state.rings).toBe(1);
+    expect(sim.state.season.year).toBe(1);
+  });
+
+  it('puts the season’s modifiers up as it turns, and takes the last one down', () => {
+    const sim = accelerated();
+
+    // Spring: growth is cheap, Light is ordinary.
+    expect(partCost('branch', 0, sim.state.modifiers).toNumber()).toBeCloseTo(inSpring(15), 9);
+
+    run(sim, 4.1); // into Summer
+    expect(sim.state.season.id).toBe('summer');
+    expect(partCost('branch', 0, sim.state.modifiers).toNumber()).toBeCloseTo(15, 9);
+    expect(lightWorth(sim)).toBeCloseTo(daylight(sim) * (1 + SUMMER_LIGHT_BONUS), 9);
+
+    run(sim, 8); // through Autumn and into Winter
+    expect(sim.state.season.id).toBe('winter');
+    expect(lightWorth(sim)).toBeCloseTo(daylight(sim) * (1 - WINTER_PENALTY), 9);
+    expect(partCost('branch', 0, sim.state.modifiers).toNumber()).toBeCloseTo(
+      15 * (1 + WINTER_PENALTY),
+      9,
+    );
+  });
+
+  it('announces the turn once, as an event the UI drains', () => {
+    const sim = accelerated();
+    expect(sim.drainSeasonEvents()).toEqual([]);
+
+    run(sim, 4.1);
+    const events = sim.drainSeasonEvents();
+    expect(events).toEqual([{ kind: 'season', id: 'summer', index: 1 }]);
+    // Drained: an event replayed every frame would replay its toast.
+    expect(sim.drainSeasonEvents()).toEqual([]);
+  });
+});
+
+describe('rings', () => {
+  it('are laid down for surviving winter, and multiply everything after', () => {
+    const sim = accelerated();
+    run(sim, 16.1); // one full year
+
+    expect(sim.state.rings).toBe(1);
+    expect(sim.snapshot(0).ringMultiplier).toBeCloseTo(1 + RING_PRODUCTION_BONUS, 9);
+
+    const water = applyModifiers(
+      new Decimal(1),
+      sim.state.modifiers.matching('water', ['root']),
+    ).toNumber();
+    expect(water).toBeCloseTo(1 + RING_PRODUCTION_BONUS, 9);
+  });
+
+  it('stack: a second winter compounds on the first', () => {
+    const sim = accelerated();
+    run(sim, 16.1);
+    expect(sim.state.rings).toBe(1);
+
+    run(sim, 16);
+    expect(sim.state.rings).toBe(2);
+    expect(sim.snapshot(0).ringMultiplier).toBeCloseTo(Math.pow(1 + RING_PRODUCTION_BONUS, 2), 9);
+  });
+
+  it('persist through the seasons that follow, rather than lapsing like a buff', () => {
+    const sim = accelerated();
+    run(sim, 16.1);
+
+    run(sim, 8); // two more seasons
+    expect(sim.state.rings).toBe(1);
+    expect(
+      applyModifiers(new Decimal(1), sim.state.modifiers.matching('minerals', ['root'])).toNumber(),
+    ).toBeCloseTo(1 + RING_PRODUCTION_BONUS, 9);
+  });
+
+  it('are paid for every winter an absence covered, exactly once each', () => {
+    const sim = accelerated();
+    run(sim, 48.1, 0.1, true); // three years, all of it away
+    expect(sim.state.rings).toBe(3);
+
+    const events = sim.drainSeasonEvents().filter((event) => event.kind === 'ring');
+    expect(events.reduce((total, event) => total + (event.kind === 'ring' ? event.rings : 0), 0)).toBe(3);
+  });
+
+  it('report themselves once, with the running total', () => {
+    const sim = accelerated();
+    run(sim, 16.1);
+
+    const ring = sim.drainSeasonEvents().find((event) => event.kind === 'ring');
+    expect(ring).toEqual({ kind: 'ring', rings: 1, total: 1 });
+  });
+
+  it('are not handed out for a winter the tree is still in the middle of', () => {
+    const sim = accelerated();
+    run(sim, 13); // deep into the first winter
+    expect(sim.state.season.id).toBe('winter');
+    expect(sim.state.rings).toBe(0);
+  });
+});
+
+describe('weather', () => {
+  it('leaves the sky clear through the opening minutes of a save', () => {
+    const sim = new Simulation();
+    run(sim, 60, 0.5);
+    expect(sim.snapshot(0).weather.active).toBeNull();
+    expect(sim.snapshot(0).weather.pending).toBeNull();
+  });
+
+  it('announces an event before it lands, and says how long it has left once it has', () => {
+    // 0 draws rain, and holds the gap at its minimum.
+    const sim = new Simulation(createInitialState(), () => 0);
+    run(sim, WEATHER_MIN_GAP_SECONDS + 1, 0.5);
+
+    const announced = sim.snapshot(0).weather;
+    expect(announced.pending?.id).toBe('rain');
+    expect(announced.pending?.inSeconds).toBeLessThanOrEqual(WEATHER_TELEGRAPH_SECONDS);
+    expect(announced.active).toBeNull();
+
+    run(sim, WEATHER_TELEGRAPH_SECONDS, 0.5);
+    const landed = sim.snapshot(0).weather;
+    expect(landed.active?.id).toBe('rain');
+    expect(landed.active?.remainingSeconds).toBeGreaterThan(0);
+    expect(landed.active?.fraction).toBeLessThanOrEqual(1);
+  });
+
+  it('triples Water while it rains, and gives it back when the sky clears', () => {
+    const sim = new Simulation(createInitialState(), () => 0);
+    const dry = () =>
+      applyModifiers(new Decimal(1), sim.state.modifiers.matching('water', ['root'])).toNumber();
+
+    run(sim, WEATHER_MIN_GAP_SECONDS + WEATHER_TELEGRAPH_SECONDS + 1, 0.5);
+    expect(sim.state.weather.active?.id).toBe('rain');
+    expect(dry()).toBeCloseTo(RAIN_WATER_MULTIPLIER, 9);
+
+    run(sim, RAIN_DURATION_SECONDS, 0.5);
+    expect(sim.state.weather.active).toBeNull();
+    expect(dry()).toBeCloseTo(1, 9);
+  });
+
+  it('never blows a storm while the player is away, however long they are gone', () => {
+    const sim = new Simulation(createInitialState(), createSeededRandom(4));
+    const seen: string[] = [];
+
+    for (let i = 0; i < 20_000; i += 1) {
+      sim.tick(0.5, { offline: true });
+      for (const event of sim.drainWeatherEvents()) seen.push(`${event.kind}:${event.id}`);
+      expect(sim.state.weather.active?.id).not.toBe('storm');
+    }
+
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.some((entry) => entry.endsWith(':storm'))).toBe(false);
+    expect(seen.some((entry) => entry.endsWith(':rain'))).toBe(true);
+  });
+
+  it('drops a storm that was announced before the player left', () => {
+    // 0.6 draws the storm; the tab shuts before it lands.
+    const sim = new Simulation(createInitialState(), () => 0.6);
+    run(sim, WEATHER_MIN_GAP_SECONDS + 1, 0.5);
+    expect(sim.state.weather.pending?.id).toBe('storm');
+
+    run(sim, WEATHER_TELEGRAPH_SECONDS + 1, 0.5, true);
+    expect(sim.state.weather.active).toBeNull();
+  });
+});
+
+describe('storms', () => {
+  /** A tree with wide limbs on it, and the storm about to arrive. */
+  function stormy(random: RandomSource): Simulation {
+    const sim = new Simulation(createInitialState(), random);
+    sim.state.resources.add('sap', new Decimal(1e6));
+    for (let i = 0; i < 5; i += 1) sim.growPart(sim.state.tree.rootId, 'branch');
+    return sim;
+  }
+
+  it('refuses a brace when there is no storm to brace against', () => {
+    expect(new Simulation().braceStorm()).toBe(false);
+  });
+
+  it('takes limbs from a tree nobody held, and pays Deadwood for them', () => {
+    // storm, gap, then rolls that fail every limb.
+    const sim = stormy(scripted([0.6, 0.5, 0, 0], 0.99));
+    const before = sim.state.tree.size;
+
+    run(sim, WEATHER_MIN_GAP_SECONDS + WEATHER_TELEGRAPH_SECONDS + 1, 0.5);
+    expect(sim.state.weather.active?.id).toBe('storm');
+    expect(sim.snapshot(0).weather.storm?.target).toBe(STORM_BRACE_TAPS);
+
+    run(sim, STORM_DURATION_SECONDS + 1, 0.5);
+
+    const report = sim
+      .drainWeatherEvents()
+      .find((event) => event.kind === 'end' && event.id === 'storm')?.storm;
+
+    expect(report).toBeDefined();
+    expect(report?.snapped.length).toBeGreaterThan(0);
+    expect(report?.snapped.length).toBeLessThanOrEqual(STORM_MAX_SNAPS);
+    expect(sim.state.tree.size).toBeLessThan(before);
+    expect(sim.state.resources.amount('deadwood').toNumber()).toBeGreaterThan(0);
+    expect(report?.deadwood.toNumber()).toBeGreaterThan(0);
+  });
+
+  it('takes nothing at all from a tree that was fully braced', () => {
+    const sim = stormy(scripted([0.6, 0.5, 0, 0, 0, 0], 0));
+    run(sim, WEATHER_MIN_GAP_SECONDS + WEATHER_TELEGRAPH_SECONDS + 1, 0.5);
+    expect(sim.state.weather.active?.id).toBe('storm');
+
+    const before = sim.state.tree.size;
+    for (let i = 0; i < STORM_BRACE_TAPS; i += 1) expect(sim.braceStorm()).toBe(true);
+    expect(sim.snapshot(0).weather.storm?.brace).toBe(1);
+
+    run(sim, STORM_DURATION_SECONDS + 1, 0.5);
+    const report = sim
+      .drainWeatherEvents()
+      .find((event) => event.kind === 'end' && event.id === 'storm')?.storm;
+
+    expect(report?.brace).toBe(1);
+    expect(report?.snapped).toEqual([]);
+    expect(sim.state.tree.size).toBe(before);
+  });
+
+  it('forgets the taps banked against the last storm', () => {
+    const sim = stormy(scripted([0.6, 0.5], 0.99));
+    run(sim, WEATHER_MIN_GAP_SECONDS + WEATHER_TELEGRAPH_SECONDS + 1, 0.5);
+    sim.braceStorm();
+    sim.braceStorm();
+    expect(sim.state.stormTaps).toBe(2);
+
+    run(sim, STORM_DURATION_SECONDS + 1, 0.5);
+    expect(sim.state.stormTaps).toBe(0);
+    expect(sim.snapshot(0).weather.storm).toBeNull();
+  });
+});
+
+describe('leaf litter', () => {
+  /**
+   * An accelerated simulation with a canopy on it.
+   *
+   * A hundred seconds a season: long enough that several piles fall inside one
+   * autumn, short enough that a test can sit through the year.
+   */
+  const SEASON = 100;
+  const AUTUMN_STARTS = SEASON * 2;
+
+  function autumnal(random: RandomSource = () => 0.5): Simulation {
+    const sim = accelerated(SEASON, random);
+    sim.state.resources.add('sap', new Decimal(1e6));
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+    for (let i = 0; i < 3; i += 1) sim.growPart(branch?.id ?? '', 'leafCluster');
+    return sim;
+  }
+
+  it('sheds nothing outside autumn', () => {
+    const sim = autumnal();
+    run(sim, AUTUMN_STARTS - 1, 0.5); // all of spring and all of summer
+    expect(sim.state.litter.size).toBe(0);
+    expect(sim.state.season.id).toBe('summer');
+  });
+
+  it('drops piles at the base once autumn comes', () => {
+    const sim = autumnal();
+    run(sim, AUTUMN_STARTS + LITTER_INTERVAL_SECONDS + 1, 0.5);
+
+    expect(sim.state.season.id).toBe('autumn');
+    expect(sim.state.litter.size).toBeGreaterThan(0);
+
+    const [pile] = sim.snapshot(0).litter;
+    expect(pile.amount.toNumber()).toBeCloseTo(3 * LITTER_PER_LEAF, 9);
+    expect(Math.abs(pile.x)).toBeLessThanOrEqual(0.5);
+  });
+
+  it('pays a pile out once, to the click that swept it', () => {
+    const sim = autumnal();
+    run(sim, AUTUMN_STARTS + LITTER_INTERVAL_SECONDS + 1, 0.5);
+
+    const [pile] = sim.snapshot(0).litter;
+    const collected = sim.collectLitter(pile.id);
+
+    expect(collected?.amount.toNumber()).toBeCloseTo(pile.amount.toNumber(), 9);
+    expect(sim.state.resources.amount('leafLitter').toNumber()).toBeCloseTo(
+      pile.amount.toNumber(),
+      9,
+    );
+    // A second click on the same heap must not pay twice.
+    expect(sim.collectLitter(pile.id)).toBeNull();
+  });
+
+  it('sheds nothing from a bare tree', () => {
+    const sim = accelerated(SEASON);
+    run(sim, AUTUMN_STARTS + LITTER_INTERVAL_SECONDS * 2, 0.5);
+    expect(sim.state.season.id).toBe('autumn');
+    expect(sim.state.litter.size).toBe(0);
+  });
+
+  it('leaves what fell on the ground when winter comes', () => {
+    const sim = autumnal();
+    // Through the whole of autumn and one tick over the line into winter.
+    run(sim, AUTUMN_STARTS + SEASON + 1, 0.5);
+    expect(sim.state.season.id).toBe('winter');
+
+    const waiting = sim.state.litter.size;
+    expect(waiting).toBeGreaterThan(0);
+
+    run(sim, SEASON / 2, 0.5);
+    // Leaves left in the snow are still leaves: nothing sweeps itself away, and
+    // a winter canopy sheds nothing to pile on top of them.
+    expect(sim.state.litter.size).toBe(waiting);
+  });
+
+  it('sweeps itself up once the Rake is bought', () => {
+    const sim = autumnal();
+    sim.state.resources.add('leafLitter', new Decimal(1000));
+    expect(sim.buyUpgrade(RAKE_ID)).toBe(true);
+    expect(sim.hasRake()).toBe(true);
+
+    const before = sim.state.resources.amount('leafLitter').toNumber();
+    run(sim, AUTUMN_STARTS + LITTER_INTERVAL_SECONDS * 2, 0.5);
+
+    expect(sim.state.litter.size).toBe(0);
+    expect(sim.state.resources.amount('leafLitter').toNumber()).toBeGreaterThan(before);
+  });
+
+  it('sweeps the base on the spot when the Rake is bought mid-autumn', () => {
+    const sim = autumnal();
+    run(sim, AUTUMN_STARTS + LITTER_INTERVAL_SECONDS + 1, 0.5);
+    expect(sim.state.litter.size).toBeGreaterThan(0);
+
+    sim.state.resources.add('leafLitter', new Decimal(1000));
+    const before = sim.state.resources.amount('leafLitter').toNumber();
+    sim.buyUpgrade(RAKE_ID);
+
+    expect(sim.state.litter.size).toBe(0);
+    // Paid for the rake and still came out ahead of the pile it swept.
+    expect(sim.state.resources.amount('leafLitter').toNumber()).toBeGreaterThan(before - 40);
+  });
+});
+
+describe('the ground a root is working in', () => {
+  it('tags a root producer with its layer, so weather can find it', () => {
+    const sim = new Simulation();
+    sim.state.resources.add('sap', new Decimal(1000));
+    const root = sim.growPart(sim.state.tree.rootId, 'rootSegment');
+
+    const producer = sim.state.producers.get(partProducerId(root?.id ?? ''));
+    expect(producer?.tags).toContain('soil:topsoil');
+    expect(producer?.tags).toContain('soil:topsoil/water');
+  });
+
+  it('dries out a shallow root in a drought and leaves the deep ones alone', () => {
+    const sim = new Simulation(createInitialState(), () => 0.99); // 0.99 draws the drought
+    sim.state.resources.add('sap', new Decimal(1000));
+    const root = sim.growPart(sim.state.tree.rootId, 'rootSegment');
+    const producer = sim.state.producers.get(partProducerId(root?.id ?? ''));
+
+    const rate = () =>
+      applyModifiers(
+        new Decimal(producer?.baseRate ?? 0),
+        sim.state.modifiers.matching('water', producer?.tags ?? []),
+      ).toNumber();
+
+    const before = rate();
+    run(sim, WEATHER_MIN_GAP_SECONDS + WEATHER_TELEGRAPH_SECONDS + 1, 0.5);
+    expect(sim.state.weather.active?.id).toBe('drought');
+    expect(rate()).toBeCloseTo(before * DROUGHT_WATER_MULTIPLIER, 9);
+
+    // The same drought, measured against a root that reached the rock.
+    const deep = sim.state.modifiers.matching('water', [
+      'root',
+      'soil:rock',
+      'soil:rock/water',
+    ]);
+    expect(applyModifiers(new Decimal(1), deep).toNumber()).toBeCloseTo(1, 9);
   });
 });

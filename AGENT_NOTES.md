@@ -15,6 +15,147 @@ Do not refactor unrelated code.
 
 ## Changelog
 
+### 2026-08-08 — STEP 11: Symbiont creatures
+
+Everything in the game so far has been bought. A symbiont is **attracted**: it
+turns up on its own once the tree has become the kind of tree it wants to live
+in, and the only way to bring one is to build toward what it needs. The tree
+stops being a machine the player operates and starts being a place other things
+live.
+
+- `src/content/symbionts.ts` — **new**. The five as data: an attraction
+  condition, a per-level effect, a mixed-resource upgrade track, flavour, and the
+  line the arrival toast says. Conditions are plain measurements of the tree's
+  shape — three blossoms, five lifetime Deadwood, a root tip in the Clay, canopy
+  height, an oak branch — so the panel can show live progress toward one without
+  the condition describing itself twice.
+  - **Level 1 is free: it is what arriving means.** Levels 2–5 are bought, and
+    every price is in **two resources**, so no track can be levelled entirely out
+    of the half of the economy it belongs to. A test enforces that, and another
+    enforces that no price names Leaf Litter or Seeds — nothing produces either
+    yet, and a price in one would be a track that cannot be bought.
+  - Two of the five do something the modifier system has no vocabulary for, so
+    they say so rather than being bent into modifiers that would misrepresent
+    themselves: `veinReachPerLevel` (the fungus) and `cadence` (the bird's Seed
+    Fragments, the squirrel's nuts).
+- `src/engine/symbionts.ts` — **new**. `SymbiontLedger` (who is here, at what
+  level, and when each is next due), `symbiontContext` (every measurement the
+  five conditions need, in **one** walk of the graph), `conditionProgress`,
+  `symbiontModifiers`, `veinReachOf`, `symbiontLevelCost`.
+  - `claimDue` counts **whole intervals**, not one per call, and advances the
+    clock by exactly that many — so the cadence cannot drift when a payout is
+    collected late, and the same code is correct for a 100 ms tick and for STEP
+    14's offline catch-up. `MAX_CATCH_UP_PAYOUTS` bounds the latter.
+  - Level scaling reuses the upgrade convention exactly (`add` × level, `mul` ^
+    level). "Level 3" has to mean the same thing wherever a player reads it.
+- **Vein reach.** `veinAt(soil, point, reach)` and `soilConditionsAt(..., reach)`
+  widen every pocket's *radius* without moving it or changing its richness — a
+  fungal network does not create minerals, it extends how far a root can feel for
+  them. It is threaded through `PartContext.veinReach` and
+  `priceGrowthOptions`, so the grow menu quotes what a tip *will* find under the
+  current network before it is bought, exactly as it already did for depth.
+- `src/engine/simulation.ts` — `updateSymbionts()` (arrivals + the banked
+  progress rows), `collectSymbiontPayouts()`, `republishSymbionts()`,
+  `upgradeSymbiont()`, `drainSymbiontArrivals()`, `plantBuriedNuts()`. Tick order
+  gained one step behind buffs: **residents are a standing input**, not an event
+  the tick should pay around. Growing, pruning and grafting all refresh the rows
+  immediately, so the third blossom brings the bees *on the purchase* rather than
+  up to a tenth of a second later.
+  - **A wider reach rebuilds the whole part pipeline.** A root tip in barren
+    ground registers no producer at all (STEP 7's rule), and a producer that does
+    not exist cannot be patched — so when the reach moves, `syncPartProducers()`
+    runs. The constructor orders this by hand: reach first, then producers.
+  - The buried nuts sprout **in the constructor**, before anything is measured,
+    so a free root is part of the tree that loads rather than something that
+    appears on top of it. `sproutedNuts` is the handle STEP 14's "While you were
+    away" summary will read. A nut with nowhere to sprout is *kept*, not spent.
+- `src/render/symbionts.ts` — **new**. A creature is a thing living *in the
+  tree*, so every one is positioned off the tree's own projected geometry and
+  moves with the camera: bees fly between the actual blossoms the player bought,
+  the ants' road runs up the actual trunk, the bird takes the highest twig there
+  is and takes a different one when a higher one is grown. `symbiontScene()`
+  reduces the projection to those points once per projection change, never per
+  frame; the motion is pure functions of engine seconds, so flight paths, the
+  ant column and the perch are all tested without a canvas.
+- `src/ui/Symbionts.tsx` + `.css` — **new**. Every creature is on the list from
+  the first frame, including the four that have not arrived: a locked card with a
+  live progress bar is a *goal*, and hiding it would leave the whole system
+  invisible until it happened by accident.
+- `src/ui/App.tsx` — the **S** hotkey, the panel (mutually exclusive with the
+  Journal), and the arrival toast, driven off `drainSymbiontArrivals()`.
+- Tests: **664 pass** (up from 575). New `engine/symbionts.test.ts` (45 — the
+  catalogue's shape and price rules, the ledger incl. drift-free cadences and the
+  catch-up cap, all five condition kinds, `symbiontContext` against a real graph,
+  level scaling, modifier publication, vein reach, and the "arriving is not a
+  lease" rule) and `render/symbionts.test.ts` (26 — scene extraction, the perch
+  rule, bee flight incl. the single-blossom orbit, ant traffic, the squirrel's
+  pauses). `simulation.test.ts` gained 15 across arrivals, the residency rule,
+  the mixed-price transaction, the songbird's clock and the squirrel's nut, and
+  `soil.test.ts` 3 for reach.
+- Verified in a real browser (Chromium/Playwright, 1280×800, production build):
+  the panel opens on **S** showing **0/5** with five locked cards, each quoting
+  its own hint; 220 taps → **553.73 Sap**; growing one branch brought the
+  **squirrel** — toast up, panel **1/5**, the card reading "Cache 1" with the pip
+  track, "Next in 7:59" and a **Cache 2 · 80 Sap / 25 Water** button, and the HUD
+  badge at 1. A separate render harness (dev server, deleted before commit) drew
+  all five at level 4 on one tree: bees over the blossoms, the bird clear on a
+  twig, the squirrel climbing the trunk, the ant column on its road, and the
+  roots sheathed in violet hyphae with the pockets glowing at **×3** reach. Two
+  frames 0.9 s apart differ, so the idle animation is live. No page errors.
+
+**Design decisions worth knowing**
+
+- **A resident is never evicted.** Pruning the blossoms that drew the bees does
+  not send them away. Conditions are an *attraction* mechanic, not an upkeep one;
+  the alternative turns every cut into a hostage negotiation, and STEP 9 exists
+  to make cutting feel free.
+- **The squirrel is the earliest creature in the game, deliberately.** Its
+  condition is one oak branch, so it arrives on the first purchase a new player
+  makes. The first toast should land while they are still learning what a branch
+  is, not forty minutes in.
+- **The bird will not perch inside a bush.** The first pass took the highest
+  wood, which is usually a twig with a leaf cluster drawn around its tip — the
+  bird was half-buried in foliage. `symbiontScene` now excludes tips that carry
+  foliage, falling back to the highest tip when every one of them does. Caught by
+  looking at the rendered frame, not by reading the code.
+- **The fungal web is violet, not pale.** The first pass sheathed each root in a
+  light glow and bleached them into bare sticks against the brown. A violet
+  sheath reads as *something growing on the root*. Also caught in the frames.
+- **Ants move Sap on two lines, resource and `click.power`** — the same
+  compromise Lateral Surge makes, for the same reason: taps are still the only
+  Sap income in the game, so a resource-only modifier would be invisible.
+- **The mineral halo grows with reach; the ore does not.** The specks stay
+  exactly where they were and the halo widens and dims, so the fungus reads as
+  "the ground has fewer secrets" rather than "there is more ore now".
+
+**Open TODOs**
+
+- [ ] **Nothing persists (STEP 15).** `symbionts`, `seedFragments`, `buriedNuts`
+      and `veinReach` are all in `GameState` and snapshotted;
+      `SymbiontLedger.clear()` and `republishSymbionts()` are the load hooks. The
+      squirrel's whole mechanic is *next session*, so it is the one symbiont that
+      cannot actually pay out until saves land — its nuts accrue and the panel
+      says so, and `Simulation.sproutedNuts` is already wired.
+- [ ] Seed Fragments accrue but buy nothing until STEP 13's prestige converts
+      them (100 = 1 Seed). The panel shows the running count.
+- [ ] The vein-reach numbers (+50%/level, so ×3.5 at level 5) and every upgrade
+      price are first-pass. STEP 19 owns balance — in particular whether a
+      level-5 network makes root-tip placement stop mattering, which would undo
+      most of STEP 7.
+- [ ] STEP 7's "vein discovery is free" TODO is **half closed**: reach is now a
+      thing the fungus extends, but every pocket is still *drawn* from the first
+      frame. Hiding undetected veins is the other half and belongs with STEP 17's
+      progressive disclosure.
+- [ ] Symbiont conditions are re-evaluated every tick (one graph walk at 10 Hz).
+      Cheap under 500 nodes; if it shows up in a profile, gate it on
+      `tree.revision` plus a lifetime-total watermark.
+- [ ] The creatures ignore `prefers-reduced-motion` (STEP 16 owns this) and have
+      no sound. The arrival ring is the only ceremony.
+- [ ] Creatures are not culled against the viewport — there are at most five of
+      them, but a zoomed-in camera still pays to draw the ant column off-screen.
+- [ ] The panel has no keyboard path into the upgrade buttons beyond ordinary tab
+      order, and no touch layout (STEP 18).
+
 ### 2026-08-07 — STEP 10: Species and grafting discovery
 
 Until now every part of the tree was made of the same anonymous wood. Now a part

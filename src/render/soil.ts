@@ -99,19 +99,32 @@ function speckCount(vein: MineralVein): number {
   return 3 + Math.round(vein.richness * 2);
 }
 
-/** Draw one mineral pocket: a soft halo with ore glinting inside it. */
-function drawVein(ctx: CanvasRenderingContext2D, vein: MineralVein, layout: TreeLayout): void {
+/**
+ * Draw one mineral pocket: a soft halo with ore glinting inside it.
+ *
+ * `reach` is how far out a root tip can currently *feel* the pocket, which the
+ * mycorrhiza widens. The ore itself never moves — only the halo grows, and it
+ * grows dimmer as it does, so the fungus reads as "the ground has fewer secrets"
+ * rather than as "there is more ore now".
+ */
+function drawVein(
+  ctx: CanvasRenderingContext2D,
+  vein: MineralVein,
+  layout: TreeLayout,
+  reach: number,
+): void {
   const cx = layout.originX + vein.center.x * layout.scale;
   const cy = layout.originY - vein.center.y * layout.scale;
   const radius = vein.radius * layout.scale;
   if (radius < 3) return;
 
-  const halo = ctx.createRadialGradient(cx, cy, radius * 0.1, cx, cy, radius);
+  const felt = radius * Math.max(1, reach);
+  const halo = ctx.createRadialGradient(cx, cy, radius * 0.1, cx, cy, felt);
   halo.addColorStop(0, PALETTE.veinGlow);
   halo.addColorStop(1, 'rgba(214, 190, 126, 0)');
   ctx.fillStyle = halo;
   ctx.beginPath();
-  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.arc(cx, cy, felt, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.save();
@@ -154,6 +167,7 @@ export function drawSoil(
   height: number,
   layout: TreeLayout,
   soil: SoilMap,
+  veinReach = 1,
 ): void {
   const bands = soilBands(layout, height);
 
@@ -175,7 +189,7 @@ export function drawSoil(
 
   // Pockets sit under the labels but over the ground they are buried in.
   for (const vein of soil.veins) {
-    if (veinVisible(vein, layout, width, height)) drawVein(ctx, vein, layout);
+    if (veinVisible(vein, layout, width, height)) drawVein(ctx, vein, layout, veinReach);
   }
 
   ctx.fillStyle = PALETTE.stratumLabel;

@@ -58,6 +58,10 @@ export interface HudProps {
   readonly journalOpen: boolean;
   /** Toggle the Journal. Mirrors the J hotkey. */
   readonly onToggleJournal: () => void;
+  /** Whether the Symbionts panel is open. */
+  readonly symbiontsOpen: boolean;
+  /** Toggle the Symbionts panel. Mirrors the S hotkey. */
+  readonly onToggleSymbionts: () => void;
 }
 
 /** React HUD overlay that sits above the full-screen canvas. */
@@ -70,8 +74,11 @@ export function Hud({
   onToggleGraft,
   journalOpen,
   onToggleJournal,
+  symbiontsOpen,
+  onToggleSymbionts,
 }: HudProps) {
   const discovered = useGameStore((s) => s.snapshot.species.discovered.length);
+  const residents = useGameStore((s) => s.snapshot.symbionts.filter((r) => r.active).length);
   return (
     <div className="hud">
       <header className="hud-header">
@@ -110,6 +117,17 @@ export function Hud({
           >
             <span aria-hidden>📖</span> Journal
             {discovered > 0 && <span className="hud-toggle__badge">{discovered}</span>}
+          </button>
+          <button
+            type="button"
+            className="hud-toggle"
+            aria-pressed={symbiontsOpen}
+            aria-keyshortcuts="S"
+            title="Symbionts (S) — the creatures living in your tree"
+            onClick={onToggleSymbionts}
+          >
+            <span aria-hidden>🐝</span> Symbionts
+            {residents > 0 && <span className="hud-toggle__badge">{residents}</span>}
           </button>
           <DaylightGauge />
           <HydrationGauge />

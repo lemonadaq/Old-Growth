@@ -98,6 +98,12 @@ export interface PartContext {
   readonly placement?: NodePlacement;
   /** Light multiplier for a `shaded` part; `1` (full sun) when unknown. */
   readonly exposure?: number;
+  /**
+   * How far out a root tip can feel for ore, as a multiplier on every pocket's
+   * radius. `1` is a bare root; the mycorrhiza raises it. Defaulted rather than
+   * required so a caller with no simulation behind it still prices a part.
+   */
+  readonly veinReach?: number;
 }
 
 /** No position, no ore, full sun — the default when nothing better is known. */
@@ -145,7 +151,9 @@ function siteProduction(type: TreeNodeType, ctx: PartContext): SitedProduction |
     };
   }
 
-  const conditions = ctx.placement ? soilConditionsAt(ctx.soil, ctx.placement.end) : null;
+  const conditions = ctx.placement
+    ? soilConditionsAt(ctx.soil, ctx.placement.end, ctx.veinReach ?? 1)
+    : null;
   const multiplier = conditions?.multiplier ?? 1;
   const vein = conditions?.vein ?? null;
 
@@ -298,6 +306,7 @@ export function priceGrowthOptions(
   modifiers: ModifierSet,
   soil: SoilMap = BARREN_SOIL,
   speciesId: string = STARTER_SPECIES_ID,
+  veinReach = 1,
 ): PricedGrowthOption[] {
   const parent = graph.placements().get(nodeId);
   // Built once for the whole menu rather than per option: the canopy does not
@@ -317,6 +326,7 @@ export function priceGrowthOptions(
         soil,
         placement,
         exposure: shaded && placement ? exposureAt(placement.end, canopy).exposure : undefined,
+        veinReach,
       },
       speciesId,
     );

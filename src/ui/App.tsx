@@ -8,7 +8,10 @@ import type { GraftAssessment } from '../engine/graft';
 import type { PricedGrowthOption } from '../engine/growth';
 import type { PruneQuote } from '../engine/prune';
 import { RESOURCE_BY_ID } from '../content/resources';
+import { SEASON_BY_ID } from '../content/seasons';
 import { SYMBIONT_BY_ID } from '../content/symbionts';
+import { WEATHER_BY_ID } from '../content/weather';
+import type { SeasonEvent } from '../engine/seasons';
 import { enableTestProducers, disableTestProducers } from '../engine/debugProducers';
 import { Renderer } from '../render/canvas';
 import { GraftTooltip } from './GraftTooltip';
@@ -22,7 +25,7 @@ import { Toast } from './Toast';
 import { Tooltip } from './Tooltip';
 import { UpgradePanel } from './UpgradePanel';
 import { Workshop } from './Workshop';
-import { playSnip } from './sfx';
+import { playSnip, playWeatherCue } from './sfx';
 import { attachTreeInput } from './treeInput';
 import './App.css';
 
@@ -295,6 +298,32 @@ export function App() {
       // scissors are out, in which case prune mode owns the whole surface.
       onPress: (point) => {
         const now = Date.now();
+
+        // A storm owns the pointer while it blows. Fifteen seconds of holding
+        // the trunk beats every other intention the press could have — and the
+        // anchor only exists during those fifteen seconds, so nothing is being
+        // taken away from the player the rest of the time.
+        if (renderer.isBracePress(point)) {
+          if (sim.braceStorm()) renderer.effects.spawnRipple(point.x, point.y, true, now);
+          return true;
+        }
+
+        // A pile of leaves is not part of the tree, so no mode has an opinion
+        // about it: it sweeps up whether the scissors are out or not.
+        const pileId = renderer.litterPileAt(point);
+        if (pileId) {
+          const pile = sim.collectLitter(pileId);
+          if (pile) {
+            renderer.effects.spawnFloatingNumber(
+              point.x,
+              point.y,
+              `+${formatNumber(pile.amount)} ${RESOURCE_BY_ID.leafLitter.label}`,
+              false,
+              now,
+            );
+          }
+          return true;
+        }
 
         if (graftModeRef.current) {
           const segment = renderer.hitTest(point);
@@ -586,6 +615,72 @@ export function App() {
             color: def.color,
             key: now + id.length,
           });
+        }
+
+        // The year turning is the other thing that happens without the player
+        // having pressed anything. A ring outranks the season that brought it:
+        // both land on the same frame, and only one of them is permanent.
+        const turns = sim.drainSeasonEvents();
+        const ring = turns.find(
+          (event): event is Extract<SeasonEvent, { kind: 'ring' }> => event.kind === 'ring',
+        );
+        const turned = turns.filter((event) => event.kind === 'season').pop();
+
+        if (ring) {
+          setToast({
+            title: '◎ A ring for the winter',
+            body: `The cold is behind you and the trunk is thicker for it. Everything the tree makes is worth ${snapshot.ringMultiplier.toFixed(
+              2,
+            )}× for good.`,
+            glyph: '◎',
+            color: '#e8cfa8',
+            key: now,
+          });
+        } else if (turned && turned.kind === 'season') {
+          const def = SEASON_BY_ID[turned.id];
+          setToast({
+            title: `${def.glyph} ${def.label}`,
+            body: def.flavor,
+            glyph: '❋',
+            color: def.tint.leaf,
+            key: now + 1,
+          });
+        }
+
+        // Weather announces itself in the sky and in the ear; the banner is
+        // driven off the snapshot, so all that is owed here is the cue and the
+        // one-off report of what a storm did.
+        for (const event of sim.drainWeatherEvents()) {
+          if (event.kind === 'telegraph') {
+            playWeatherCue(event.id);
+            continue;
+          }
+          if (event.kind !== 'end' || !event.storm) continue;
+
+          const report = event.storm;
+          const def = WEATHER_BY_ID[event.id];
+          if (report.snapped.length > 0) {
+            setToast({
+              title: `${def.glyph} The wind took ${report.snapped.length} limb${
+                report.snapped.length === 1 ? '' : 's'
+              }`,
+              body: `What came down is yours: +${formatNumber(report.deadwood)} Deadwood.`,
+              glyph: '⚡',
+              color: def.color,
+              key: now + 2,
+            });
+          } else if (report.exposed > 0) {
+            setToast({
+              title: `${def.glyph} Every limb held`,
+              body:
+                report.brace >= 1
+                  ? 'Braced to the last. The storm went through the canopy and took nothing.'
+                  : 'The wind found nothing to lever. It will not always be so generous.',
+              glyph: '⚓',
+              color: def.color,
+              key: now + 3,
+            });
+          }
         }
       },
       onStats: (stats) => {

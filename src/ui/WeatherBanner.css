@@ -1,0 +1,99 @@
+.weather {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 280px;
+  max-width: min(460px, 84vw);
+  padding: 8px 12px;
+  font-size: 12px;
+
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 10px;
+  backdrop-filter: blur(4px);
+  /* Informational: it must never sit between the player and the anchor. */
+  pointer-events: none;
+}
+
+/* The warning is quieter than the thing it warns about. */
+.weather--pending {
+  opacity: 0.92;
+  border-style: dashed;
+}
+
+/* A storm is the one piece of weather that wants something back. */
+.weather--storm {
+  animation: weather-urge 900ms ease-in-out infinite;
+}
+
+@keyframes weather-urge {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 210, 122, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(255, 210, 122, 0.22);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .weather--storm {
+    animation: none;
+  }
+}
+
+.weather__glyph {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.weather__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.weather__name {
+  font-weight: 700;
+}
+
+.weather__call {
+  font-weight: 400;
+  color: var(--hud-accent);
+}
+
+.weather__effect {
+  opacity: 0.78;
+}
+
+.weather__track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(253, 243, 224, 0.18);
+  overflow: hidden;
+}
+
+.weather__fill,
+.weather__brace {
+  display: block;
+  height: 100%;
+  transition: width 200ms linear;
+}
+
+.weather__brace {
+  background: #8fd694;
+}
+
+.weather__time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--hud-accent);
+}

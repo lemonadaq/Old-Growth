@@ -97,3 +97,58 @@ export function playSnip(): void {
     // Audio is decoration. Never let it break the interaction that triggered it.
   }
 }
+
+/** Peak gain of a weather cue. Quieter than the snip: it is a warning, not an alarm. */
+const CUE_GAIN = 0.07;
+
+/** One soft tone, ramped in and out so it has no click at either end. */
+function tone(
+  ctx: AudioContext,
+  at: number,
+  hz: number,
+  seconds: number,
+  type: OscillatorType = 'sine',
+): void {
+  const osc = ctx.createOscillator();
+  osc.type = type;
+  osc.frequency.setValueAtTime(hz, at);
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, at);
+  gain.gain.exponentialRampToValueAtTime(CUE_GAIN, at + seconds * 0.25);
+  gain.gain.exponentialRampToValueAtTime(0.0001, at + seconds);
+
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(at);
+  osc.stop(at + seconds + 0.02);
+}
+
+/**
+ * The cue that goes with the sky turning, ten seconds before weather lands.
+ *
+ * Three different shapes rather than three pitches of the same note: rain falls
+ * (two notes down, soft), a storm gathers (two notes *up*, and rough enough to
+ * be alarming), and a drought is one thin sustained tone that does not resolve.
+ * The design asks for the telegraph to be audible as well as visible, and a
+ * player should be able to tell which one is coming without looking up.
+ */
+export function playWeatherCue(kind: 'rain' | 'storm' | 'drought'): void {
+  const ctx = audioContext();
+  if (!ctx) return;
+  if (ctx.state === 'suspended') void ctx.resume().catch(() => undefined);
+
+  try {
+    const now = ctx.currentTime;
+    if (kind === 'rain') {
+      tone(ctx, now, 523.25, 0.28);
+      tone(ctx, now + 0.22, 392, 0.42);
+    } else if (kind === 'storm') {
+      tone(ctx, now, 174.61, 0.34, 'sawtooth');
+      tone(ctx, now + 0.26, 261.63, 0.5, 'sawtooth');
+    } else {
+      tone(ctx, now, 659.25, 0.75, 'triangle');
+    }
+  } catch {
+    // Audio is decoration. Never let it break the tick that triggered it.
+  }
+}

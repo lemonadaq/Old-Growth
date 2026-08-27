@@ -1,4 +1,5 @@
 import type { ResourceId } from './resources';
+import { stratumResourceTag, stratumTag, type StratumId } from './soil';
 import { speciesResourceTag, speciesTag, STARTER_SPECIES_ID } from './species';
 
 /**
@@ -249,15 +250,25 @@ export const OFFLINE_TAG = 'offline';
  * trait reach one resource on its own parts and nothing else, since a modifier
  * matches a producer by resource or by tag but never by both at once.
  *
- * Underground parts additionally carry {@link OFFLINE_TAG}.
+ * Underground parts additionally carry {@link OFFLINE_TAG} and, when the caller
+ * knows where the part is working, the layer it is working in — `soil:clay` and
+ * `soil:clay/water`. That is what lets a drought dry out the shallow roots and
+ * leave the ones that reached the rock alone, without naming a single node.
  */
 export function partProducerTags(
   type: TreeNodeType,
   speciesId: string = STARTER_SPECIES_ID,
+  stratum?: StratumId,
 ): readonly string[] {
   const rule = GROWTH_RULE_BY_TYPE[type];
   const tags: string[] = [rule.domain, type, speciesTag(speciesId)];
   if (rule.production) tags.push(speciesResourceTag(speciesId, rule.production.resource));
-  if (rule.domain === 'root') tags.push(OFFLINE_TAG);
+  if (rule.domain === 'root') {
+    tags.push(OFFLINE_TAG);
+    if (stratum) {
+      tags.push(stratumTag(stratum));
+      if (rule.production) tags.push(stratumResourceTag(stratum, rule.production.resource));
+    }
+  }
   return tags;
 }

@@ -1,0 +1,86 @@
+.season {
+  pointer-events: auto; /* the HUD ignores pointer events by default */
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+  cursor: help;
+  color: #d8e0c8;
+  /* The border carries the season, so the chip changes with the year even at a
+     glance across the screen. */
+  transition:
+    color 600ms linear,
+    border-color 600ms linear;
+}
+
+.season--spring {
+  color: #b7de84;
+  border-color: rgba(183, 222, 132, 0.5);
+}
+
+.season--summer {
+  color: #ffd27a;
+  border-color: rgba(255, 210, 122, 0.5);
+}
+
+.season--autumn {
+  color: #eda254;
+  border-color: rgba(237, 162, 84, 0.55);
+}
+
+.season--winter {
+  color: #cfe0f2;
+  border-color: rgba(207, 224, 242, 0.5);
+}
+
+.season__glyph {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.season__value {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.season__value b {
+  font-weight: 700;
+}
+
+.season__ringbadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding-left: 6px;
+  border-left: 1px solid var(--hud-border);
+  color: #e8cfa8;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.season__rings {
+  width: 16px;
+  height: 16px;
+}
+
+/* Rings are drawn, not filled: a cross-section is lines on pale heartwood. */
+.season__ring {
+  fill: none;
+  stroke: #e8cfa8;
+  stroke-width: 1.1;
+  opacity: 0.85;
+}
+
+.season__ring--core {
+  fill: rgba(232, 207, 168, 0.35);
+  stroke-width: 0.8;
+}
+
+.season__ringcount {
+  font-size: 11px;
+}

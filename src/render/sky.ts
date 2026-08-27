@@ -2,7 +2,7 @@ import { SUNLIT_FRACTION } from '../content/daylight';
 import { CLOUD_LEVEL_Y, type Viewport } from '../engine/camera';
 import type { DayCycle } from '../engine/daylight';
 import type { TreeLayout } from '../engine/tree';
-import { lerpColor } from './color';
+import { castColor, lerpColor, type ColorCast } from './color';
 import { PALETTE, SKY_KEYFRAMES, type SkyColors } from './palette';
 
 /**
@@ -207,12 +207,17 @@ function drawHillBand(
  * Order matters and is fixed: sky, then the body against it, then the hills in
  * front of both so a low sun *sets behind* the ridgeline, then (by the caller)
  * the soil cross-section over their feet, and the tree in front of all of it.
+ *
+ * `casts` are the season and the weather, in that order — the sky is the first
+ * thing either of them changes, and the hour of the day is resolved before
+ * either gets a say, so a stormy dusk is still recognisably dusk.
  */
 export function drawBackdrop(
   ctx: CanvasRenderingContext2D,
   viewport: Viewport,
   layout: TreeLayout,
   cycle: DayCycle,
+  casts: readonly ColorCast[] = [],
 ): void {
   const { width: w, height: h } = viewport;
   const groundY = layout.originY;
@@ -220,7 +225,11 @@ export function drawBackdrop(
   // once the camera is at the clouds or down in the rock.
   const skyBottom = Math.min(h, Math.max(0, groundY));
 
-  const sky = skyColors(cycle.t);
+  const hour = skyColors(cycle.t);
+  const sky: SkyColors = {
+    top: castColor(hour.top, casts),
+    bottom: castColor(hour.bottom, casts),
+  };
   if (skyBottom > 0) {
     // Anchor the gradient to the cloud ceiling rather than the canvas top, so
     // panning up moves through the sky instead of dragging it along.
@@ -241,13 +250,15 @@ export function drawBackdrop(
     ctx.beginPath();
     ctx.rect(0, 0, w, skyBottom);
     ctx.clip();
+    // The hills take the same casts the sky does — a winter that whitened the
+    // sky and left the ridgeline green would read as two different days.
     drawHillBand(
       ctx,
       viewport,
       groundY,
       layout,
       0,
-      lerpColor(PALETTE.hillFar, PALETTE.hillFarNight, night),
+      castColor(lerpColor(PALETTE.hillFar, PALETTE.hillFarNight, night), casts),
     );
     drawHillBand(
       ctx,
@@ -255,7 +266,7 @@ export function drawBackdrop(
       groundY,
       layout,
       1,
-      lerpColor(PALETTE.hillNear, PALETTE.hillNearNight, night),
+      castColor(lerpColor(PALETTE.hillNear, PALETTE.hillNearNight, night), casts),
     );
     ctx.restore();
   }

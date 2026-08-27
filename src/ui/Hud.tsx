@@ -3,6 +3,8 @@ import { RESOURCES } from '../content/resources';
 import { BuffBar } from './BuffBar';
 import { DaylightGauge } from './DaylightGauge';
 import { HydrationGauge } from './HydrationGauge';
+import { SeasonBadge } from './SeasonBadge';
+import { WeatherBanner } from './WeatherBanner';
 import { useGameStore } from './useGameStore';
 import './Hud.css';
 
@@ -129,6 +131,7 @@ export function Hud({
             <span aria-hidden>🐝</span> Symbionts
             {residents > 0 && <span className="hud-toggle__badge">{residents}</span>}
           </button>
+          <SeasonBadge />
           <DaylightGauge />
           <HydrationGauge />
           <button
@@ -142,6 +145,7 @@ export function Hud({
           <DebugCounter />
         </div>
       </header>
+      <WeatherBanner />
       <ResourceReadout />
     </div>
   );

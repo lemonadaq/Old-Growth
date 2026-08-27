@@ -3,7 +3,7 @@ import { STARTER_SPECIES_ID } from '../content/species';
 import type { Viewport } from '../engine/camera';
 import { speciesPalette } from '../engine/species';
 import type { ScreenSegment, TreeBounds, TreeLayout } from '../engine/tree';
-import { lerpColor } from './color';
+import { castColor, lerpColor, type ColorCast } from './color';
 import { HORIZON_RATIO, PALETTE } from './palette';
 
 /**
@@ -245,7 +245,14 @@ export function shadeTint(exposure: number | undefined): number {
   return Math.sqrt(Math.min(1, Math.max(0, 1 - exposure))) * SHADE_TINT_STRENGTH;
 }
 
-/** A leaf cluster: overlapping soft circles around the twig's tip. */
+/**
+ * A leaf cluster: overlapping soft circles around the twig's tip.
+ *
+ * Two things recolour foliage and they are not the same kind of thing. `tint` is
+ * *shade* — how much sky this particular cluster can see — and it is applied
+ * first, because it is about this leaf. `season` is the month, and it is applied
+ * over the top, because October happens to the whole tree.
+ */
 function drawLeafCluster(
   ctx: CanvasRenderingContext2D,
   segment: ScreenSegment,
@@ -253,10 +260,12 @@ function drawLeafCluster(
   alpha = 1,
   sway: { dx: number; dy: number } = STILL,
   tint = 0,
+  season?: ColorCast,
 ): void {
   const radius = Math.max(3, segment.width) * t;
   const blobs = blobOffsets(segment.id, 4);
   const leaves = speciesPalette(segment.speciesId ?? STARTER_SPECIES_ID);
+  const casts = season ? [season] : [];
 
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -264,7 +273,8 @@ function drawLeafCluster(
     const blob = blobs[i];
     const base =
       i === 0 ? leaves.leafShade : i === blobs.length - 1 ? leaves.leafHighlight : leaves.leaf;
-    ctx.fillStyle = tint > 0 ? lerpColor(base, PALETTE.leafOccluded, tint) : base;
+    const shaded = tint > 0 ? lerpColor(base, PALETTE.leafOccluded, tint) : base;
+    ctx.fillStyle = castColor(shaded, casts);
     ctx.beginPath();
     ctx.arc(
       segment.b.x + blob.dx * radius + sway.dx,
@@ -358,7 +368,8 @@ export type LeafExposures = ReadonlyMap<string, { readonly exposure: number }>;
  * Passing a `viewport` culls everything off-screen before any of those passes
  * run, so a zoomed-in camera pays only for the parts the player can see.
  * Passing `exposures` darkens the clusters the canopy is shading, which is how
- * a crowded tree tells on itself.
+ * a crowded tree tells on itself. Passing `season` recolours the foliage for the
+ * month — autumn's whole reason for existing.
  */
 export function drawTree(
   ctx: CanvasRenderingContext2D,
@@ -367,6 +378,7 @@ export function drawTree(
   spawns: SpawnTimes = new Map(),
   viewport?: Viewport,
   exposures?: LeafExposures,
+  season?: ColorCast,
 ): void {
   const segments = viewport ? cullSegments(allSegments, viewport) : allSegments;
   if (segments.length === 0) return;
@@ -414,7 +426,15 @@ export function drawTree(
     const t = progress.get(segment.id) ?? 1;
     const sway = swayOffset(segment.id, now, Math.max(3, segment.width) * t);
     if (segment.kind === 'leafCluster') {
-      drawLeafCluster(ctx, segment, t, 1, sway, shadeTint(exposures?.get(segment.id)?.exposure));
+      drawLeafCluster(
+        ctx,
+        segment,
+        t,
+        1,
+        sway,
+        shadeTint(exposures?.get(segment.id)?.exposure),
+        season,
+      );
     } else {
       drawBlossom(ctx, segment, t, 1, sway);
     }

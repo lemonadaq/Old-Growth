@@ -2,6 +2,7 @@ import { SOIL_UNITS_PER_CANONICAL, STRATA, type Stratum } from '../content/soil'
 import type { MineralVein, SoilMap } from '../engine/soil';
 import { createSeededRandom } from '../engine/rng';
 import type { TreeLayout } from '../engine/tree';
+import { castColor, type ColorCast } from './color';
 import { PALETTE } from './palette';
 
 /**
@@ -160,6 +161,11 @@ const LABEL_MIN_BAND_PX = 26;
  * names, and every mineral pocket that is on screen.
  *
  * Drawn before the tree, so roots read as growing *through* the ground.
+ *
+ * `season` casts the month over the bands: frozen ground reads grey, and the
+ * ground under an autumn tree reads warm. Only the *fills* take it — the bedding
+ * planes, the ore and the labels are structure, and structure does not have a
+ * season.
  */
 export function drawSoil(
   ctx: CanvasRenderingContext2D,
@@ -168,14 +174,16 @@ export function drawSoil(
   layout: TreeLayout,
   soil: SoilMap,
   veinReach = 1,
+  season?: ColorCast,
 ): void {
   const bands = soilBands(layout, height);
+  const casts = season ? [season] : [];
 
   ctx.save();
   for (const band of bands) {
     const fill = ctx.createLinearGradient(0, band.gradientTop, 0, band.gradientBottom);
-    fill.addColorStop(0, band.stratum.colorTop);
-    fill.addColorStop(1, band.stratum.colorBottom);
+    fill.addColorStop(0, castColor(band.stratum.colorTop, casts));
+    fill.addColorStop(1, castColor(band.stratum.colorBottom, casts));
     ctx.fillStyle = fill;
     ctx.fillRect(0, band.top, width, band.bottom - band.top);
   }

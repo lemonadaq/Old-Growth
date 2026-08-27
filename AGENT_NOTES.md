@@ -15,6 +15,161 @@ Do not refactor unrelated code.
 
 ## Changelog
 
+### 2026-08-26 — STEP 12: Seasons and weather events
+
+The tree has had a clock since STEP 8 — a day that gets dark and comes back.
+This gives it a **calendar**: four seasons the tree lives inside, and weather
+that interrupts them. It is the first system that changes the game without the
+player having done anything, so almost all of the work is in saying so clearly:
+a badge that names the season, a sky that turns before the storm lands, and a
+canopy that is visibly gold in October.
+
+- `src/content/balance.ts` — **new**. Every tunable this step introduced, in one
+  file, because the numbers are the part that will move most (and because STEP
+  13's Tempo heirloom needs one number to scale, not a definition to rewrite).
+  Season length, the ring bonus, the weather cadence, the storm's brace, the
+  litter rate.
+- `src/content/seasons.ts` — **new**. The four as data: standing modifiers, a
+  colour cast, and two flags for the mechanics that are not modifiers
+  (`shedsLitter`, `earnsRing`).
+  - **Winter's "−60%" is read as two things going the *same* way.** Light ×0.4 is
+    the plain reading; growth cannot also be −60% because Spring already spends
+    "−20%" on making growth *cheaper*, and a winter that discounted prices
+    further would reward the hardest season in the game. So winter's growth is
+    ×1.6 — dearer, not cheaper. It is the one place this step reads against the
+    letter of the design line, and `WINTER_PENALTY` carries the reasoning.
+- `src/content/weather.ts` — **new**. Rain, storm and drought, with a telegraph
+  line each. The **drought's immunity rule is data**: its modifiers are derived
+  from the strata table minus `DROUGHT_IMMUNE_STRATUM`, so adding a layer to the
+  ground cannot quietly leave a hole in the weather.
+- **Roots now carry the layer they work in.** `partProducerTags` gained an
+  optional stratum and emits `soil:clay` plus `soil:clay/water`. That two-part
+  tag is the same trick `speciesResourceTag` plays, and it is the whole of the
+  drought's immunity: a modifier can dry out the shallow roots and leave the
+  ones that reached the rock, without naming a single node — and without
+  touching Minerals, which a drought has no business taking.
+- `src/engine/seasons.ts` — **new**. Which season it is is a *pure function of
+  elapsed time*, exactly as the hour of the day is; the simulation stores only
+  which season it last **saw**, so it can notice a boundary. Rings are the
+  deliberate exception: a ring is a record of a winter lived through, so it is
+  stored — prestige (STEP 13) keeps Rings and resets everything else, and a
+  derived count would have nowhere to live.
+  - `ringsEarnedBetween(from, to)` counts winters over the whole span rather than
+    one per call, so an offline jump of a week pays exactly what sitting through
+    it would have. `seasonAt` takes the season length as a parameter — that is
+    the accelerated test mode, and STEP 13's Tempo knob.
+- `src/engine/weather.ts` — **new**. A three-field state machine (running,
+  announced, next roll) advancing on **engine seconds**, with time and randomness
+  both passed in — so a whole year of weather is reproducible from one seed. Each
+  transition is stamped with the moment it was *due*, not with `now`, so a long
+  jump replays the schedule on its own timeline instead of bunching every event
+  onto the first tick back (bounded by `MAX_WEATHER_STEPS`).
+  - **Storms are online-only, enforced twice**: never drawn while `allowStorm` is
+    false, and one already announced is *dropped* rather than run if the player
+    leaves before it lands. `Simulation.tick(dt, { offline })` is the switch STEP
+    14 will throw.
+  - The storm itself is resolved by the simulation out of pure helpers here —
+    `wideLimbs` (branches leaning more than 45° off vertical; the leader points
+    into the wind and is safe), `braceFraction`, `chooseSnappedLimbs` (hard cap
+    of two, whatever the rolls say). What snaps pays **Deadwood only**: a storm is
+    not a harvest, and there is no refund for wood nobody chose to cut.
+- `src/engine/litter.ts` — **new**. Autumn's piles are *places*, not a number
+  going up: each has a position at the base and is swept by clicking it. Capped
+  at six, so a season spent elsewhere is worth one sweep rather than a backlog,
+  and piles survive into winter — leaves left in the snow are still leaves.
+- `src/content/upgrades.ts` — the **Rake**: the first upgrade that grants no
+  modifiers at all. It buys a capability the engine reads directly, and it is
+  priced in the thing it collects, so a few piles swept by hand buy the tool that
+  sweeps the rest. Buying it sweeps the base on the spot.
+- `src/engine/simulation.ts` — season and weather go into the tick right behind
+  buffs, ahead of the residents: a rain that starts on this tick must be worth its
+  triple *on* this tick, and a winter that turns on it must not pay a single
+  second at summer's rates.
+- `src/render/weather.ts` + `src/render/litter.ts` — **new**, and everything in
+  them is a pure function of engine seconds: no particle pool, no RNG, so the
+  whole sky is testable without a canvas. Seasons and weather repaint the world
+  by **casting** a colour over the existing palette (`ColorCast` in `./color.ts`,
+  which now parses `rgb(...)` as well as hex so casts compose) — October is the
+  same tree as June, tinted. The brace anchor is drawn on the trunk rather than in
+  the HUD: bracing is *holding the tree*, and a button in the corner would be a
+  quick-time event with a tree in the background.
+- `src/ui/SeasonBadge.tsx` / `WeatherBanner.tsx` — **new**. The badge names the
+  season, what it is doing to the numbers, and how long is left; the rings are
+  drawn as what they are, a trunk in cross-section. The banner is the only piece
+  of chrome that asks for something back, and it disappears entirely when the sky
+  is clear.
+- `src/ui/sfx.ts` — `playWeatherCue`, three shapes rather than three pitches:
+  rain falls, a storm gathers, a drought hangs. The design asks for the telegraph
+  to be audible as well as visible.
+- Tests: **797 pass** (up from 664). New `engine/seasons.test.ts` (28),
+  `engine/weather.test.ts` (35), `engine/litter.test.ts` (12),
+  `render/weather.test.ts` (20) and `render/litter.test.ts` (10);
+  `simulation.test.ts` gained 28 across the accelerated year, ring stacking and
+  persistence, the offline storm ban, the brace, the litter rhythm and the Rake.
+  Two existing growth-price tests now quote prices *through Spring* — a fresh save
+  opens in a growth discount, and pretending otherwise would have hidden it.
+- Verified in a real browser (Chromium/Playwright, 1280×800): the four seasons
+  read as four different pictures — spring fresh, summer rich, autumn gold with
+  heaps of litter along the base, winter frosted through sky, foliage, hills and
+  soil. Rain falls in slanted streaks; a storm darkens the whole scene, flashes,
+  and puts a **BRACE** ring on the trunk with the banked brace drawn as a green
+  arc; two storm frames 0.9 s apart differ, so it is live. The game itself opens
+  on "🌱 Spring 1/20" in the HUD with the grow menu quoting **BR 12** rather than
+  15 — the season is visible in the price before it is read in a tooltip. 60 fps,
+  no page errors.
+
+**Design decisions worth knowing**
+
+- **A ring is the only permanent multiplier that cannot be bought.** It is the
+  reason to sit through the worst season in the game rather than log off for it,
+  and it is why winter had to be legible at a glance: the badge, the sky, the
+  foliage and the soil all change together.
+- **Rain is drawn in pale streaks, not blue ones.** A blue line over a blue sky
+  is a line nobody sees. Caught in the frames.
+- **Rain is clipped at the ground line.** The underground is a cross-section, and
+  rain falling through the clay is the kind of small wrongness that cannot be
+  un-seen once noticed. Also caught in the frames.
+- **The season casts *over* the shade tint, not instead of it.** Shade is about
+  one leaf and is applied first; the month happens to the whole tree and goes on
+  top. A crowded canopy still tells on itself in October.
+- **A storm owns the pointer for its fifteen seconds** — the anchor gets first
+  refusal on every press, ahead of prune and graft mode. It only exists during
+  those fifteen seconds, so nothing is taken away from the player the rest of the
+  time. A pile of leaves is the opposite: it is not part of the tree, so no mode
+  has an opinion about it and it sweeps up whatever else is happening.
+
+**Open TODOs**
+
+- [ ] **Nothing persists (STEP 15).** `rings`, `seasonIndexSeen`, the weather
+      scheduler and the litter piles are all in `GameState` and snapshotted;
+      `WeatherScheduler.clear(nextRollAt)` and `LitterGround.clear()` are the load
+      hooks. **A save loaded with a stale `nextRollAt` will replay the schedule**
+      up to `MAX_WEATHER_STEPS` — the loader must re-arm the roll to just after
+      the restored `elapsedSeconds`, which is exactly what `clear` takes an
+      argument for.
+- [ ] Season length (20 engine days ≈ 2h40 a season, ~10h40 a year) is the
+      design's number and makes a Ring a very long-run reward. STEP 19 owns
+      whether that is right; the knob is `SEASON_LENGTH_DAYS` alone.
+- [ ] Weather cadence, the storm's snap chance and the litter rate are first-pass.
+      In particular nothing yet stops a player from simply not being there for
+      storms: there is no penalty for ignoring one beyond the two limbs.
+- [ ] A storm that takes the tree's leader does **not** grant a Lateral Surge, the
+      way a deliberate cut does. Arguably it should — apical dominance does not
+      care who did the cutting — but a storm is not a decision and paying it out
+      like one felt wrong. Revisit with STEP 19.
+- [ ] The storm's damage has no debris: the toast says what was lost, but the
+      limbs vanish between frames. `EffectPool.spawnPruneBurst` wants the screen
+      positions of the doomed limbs, and by the time the report exists they are
+      gone from the graph.
+- [ ] Rain and the storm ignore `prefers-reduced-motion` (STEP 16 owns this), and
+      the weather cues are synthesised in the temporary `sfx.ts`.
+- [ ] Litter piles are not culled against the viewport, and the anchor is drawn
+      even when the trunk is off-screen (clamped into view on purpose — but a
+      zoomed-in player gets an anchor with no trunk under it).
+- [ ] The Rake is visible in the upgrade panel from the first frame, priced in a
+      resource the player has never seen. STEP 17's progressive disclosure should
+      hide it until the first pile falls.
+
 ### 2026-08-08 — STEP 11: Symbiont creatures
 
 Everything in the game so far has been bought. A symbiont is **attracted**: it

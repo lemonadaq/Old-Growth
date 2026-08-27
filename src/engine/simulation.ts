@@ -1,5 +1,9 @@
 import Decimal from 'break_infinity.js';
-import { LITTER_INTERVAL_SECONDS, STORM_BRACE_TAPS } from '../content/balance';
+import {
+  LITTER_INTERVAL_SECONDS,
+  SEASON_LENGTH_SECONDS,
+  STORM_BRACE_TAPS,
+} from '../content/balance';
 import { BUFF_BY_ID, LATERAL_SURGE_ID } from '../content/buffs';
 import { GROWTH_RULE_BY_TYPE, type TreeNodeType } from '../content/growth';
 import type { HybridDef } from '../content/hybrids';
@@ -22,6 +26,19 @@ import {
   priceGrowthOptions,
   type PricedGrowthOption,
 } from './growth';
+import {
+  bondLevel,
+  heirloomCost,
+  heirloomModifiers,
+  isHeirloomMaxed,
+  isHeirloomUnlocked,
+  memoryDomains,
+  offlineCapHours,
+  seasonLengthFactor,
+  startingParts,
+  startingResources,
+  HEIRLOOM_SOURCE,
+} from './heirlooms';
 import { computeHydration, hydrationModifiers, HYDRATION_SOURCE } from './hydration';
 import {
   canopyIndex,
@@ -32,6 +49,23 @@ import {
 } from './light';
 import { litterAmount, litterPosition, type LitterPile } from './litter';
 import { applyModifiers, type Modifier } from './modifiers';
+import {
+  beginCeremony,
+  captureMemory,
+  ceremonyFraction,
+  forestModifiers,
+  forestMultiplier,
+  memoryParts,
+  prestigeProgress as computePrestigeProgress,
+  seedYield as computeSeedYield,
+  summariseTree,
+  treeHeight,
+  FOREST_SOURCE,
+  type Ceremony,
+  type PrestigeProgress,
+  type SeedYield,
+  type TreeMemory,
+} from './prestige';
 import { deadwoodFor, quotePrune, woodVolume, type PruneQuote } from './prune';
 import { quoteGraft, type GraftAssessment, type GraftQuote } from './graft';
 import type { RandomSource } from './rng';
@@ -80,14 +114,18 @@ import {
   type BuffSnapshot,
   type GameSnapshot,
   type GameState,
+  type HeirloomSnapshot,
   type LeafLight,
   type LitterSnapshot,
+  type PrestigeReport,
+  type PrestigeSnapshot,
   type Resources,
   type SpeciesSnapshot,
   type SymbiontSnapshot,
   type UpgradeSnapshot,
   type WeatherSnapshot,
 } from './types';
+import { HEIRLOOMS, HEIRLOOM_BY_ID } from '../content/prestige';
 
 /** What one resolved tap did, including any dawn Dew it happened to collect. */
 export interface ClickOutcome extends ClickResult {
@@ -142,7 +180,17 @@ export interface PruneResult {
  * a burst of rapid taps can never be coalesced or dropped by the frame loop.
  */
 export class Simulation {
-  readonly state: GameState;
+  /**
+   * The mutable state being advanced.
+   *
+   * Reassignable, and only by {@link goToSeed}: a prestige builds a **fresh**
+   * state and copies across the handful of things that survive, rather than
+   * unwinding thirty fields in place. Anything that resets is then reset by
+   * construction, and a field added in a later step cannot be forgotten by the
+   * reset — the failure mode is that it starts clean, which is the safe way
+   * round. Every consumer reads through `sim.state`, so the swap is invisible.
+   */
+  state: GameState;
 
   /**
    * The free roots the squirrel's buried nuts sprouted into on the way in.
@@ -170,7 +218,18 @@ export class Simulation {
     // now, so the free root is part of the tree that loads rather than something
     // that appears on top of it a moment later.
     this.sproutedNuts = this.sproutNuts(random);
+    this.hydrate();
+  }
 
+  /**
+   * Bring every derived reading and standing modifier into step with the state,
+   * from scratch.
+   *
+   * The path a session takes on the way in, and the one a prestige takes on the
+   * way out: both arrive holding a `GameState` nothing has been published from
+   * yet, and both need exactly this order.
+   */
+  private hydrate(): void {
     this.syncPartProducers();
     // Permanent auras and any running buffs first: they are inputs to everything
     // measured below them, and a loaded save arrives with both already set. The
@@ -191,6 +250,11 @@ export class Simulation {
     this.state.seasonIndexSeen = this.state.season.index;
     this.republishSeason();
     this.republishRings();
+    // The two that outlive the tree entirely: what the Vault has been spent on,
+    // and how many trees stand behind this one. Both are as standing as an aura
+    // and neither has anything to do with the run they are being applied to.
+    this.republishHeirlooms();
+    this.republishForest();
     // Producers are rebuilt once the reach is known: a root tip that only finds
     // its pocket through the fungus would otherwise load barren.
     this.syncPartProducers();
@@ -1135,6 +1199,327 @@ export class Simulation {
     return true;
   }
 
+  /* ------------------------------------------------------------- prestige */
+
+  /**
+   * Republish what the Seed Vault is worth.
+   *
+   * One revocable source for twenty heirlooms, exactly as the season has one for
+   * four: buying a level revokes the whole set and re-grants it at the new level,
+   * so an effect can never stack with its own previous instance.
+   */
+  republishHeirlooms(): void {
+    this.state.modifiers.removeBySource(HEIRLOOM_SOURCE);
+    for (const modifier of heirloomModifiers(this.state.heirlooms)) {
+      this.state.modifiers.add(modifier);
+    }
+  }
+
+  /** Republish what the trees standing behind this one are worth. */
+  republishForest(): void {
+    this.state.modifiers.removeBySource(FOREST_SOURCE);
+    for (const modifier of forestModifiers(this.state.forest.length)) {
+      this.state.modifiers.add(modifier);
+    }
+  }
+
+  /** How close the tree is to maturity, against both gates. */
+  prestigeProgress(): PrestigeProgress {
+    return computePrestigeProgress(treeHeight(this.state.tree), this.state.resources.total('light'));
+  }
+
+  /** What going to seed right now would pay. */
+  prestigeYield(): SeedYield {
+    return computeSeedYield(this.state.resources.total('light'), this.state.seedFragments);
+  }
+
+  /** Whether the ceremony can be started: mature, and not already under way. */
+  canGoToSeed(): boolean {
+    return this.state.ceremony === null && this.prestigeProgress().ready;
+  }
+
+  /**
+   * Commit to seeding. Starts the six-second ceremony and returns it, or `null`
+   * when the tree is not ready (or is already seeding).
+   *
+   * The payout is **locked in here**, not when the ceremony lands: the number on
+   * the confirm button is the number the player agreed to, and six more seconds
+   * of Light must not quietly change it. There is deliberately no way to call it
+   * off — going to seed is the one irreversible thing in the game, and a cancel
+   * button would turn the ceremony into a dialog.
+   */
+  goToSeed(): Ceremony | null {
+    if (!this.canGoToSeed()) return null;
+
+    const ceremony = beginCeremony(this.state.elapsedSeconds, this.prestigeYield());
+    this.state.ceremony = ceremony;
+    return ceremony;
+  }
+
+  /**
+   * Land a ceremony whose six seconds are up. Returns what it did, or `null`
+   * when there is nothing running or it has not finished.
+   */
+  updateCeremony(): PrestigeReport | null {
+    const ceremony = this.state.ceremony;
+    if (!ceremony || this.state.elapsedSeconds < ceremony.endsAt) return null;
+
+    const report = this.commitPrestige(ceremony);
+    this.state.prestigeEvents.push(report);
+    return report;
+  }
+
+  /** Take the prestiges nobody has celebrated yet. */
+  drainPrestigeEvents(): PrestigeReport[] {
+    if (this.state.prestigeEvents.length === 0) return [];
+    return this.state.prestigeEvents.splice(0, this.state.prestigeEvents.length);
+  }
+
+  /**
+   * End the run: pay the Seeds, stand the old tree on the hills, and start again.
+   *
+   * The reset is a **swap, not an unwind**. A fresh {@link createInitialState} is
+   * built and the handful of things that outlive a tree are copied onto it —
+   * Seeds, Heirlooms, Rings, the Journal's discoveries, the forest, the bond, and
+   * the ground itself. Everything else resets because it was never carried, which
+   * is the safe way round: a field added by a later step starts clean rather than
+   * leaking into the next run because someone forgot a line here.
+   *
+   * What is deliberately *not* carried, beyond the obvious:
+   * - **Planted totems.** The recipes are content and are never forgotten, but a
+   *   carving stands at the base of a tree that no longer exists.
+   * - **Residents.** A creature lived in *that* tree. The Bond heirloom is the
+   *   supported way to keep one, and it costs Seeds precisely because free
+   *   symbionts across a reset would make the whole branch pointless.
+   * - **Species unlocks.** They are milestones against this run's totals, so they
+   *   re-earn themselves — much faster, on a tree that starts with heirlooms.
+   */
+  private commitPrestige(ceremony: Ceremony): PrestigeReport {
+    const old = this.state;
+    const awarded = ceremony.yield.total;
+
+    const tree = summariseTree(old.tree, {
+      slot: old.forest.length,
+      rings: old.rings,
+      seeds: awarded,
+    });
+    // Recorded even when no Memory heirloom is owned: it costs nothing, and a
+    // player who buys Root Map later should get the tree they actually left.
+    const memory = captureMemory(old.tree);
+
+    const seeds = old.resources.amount('seeds').add(awarded);
+    const seedsEverEarned = old.resources.total('seeds').add(awarded);
+
+    const next = createInitialState(Date.now());
+    // The ground does not change because a tree died. Carrying the same soil map
+    // is also what keeps the Memory heirlooms honest — a remembered root layout
+    // has to come up in the same veins it was dug for.
+    next.soil = old.soil;
+    next.rings = old.rings;
+    next.discoveries = old.discoveries;
+    next.heirlooms = old.heirlooms;
+    next.bondSymbiont = old.bondSymbiont;
+    next.forest = [...old.forest, tree];
+    next.memory = memory;
+    next.resources.restore('seeds', seeds, seedsEverEarned);
+    next.seedFragments = ceremony.yield.fragmentsRemaining;
+    // Tempo applies from the first tick of the new run, and the year is derived
+    // from elapsed time — which is back at zero, so the seedling opens in Spring
+    // exactly as the very first one did.
+    next.seasonLengthSeconds = SEASON_LENGTH_SECONDS * seasonLengthFactor(old.heirlooms);
+    next.season = seasonAt(0, next.seasonLengthSeconds);
+
+    this.state = next;
+    // `runStartLevels` is empty on the fresh state, so this grants the whole
+    // Vault rather than a delta — and this is the one call that replays a layout.
+    const remembered = this.grantRunStart(true);
+    this.hydrate();
+
+    return {
+      yield: ceremony.yield,
+      tree,
+      forestSize: next.forest.length,
+      seeds,
+      remembered,
+    };
+  }
+
+  /**
+   * Hand the run whatever the Vault has bought it and this run has not been
+   * given yet: a balance, a layout, a friend.
+   *
+   * Returns how many parts came back from memory.
+   *
+   * Called from two places, and the difference between them is the whole point
+   * of `runStartLevels`. At a **prestige** the record is empty, so this grants
+   * everything the Vault provides. At a **purchase** the record holds what the
+   * run already had, so it grants only the level just bought — which is what
+   * makes a Seedcase bought with the Seed the reset just paid put 200 Sap on the
+   * tree *now* rather than a whole run later. Deferring it would leave the first
+   * purchase every player makes looking like a button that does nothing.
+   *
+   * The layout is the exception and stays deferred: replaying a remembered tree
+   * into one the player has already been building would fight for slots that are
+   * taken, and half a tree arriving mid-run is not what "start with your previous
+   * layout" means. `replayed` is what says so.
+   *
+   * At a prestige this runs *before* {@link hydrate}, so nothing here has to
+   * register a producer or republish a species share — the from-scratch pass that
+   * follows does all of it at once, on the finished tree rather than part by part.
+   */
+  private grantRunStart(replayed: boolean): number {
+    const state = this.state;
+    const heirlooms = state.heirlooms;
+
+    // What the Vault provides *minus* what this run has already been handed.
+    const granted = state.runStartLevels;
+    const owed = { level: (id: string) => Math.max(0, heirlooms.level(id) - (granted[id] ?? 0)) };
+
+    for (const line of startingResources(owed)) {
+      state.resources.add(line.resource, line.amount);
+    }
+
+    const domains = memoryDomains(heirlooms);
+    const remembered =
+      replayed && state.memory && domains.size > 0
+        ? this.replayMemory(state.memory, domains)
+        : 0;
+
+    // Loose parts go on *after* the layout: with Memory owned the trunk may
+    // already be carrying what the previous run put there, and First Limb should
+    // add to that rather than compete for the same slot.
+    for (const { type, count } of startingParts(owed)) {
+      for (let i = 0; i < count; i += 1) {
+        if (!this.growFree(state.tree.rootId, type, STARTER_SPECIES_ID)) break;
+      }
+    }
+
+    // The bond is settled against the *full* ledger rather than the delta: both
+    // calls beneath it are idempotent — a creature already in residence does not
+    // arrive twice, and a level is set rather than added — so asking for the
+    // whole thing every time is both simpler and correct.
+    const level = bondLevel(heirlooms);
+    const def = state.bondSymbiont ? SYMBIONT_BY_ID[state.bondSymbiont] : undefined;
+    if (level > 0 && def) {
+      state.symbionts.arrive(def, state.elapsedSeconds);
+      state.symbionts.setLevel(def.id, level);
+    }
+
+    for (const [id, owned] of heirlooms.entries()) granted[id] = owned;
+    return remembered;
+  }
+
+  /**
+   * Rebuild one or both halves of the previous tree, free of charge.
+   *
+   * The memory is a list of purchases in the order they were made, so a plain
+   * forward walk always has the parent already standing — old ids are mapped to
+   * new ones as they are grown. A part whose parent belonged to the half that is
+   * *not* being replayed simply finds nothing in the map and is skipped, which is
+   * what makes "roots only" a filter rather than a special case.
+   *
+   * Anything the growth rules now refuse is skipped too rather than retried
+   * elsewhere: a remembered tree is a shape, and a part that cannot go back where
+   * it was does not belong somewhere else instead.
+   */
+  private replayMemory(memory: TreeMemory, domains: ReadonlySet<'root' | 'canopy'>): number {
+    const ids = new Map<string, string>([[memory.rootId, this.state.tree.rootId]]);
+    let grown = 0;
+
+    for (const part of memoryParts(memory, domains)) {
+      const parentId = ids.get(part.parentId);
+      if (!parentId) continue;
+
+      const node = this.growFree(parentId, part.type, part.speciesId);
+      if (!node) continue;
+
+      ids.set(part.id, node.id);
+      grown += 1;
+    }
+
+    return grown;
+  }
+
+  /**
+   * Grow a part without charging for it. The Vault's purchases are made in Seeds,
+   * and the part is what the Seeds already bought.
+   */
+  private growFree(
+    parentId: string,
+    type: TreeNodeType,
+    speciesId: string,
+  ): TreeNode | null {
+    return this.state.tree.grow(parentId, type, speciesId, this.state.tick);
+  }
+
+  /**
+   * Buy one level of an heirloom, paying in Seeds.
+   *
+   * Returns `false` and changes nothing when the id is unknown, the node is still
+   * closed behind the one before it, its track is full, or the Seeds are not
+   * there.
+   */
+  buyHeirloom(id: string): boolean {
+    const def = HEIRLOOM_BY_ID[id];
+    if (!def) return false;
+
+    const heirlooms = this.state.heirlooms;
+    const level = heirlooms.level(id);
+    if (isHeirloomMaxed(def, level)) return false;
+    if (!isHeirloomUnlocked(id, heirlooms)) return false;
+
+    const cost = heirloomCost(def, level);
+    if (this.state.resources.amount('seeds').lt(cost)) return false;
+
+    this.state.resources.add('seeds', cost.neg());
+    heirlooms.setLevel(id, level + 1);
+    this.republishHeirlooms();
+
+    // Top the current run up by exactly the level just bought. A layout is never
+    // replayed mid-run — see {@link grantRunStart}.
+    const planted = this.state.tree.size;
+    this.grantRunStart(false);
+    if (this.state.tree.size !== planted) {
+      this.syncPartProducers();
+      this.republishSpecies();
+    }
+    this.republishSymbionts();
+
+    // Tempo's Quickening shortens the season *this run is already inside*, and
+    // which season it is is derived from elapsed time — so a shorter year means
+    // a different reading of the same moment. The index is re-marked as seen at
+    // the same time: the winters that would suddenly be "behind" the tree were
+    // never lived through, and paying rings for them would make the heirloom a
+    // way to buy the one multiplier that cannot be bought.
+    this.state.seasonLengthSeconds =
+      SEASON_LENGTH_SECONDS * seasonLengthFactor(heirlooms);
+    this.state.season = seasonAt(this.state.elapsedSeconds, this.state.seasonLengthSeconds);
+    this.state.seasonIndexSeen = this.state.season.index;
+    this.republishSeason();
+
+    this.updateHydration();
+    this.updateLightExposure();
+    return true;
+  }
+
+  /**
+   * Choose which creature the Bond heirloom brings. `null` clears the choice.
+   *
+   * Storable before the bond is bought and kept after prestige, because it is a
+   * *preference* rather than a purchase — the Vault shows the picker greyed until
+   * Old Friend is owned, and a player who changes their mind between runs should
+   * not have to buy anything again.
+   */
+  setBondSymbiont(id: string | null): boolean {
+    if (id === null) {
+      this.state.bondSymbiont = null;
+      return true;
+    }
+    if (!SYMBIONT_BY_ID[id]) return false;
+    this.state.bondSymbiont = id;
+    return true;
+  }
+
   /** Advance the simulation by one fixed step of `dtSeconds`. */
   tick(dtSeconds: number, options: TickOptions = {}): void {
     this.state.tick += 1;
@@ -1150,6 +1535,12 @@ export class Simulation {
     // ceiling on what Light is worth, hydration sets what the roots can pay for,
     // and only then is it worth asking what each leaf is earning — so the rate
     // banked for the tooltips is the one the tick actually pays out.
+    // A ceremony that has run its six seconds lands before anything else, because
+    // everything below this line belongs to a tree that may no longer exist. The
+    // rest of the tick then runs on the seedling, which is right: the new run's
+    // clock starts here.
+    this.updateCeremony();
+
     this.updateBuffs();
     this.updateSeason();
     this.updateWeather(options.offline === true);
@@ -1220,6 +1611,42 @@ export class Simulation {
     };
 
     const elapsed = this.state.elapsedSeconds;
+
+    const heirloomLedger = this.state.heirlooms;
+    const heirlooms: HeirloomSnapshot[] = HEIRLOOMS.map((def) => {
+      const level = heirloomLedger.level(def.id);
+      const cost = heirloomCost(def, level);
+      return {
+        id: def.id,
+        level,
+        cost,
+        affordable: resources.seeds.gte(cost),
+        maxed: isHeirloomMaxed(def, level),
+        unlocked: isHeirloomUnlocked(def.id, heirloomLedger),
+      };
+    });
+
+    const ceremony = this.state.ceremony;
+    const prestige: PrestigeSnapshot = {
+      progress: this.prestigeProgress(),
+      yield: this.prestigeYield(),
+      ceremony: ceremony
+        ? {
+            fraction: ceremonyFraction(ceremony, elapsed),
+            remainingSeconds: Math.max(0, ceremony.endsAt - elapsed),
+            yield: ceremony.yield,
+          }
+        : null,
+      // Copied: the engine pushes onto this array in place.
+      forest: [...this.state.forest],
+      forestMultiplier: forestMultiplier(this.state.forest.length),
+      heirlooms,
+      bondSymbiont: this.state.bondSymbiont,
+      bonded: bondLevel(heirloomLedger) > 0,
+      offlineCapHours: offlineCapHours(heirloomLedger),
+      remembered: this.state.memory?.parts.length ?? 0,
+    };
+
     const buffs: BuffSnapshot[] = this.state.buffs.entries().map((buff) => {
       const duration = Math.max(1e-9, buff.expiresAt - buff.grantedAt);
       const remainingSeconds = Math.max(0, buff.expiresAt - elapsed);
@@ -1308,6 +1735,7 @@ export class Simulation {
       buffs,
       symbionts,
       veinReach: this.state.veinReach,
+      prestige,
       seedFragments: this.state.seedFragments,
       buriedNuts: this.state.buriedNuts,
       // Copied, not shared: the engine pushes onto this array in place.

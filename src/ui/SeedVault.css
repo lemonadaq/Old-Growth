@@ -1,0 +1,356 @@
+/* STEP 13's prestige screen. The final UI (STEP 18) folds this into the dock. */
+.vault {
+  pointer-events: auto; /* the HUD ignores pointer events by default */
+  position: absolute;
+  top: 56px;
+  right: 12px;
+  width: 340px;
+  max-height: calc(100% - 96px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 10px;
+  backdrop-filter: blur(4px);
+  /* The panel is a slice of trunk: heartwood in the middle, sapwood at the rim. */
+  background-image: radial-gradient(
+    circle at 50% 22%,
+    rgba(201, 168, 120, 0.14),
+    rgba(201, 168, 120, 0) 62%
+  );
+  isolation: isolate;
+}
+
+/*
+ * The rings themselves, behind everything. Drawn rather than tiled so they stay
+ * concentric at any panel height, and pinned to the top where the eye lands
+ * first — a full-panel wood grain would fight every row of text over it.
+ */
+.vault__grain {
+  position: absolute;
+  top: -26px;
+  left: 50%;
+  width: 300px;
+  height: 300px;
+  transform: translateX(-50%);
+  z-index: -1;
+  fill: none;
+  stroke: rgba(201, 168, 120, 0.16);
+  stroke-width: 0.7;
+  pointer-events: none;
+}
+
+.vault__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.vault__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hud-muted);
+}
+
+.vault__seeds {
+  margin: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--hud-accent);
+}
+
+.vault__fragments {
+  color: var(--hud-muted);
+}
+
+.vault__heading {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--hud-text);
+}
+
+.vault__count,
+.vault__ready {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--hud-muted);
+}
+
+.vault__ready {
+  font-weight: 700;
+  color: var(--hud-accent);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* --- maturity ----------------------------------------------------------- */
+
+.vault__maturity {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px;
+  background: rgba(255, 240, 214, 0.06);
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+}
+
+.vault__gate {
+  display: grid;
+  grid-template-columns: 82px 1fr auto;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 11px;
+  color: var(--hud-muted);
+}
+
+.vault__gate b {
+  font-variant-numeric: tabular-nums;
+  color: var(--hud-text);
+}
+
+.vault__bar {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(253, 243, 224, 0.15);
+  overflow: hidden;
+}
+
+.vault__bar > span {
+  display: block;
+  height: 100%;
+  background: var(--hud-accent);
+}
+
+.vault__payout {
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.vault__muted {
+  color: var(--hud-muted);
+}
+
+.vault__seed {
+  padding: 8px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: #2a1c0e;
+  background: var(--hud-accent);
+  border: 1px solid var(--hud-accent);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.vault__seed:disabled {
+  color: var(--hud-muted);
+  background: transparent;
+  border-color: var(--hud-border);
+  cursor: not-allowed;
+}
+
+.vault__warn {
+  margin: 0;
+  font-size: 10px;
+  font-style: italic;
+  line-height: 1.35;
+  color: var(--hud-muted);
+}
+
+/* --- the grove ---------------------------------------------------------- */
+
+.vault__empty,
+.vault__forest,
+.vault__memory,
+.vault__blurb,
+.vault__footer {
+  margin: 0;
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1.35;
+  color: var(--hud-muted);
+}
+
+.vault__forest b {
+  font-style: normal;
+  color: var(--hud-accent);
+}
+
+/* --- the limbs ---------------------------------------------------------- */
+
+.vault__limbs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.vault__limb {
+  padding: 9px 0 0;
+  border-top: 2px solid var(--hud-border);
+}
+
+.vault__nodes {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/*
+ * The chain. Each node hangs off the one above it, so a limb reads as a limb —
+ * the line is what says "this is not five separate purchases".
+ */
+.vault__node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-left: 10px;
+  padding: 7px 9px;
+  background: rgba(255, 240, 214, 0.06);
+  border: 1px solid var(--hud-border);
+  border-left: 3px solid rgba(253, 243, 224, 0.18);
+  border-radius: 8px;
+}
+
+.vault__node + .vault__node::before {
+  content: '';
+  position: absolute;
+  left: -3px;
+  top: -6px;
+  width: 3px;
+  height: 6px;
+  background: rgba(253, 243, 224, 0.18);
+}
+
+.vault__node--closed {
+  opacity: 0.55;
+}
+
+.vault__node--owned {
+  background: rgba(255, 210, 122, 0.09);
+}
+
+.vault__name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.vault__pips {
+  display: flex;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.vault__pip {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(253, 243, 224, 0.18);
+}
+
+.vault__pip--lit {
+  background: var(--hud-accent);
+}
+
+.vault__desc {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--hud-muted);
+}
+
+.vault__buy {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 3px 9px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--hud-text);
+  background: rgba(253, 243, 224, 0.08);
+  border: 1px solid var(--hud-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.vault__buy:enabled:hover {
+  border-color: var(--hud-accent);
+  color: var(--hud-accent);
+}
+
+.vault__buy:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* --- the bond picker ---------------------------------------------------- */
+
+.vault__bond {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 6px;
+  padding: 7px 9px;
+  background: rgba(255, 240, 214, 0.04);
+  border: 1px dashed var(--hud-border);
+  border-radius: 8px;
+}
+
+.vault__bond--idle {
+  opacity: 0.55;
+}
+
+.vault__bondlabel,
+.vault__bondpick {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--hud-muted);
+}
+
+.vault__chips {
+  display: flex;
+  gap: 5px;
+}
+
+.vault__chip {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+  background: rgba(253, 243, 224, 0.08);
+  border: 1px solid var(--hud-border);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.vault__chip--on {
+  background: rgba(255, 210, 122, 0.22);
+  border-color: var(--hud-accent);
+}

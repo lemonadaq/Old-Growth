@@ -59,6 +59,33 @@
   background: rgba(30, 84, 44, 0.7);
 }
 
+/*
+ * The Vault, once the tree is mature. A slow pulse rather than a flash: it is a
+ * standing invitation, not an alarm, and it will be up for as long as the player
+ * takes to decide.
+ */
+.hud-toggle--ready {
+  color: var(--hud-accent);
+  border-color: var(--hud-accent);
+  animation: hud-ready 2.4s ease-in-out infinite;
+}
+
+@keyframes hud-ready {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 210, 122, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(255, 210, 122, 0.22);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-toggle--ready {
+    animation: none;
+  }
+}
+
 /* Count of hybrids found, so the Journal advertises that it has filled up. */
 .hud-toggle__badge {
   margin-left: 4px;

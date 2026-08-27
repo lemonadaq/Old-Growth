@@ -16,12 +16,18 @@ import {
   STORM_BRACE_TAPS,
   STORM_DURATION_SECONDS,
   STORM_MAX_SNAPS,
+  SEASON_LENGTH_SECONDS,
   SUMMER_LIGHT_BONUS,
   WEATHER_MIN_GAP_SECONDS,
   WEATHER_TELEGRAPH_SECONDS,
   WINTER_PENALTY,
 } from '../content/balance';
 import { RAKE_ID } from '../content/upgrades';
+import {
+  CEREMONY_SECONDS,
+  FOREST_PRODUCTION_BONUS,
+  PRESTIGE_LIGHT_REQUIREMENT,
+} from '../content/prestige';
 import { applyModifiers } from './modifiers';
 import { partCost } from './growth';
 import { createSeededRandom, type RandomSource } from './rng';
@@ -1682,5 +1688,560 @@ describe('the ground a root is working in', () => {
       'soil:rock/water',
     ]);
     expect(applyModifiers(new Decimal(1), deep).toNumber()).toBeCloseTo(1, 9);
+  });
+});
+
+/* ---------------------------------------------------------------- prestige */
+
+/**
+ * Bring a tree to maturity the way a run does, only faster.
+ *
+ * Height has to be *built* — it is a property of the graph and there is no way
+ * to fake it — so the tree is grown branch-first up its own highest tip, which
+ * is what a player reaching for the gate would do. The Light is granted outright:
+ * a million of it is nine hours of a real canopy, and what these tests are about
+ * is what happens at the threshold rather than how long it takes to arrive.
+ */
+function mature(sim: Simulation, species = STARTER_SPECIES_ID): void {
+  sim.state.resources.add('sap', new Decimal(1e9));
+
+  for (let i = 0; i < 40 && sim.prestigeProgress().heightFraction < 1; i += 1) {
+    const placements = sim.state.tree.placements();
+    let best: string | null = null;
+    let bestY = -Infinity;
+
+    for (const node of sim.state.tree.allNodes()) {
+      if (!sim.state.tree.getValidGrowthOptions(node.id).some((o) => o.type === 'branch')) continue;
+      const y = placements.get(node.id)?.end.y ?? -Infinity;
+      if (y > bestY) {
+        bestY = y;
+        best = node.id;
+      }
+    }
+    if (!best) break;
+    sim.growPart(best, 'branch', species);
+  }
+
+  sim.state.resources.add('light', new Decimal(PRESTIGE_LIGHT_REQUIREMENT));
+}
+
+/** Take a mature tree all the way through the ceremony to the new seedling. */
+function goToSeed(sim: Simulation): void {
+  expect(sim.goToSeed()).not.toBeNull();
+  run(sim, CEREMONY_SECONDS + 0.2, 0.1);
+  expect(sim.state.ceremony).toBeNull();
+}
+
+describe('maturity', () => {
+  it('refuses a seedling', () => {
+    const sim = new Simulation();
+    expect(sim.canGoToSeed()).toBe(false);
+    expect(sim.goToSeed()).toBeNull();
+  });
+
+  it('refuses a tall tree that has gathered no Light', () => {
+    const sim = new Simulation();
+    mature(sim);
+    sim.state.resources.restore('light', new Decimal(0), new Decimal(0));
+
+    expect(sim.prestigeProgress().heightFraction).toBe(1);
+    expect(sim.canGoToSeed()).toBe(false);
+  });
+
+  it('refuses a bright seedling — the tree has to have grown', () => {
+    const sim = new Simulation();
+    sim.state.resources.add('light', new Decimal(PRESTIGE_LIGHT_REQUIREMENT * 4));
+
+    expect(sim.prestigeProgress().lightFraction).toBe(1);
+    expect(sim.canGoToSeed()).toBe(false);
+  });
+
+  it('opens once both gates are met', () => {
+    const sim = new Simulation();
+    mature(sim);
+    expect(sim.canGoToSeed()).toBe(true);
+  });
+
+  it('pays at least one Seed the moment it becomes possible', () => {
+    const sim = new Simulation();
+    mature(sim);
+    expect(sim.prestigeYield().total).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('the Go to Seed ceremony', () => {
+  it('does not reset the tree the instant it is started', () => {
+    const sim = new Simulation();
+    mature(sim);
+    const before = sim.state.tree.size;
+
+    sim.goToSeed();
+    run(sim, CEREMONY_SECONDS - 1, 0.1);
+
+    expect(sim.state.tree.size).toBe(before);
+    expect(sim.state.ceremony).not.toBeNull();
+  });
+
+  it('lands after six seconds and leaves a seedling', () => {
+    const sim = new Simulation();
+    mature(sim);
+    goToSeed(sim);
+
+    expect(sim.state.tree.size).toBe(1);
+    expect(sim.state.elapsedSeconds).toBeLessThan(CEREMONY_SECONDS);
+  });
+
+  it('cannot be started twice', () => {
+    const sim = new Simulation();
+    mature(sim);
+    expect(sim.goToSeed()).not.toBeNull();
+    expect(sim.goToSeed()).toBeNull();
+  });
+
+  it('pays what it quoted, not what six more seconds earned', () => {
+    const sim = new Simulation();
+    mature(sim);
+    const quoted = sim.prestigeYield().total;
+
+    sim.goToSeed();
+    // A windfall mid-ceremony must not change the deal the player agreed to.
+    sim.state.resources.add('light', new Decimal(PRESTIGE_LIGHT_REQUIREMENT * 400));
+    run(sim, CEREMONY_SECONDS + 0.2, 0.1);
+
+    expect(sim.state.resources.amount('seeds').toNumber()).toBe(quoted);
+  });
+
+  it('reports itself on the snapshot while it runs', () => {
+    const sim = new Simulation();
+    mature(sim);
+    sim.goToSeed();
+    run(sim, CEREMONY_SECONDS / 2, 0.1);
+
+    const ceremony = sim.snapshot().prestige.ceremony;
+    expect(ceremony).not.toBeNull();
+    expect(ceremony?.fraction).toBeGreaterThan(0.3);
+    expect(ceremony?.fraction).toBeLessThan(0.7);
+  });
+
+  it('queues exactly one report for the UI to celebrate', () => {
+    const sim = new Simulation();
+    mature(sim);
+    goToSeed(sim);
+
+    const events = sim.drainPrestigeEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0].forestSize).toBe(1);
+    expect(sim.drainPrestigeEvents()).toHaveLength(0);
+  });
+});
+
+describe('what prestige keeps and what it gives up', () => {
+  it('gives up the tree, the run resources and the run upgrades', () => {
+    const sim = new Simulation();
+    mature(sim);
+    sim.buyUpgrade('strongerTaps');
+    sim.state.resources.add('deadwood', new Decimal(500));
+    sim.craftTotem('rain');
+    expect(sim.state.totems).toHaveLength(1);
+
+    goToSeed(sim);
+
+    expect(sim.state.tree.size).toBe(1);
+    expect(sim.state.resources.amount('sap').toNumber()).toBe(0);
+    expect(sim.state.resources.total('light').toNumber()).toBe(0);
+    expect(sim.state.upgrades.level('strongerTaps')).toBe(0);
+    expect(sim.state.totems).toHaveLength(0);
+    expect(sim.state.symbionts.size).toBe(0);
+  });
+
+  it('keeps Seeds, Rings, Heirlooms and the Journal', () => {
+    const sim = new Simulation();
+    mature(sim);
+    sim.state.rings = 3;
+    sim.state.discoveries.add('ghostwillow');
+    sim.state.resources.restore('seeds', new Decimal(9), new Decimal(9));
+    sim.buyHeirloom('seedcase');
+
+    const seedsBefore = sim.state.resources.amount('seeds');
+    const paid = sim.prestigeYield().total;
+    goToSeed(sim);
+
+    expect(sim.state.rings).toBe(3);
+    expect(sim.state.discoveries.has('ghostwillow')).toBe(true);
+    expect(sim.state.heirlooms.level('seedcase')).toBe(1);
+    expect(sim.state.resources.amount('seeds').toNumber()).toBe(
+      seedsBefore.toNumber() + paid,
+    );
+  });
+
+  it('keeps the rings working — they are still a live multiplier after the reset', () => {
+    const sim = new Simulation();
+    mature(sim);
+    sim.state.rings = 4;
+    goToSeed(sim);
+
+    expect(sim.snapshot().ringMultiplier).toBeCloseTo((1 + RING_PRODUCTION_BONUS) ** 4, 9);
+    expect(lightWorth(sim)).toBeGreaterThan(1);
+  });
+
+  it('keeps the ground the previous tree grew in', () => {
+    const sim = new Simulation();
+    const soil = sim.state.soil;
+    mature(sim);
+    goToSeed(sim);
+
+    expect(sim.state.soil).toBe(soil);
+  });
+
+  it('carries fragments the songbird had not finished, and spends the rest', () => {
+    const sim = new Simulation();
+    mature(sim);
+    sim.state.seedFragments = 250;
+
+    const paid = sim.prestigeYield();
+    expect(paid.fromFragments).toBe(2);
+    goToSeed(sim);
+
+    expect(sim.state.seedFragments).toBe(50);
+  });
+
+  it('starts the new run in Spring, on a clock of its own', () => {
+    const sim = new Simulation();
+    mature(sim);
+    run(sim, 30, 0.5);
+    goToSeed(sim);
+
+    expect(sim.state.season.id).toBe('spring');
+    expect(sim.snapshot().season.day).toBe(1);
+  });
+});
+
+describe('the Old Growth forest', () => {
+  it('stands the old tree on the hills', () => {
+    const sim = new Simulation();
+    mature(sim, 'oak');
+    const parts = sim.state.tree.size - 1;
+    goToSeed(sim);
+
+    expect(sim.state.forest).toHaveLength(1);
+    expect(sim.state.forest[0].parts).toBe(parts);
+    expect(sim.state.forest[0].speciesId).toBe('oak');
+    expect(sim.state.forest[0].slot).toBe(0);
+  });
+
+  it('accumulates: every tree given up is still there', () => {
+    const sim = new Simulation();
+    for (let run_ = 0; run_ < 3; run_ += 1) {
+      mature(sim);
+      goToSeed(sim);
+      expect(sim.state.forest).toHaveLength(run_ + 1);
+      expect(sim.state.forest[run_].slot).toBe(run_);
+    }
+  });
+
+  it('pays one per cent per tree, live in the production pipeline', () => {
+    const sim = new Simulation();
+    mature(sim);
+    goToSeed(sim);
+
+    // Measured against a tree of the same age rather than against a fresh one:
+    // the sun has been moving since the ceremony started, and Light is worth what
+    // the hour makes it worth.
+    const control = new Simulation();
+    run(control, sim.state.elapsedSeconds, 0.1);
+
+    expect(sim.snapshot().prestige.forestMultiplier).toBeCloseTo(1 + FOREST_PRODUCTION_BONUS, 9);
+    expect(lightWorth(sim)).toBeCloseTo(lightWorth(control) * (1 + FOREST_PRODUCTION_BONUS), 9);
+  });
+});
+
+describe('the Seed Vault', () => {
+  /** A simulation holding Seeds and nothing else. */
+  function withSeeds(seeds: number): Simulation {
+    const sim = new Simulation();
+    sim.state.resources.restore('seeds', new Decimal(seeds), new Decimal(seeds));
+    return sim;
+  }
+
+  it('refuses an unknown heirloom', () => {
+    expect(withSeeds(999).buyHeirloom('not-an-heirloom')).toBe(false);
+  });
+
+  it('refuses a node whose Seeds are not there', () => {
+    const sim = withSeeds(0);
+    expect(sim.buyHeirloom('seedcase')).toBe(false);
+    expect(sim.state.heirlooms.level('seedcase')).toBe(0);
+  });
+
+  it('refuses a node still shut behind the one before it', () => {
+    const sim = withSeeds(999);
+    expect(sim.buyHeirloom('firstLimb')).toBe(false);
+    expect(sim.buyHeirloom('seedcase')).toBe(true);
+    expect(sim.buyHeirloom('firstLimb')).toBe(true);
+  });
+
+  it('refuses a track that is already full', () => {
+    const sim = withSeeds(999);
+    sim.buyHeirloom('seedcase');
+    expect(sim.buyHeirloom('rootMap')).toBe(true);
+    expect(sim.buyHeirloom('rootMap')).toBe(false);
+  });
+
+  it('charges the Seeds and publishes the effect at once', () => {
+    const sim = withSeeds(999);
+    for (const id of ['seedcase', 'firstLimb', 'firstRoot', 'cotyledon']) sim.buyHeirloom(id);
+
+    const before = sim.snapshot().clickStats.clickPower.toNumber();
+    const seeds = sim.state.resources.amount('seeds');
+    expect(sim.buyHeirloom('vigour')).toBe(true);
+
+    expect(sim.state.resources.amount('seeds').lt(seeds)).toBe(true);
+    expect(sim.snapshot().clickStats.clickPower.toNumber()).toBeCloseTo(before * 1.12, 9);
+  });
+
+  it('never stacks a level of an heirloom with its own previous level', () => {
+    const sim = withSeeds(1e6);
+    for (const id of ['seedcase', 'firstLimb', 'firstRoot', 'cotyledon']) sim.buyHeirloom(id);
+
+    const base = sim.snapshot().clickStats.clickPower.toNumber();
+    sim.buyHeirloom('vigour');
+    sim.buyHeirloom('vigour');
+    sim.buyHeirloom('vigour');
+
+    expect(sim.snapshot().clickStats.clickPower.toNumber()).toBeCloseTo(base * 1.12 ** 3, 9);
+  });
+
+  it('tops the current run up with a starting balance the moment it is bought', () => {
+    // The first thing every player does with their first Seed. If it only paid
+    // out at the *next* reset it would read as a button that does nothing.
+    const sim = withSeeds(999);
+    expect(sim.state.resources.amount('sap').toNumber()).toBe(0);
+
+    expect(sim.buyHeirloom('seedcase')).toBe(true);
+    expect(sim.state.resources.amount('sap').toNumber()).toBe(200);
+  });
+
+  it('tops up by the level bought, never by the whole track again', () => {
+    const sim = withSeeds(1e6);
+    sim.buyHeirloom('seedcase');
+    sim.buyHeirloom('seedcase');
+    sim.buyHeirloom('seedcase');
+
+    expect(sim.state.resources.amount('sap').toNumber()).toBe(600);
+  });
+
+  it('plants a starting part on the spot, earning from the next tick', () => {
+    const sim = withSeeds(1e6);
+    sim.buyHeirloom('seedcase');
+    sim.buyHeirloom('firstLimb');
+    expect(sim.buyHeirloom('firstRoot')).toBe(true);
+
+    expect(sim.state.tree.countOfType('branch')).toBe(1);
+    expect(sim.state.tree.countOfType('rootSegment')).toBe(1);
+
+    // Registered as a producer, not merely present in the graph: the rate itself
+    // is banked by the tick, a tenth of a second later, exactly as it is for any
+    // other purchase.
+    run(sim, 0.1, 0.1);
+    expect(sim.snapshot().perSecond.water.toNumber()).toBeGreaterThan(0);
+  });
+
+  it('does not pay the same run twice across a prestige', () => {
+    const sim = withSeeds(1e6);
+    sim.buyHeirloom('seedcase');
+    mature(sim);
+    goToSeed(sim);
+
+    // The new run is paid once, from an empty record — not once for the reset
+    // and again for the purchase the previous run already banked.
+    expect(sim.state.resources.amount('sap').toNumber()).toBe(200);
+  });
+
+  it('shortens the year the moment Quickening is bought, without paying rings for it', () => {
+    const sim = accelerated(40);
+    sim.state.resources.restore('seeds', new Decimal(999), new Decimal(999));
+    run(sim, 30, 0.5);
+
+    const rings = sim.state.rings;
+    expect(sim.buyHeirloom('quickening')).toBe(true);
+
+    expect(sim.state.seasonLengthSeconds).toBeCloseTo(SEASON_LENGTH_SECONDS * 0.9, 6);
+    expect(sim.state.rings).toBe(rings);
+  });
+});
+
+describe('what the Vault hands the next run', () => {
+  /** Prestige once, then buy the named heirlooms and prestige again. */
+  function secondRun(ids: readonly string[], seeds = 1e6): Simulation {
+    const sim = new Simulation();
+    mature(sim);
+    goToSeed(sim);
+    sim.state.resources.restore('seeds', new Decimal(seeds), new Decimal(seeds));
+    for (const id of ids) expect(sim.buyHeirloom(id)).toBe(true);
+
+    mature(sim);
+    goToSeed(sim);
+    return sim;
+  }
+
+  it('gives Seedcase its Sap on the very first tick', () => {
+    const sim = secondRun(['seedcase']);
+    expect(sim.state.resources.amount('sap').toNumber()).toBe(200);
+  });
+
+  it('grows the parts First Limb and First Root paid for', () => {
+    const sim = secondRun(['seedcase', 'firstLimb', 'firstRoot']);
+    expect(sim.state.tree.countOfType('branch')).toBe(1);
+    expect(sim.state.tree.countOfType('rootSegment')).toBe(1);
+    // A root that exists is a root that is already earning.
+    expect(sim.snapshot().perSecond.water.toNumber()).toBeGreaterThan(0);
+  });
+
+  it('rebuilds the previous roots from Root Map, and nothing above ground', () => {
+    const sim = new Simulation();
+    mature(sim);
+    goToSeed(sim);
+    sim.state.resources.restore('seeds', new Decimal(1e6), new Decimal(1e6));
+    sim.buyHeirloom('rootMap');
+
+    // The layout that comes back is the one this run leaves behind, so the roots
+    // have to be dug in the run *before* the reset that restores them.
+    sim.state.resources.add('sap', new Decimal(1e9));
+    for (let i = 0; i < 3; i += 1) sim.growPart(sim.state.tree.rootId, 'rootSegment');
+    expect(sim.state.tree.countOfType('rootSegment')).toBe(3);
+
+    mature(sim);
+    const canopyBefore = sim.state.tree.countOfType('branch');
+    goToSeed(sim);
+
+    expect(sim.state.tree.countOfType('rootSegment')).toBe(3);
+    expect(sim.state.tree.countOfType('branch')).toBe(0);
+    expect(canopyBefore).toBeGreaterThan(0);
+  });
+
+  it('never replays a layout into a run already under way', () => {
+    const sim = new Simulation();
+    mature(sim);
+    goToSeed(sim);
+
+    const size = sim.state.tree.size;
+    sim.state.resources.restore('seeds', new Decimal(1e6), new Decimal(1e6));
+    expect(sim.buyHeirloom('rootMap')).toBe(true);
+
+    // Root Map is bought with a whole tree remembered, and the seedling is left
+    // exactly as it was: a layout arrives at a reset or not at all.
+    expect(sim.state.tree.size).toBe(size);
+    expect(sim.snapshot().prestige.remembered).toBeGreaterThan(0);
+  });
+
+  it('rebuilds the whole tree once Canopy Map is owned too', () => {
+    const sim = new Simulation();
+    mature(sim);
+    goToSeed(sim);
+    sim.state.resources.restore('seeds', new Decimal(1e6), new Decimal(1e6));
+    for (const id of ['rootMap', 'deepHabit', 'canopyMap']) {
+      expect(sim.buyHeirloom(id)).toBe(true);
+    }
+
+    mature(sim);
+    const size = sim.state.tree.size;
+    goToSeed(sim);
+
+    expect(sim.state.tree.size).toBe(size);
+    // A tree that came back at full height is mature again immediately.
+    expect(sim.prestigeProgress().heightFraction).toBe(1);
+  });
+
+  it('seats the bonded creature before the first tick', () => {
+    const sim = new Simulation();
+    mature(sim);
+    goToSeed(sim);
+    sim.state.resources.restore('seeds', new Decimal(1e6), new Decimal(1e6));
+    sim.setBondSymbiont('mycorrhiza');
+    for (const id of ['oldFriend', 'warmWelcome']) expect(sim.buyHeirloom(id)).toBe(true);
+
+    mature(sim);
+    goToSeed(sim);
+
+    expect(sim.state.symbionts.has('mycorrhiza')).toBe(true);
+    expect(sim.state.symbionts.level('mycorrhiza')).toBe(2);
+    // Its reach is published, not merely recorded.
+    expect(sim.state.veinReach).toBeGreaterThan(1);
+  });
+
+  it('brings nobody when no creature was chosen', () => {
+    const sim = new Simulation();
+    mature(sim);
+    goToSeed(sim);
+    sim.state.resources.restore('seeds', new Decimal(1e6), new Decimal(1e6));
+    sim.buyHeirloom('oldFriend');
+
+    mature(sim);
+    goToSeed(sim);
+    expect(sim.state.symbionts.size).toBe(0);
+  });
+
+  it('refuses a bond choice that is not a creature', () => {
+    const sim = new Simulation();
+    expect(sim.setBondSymbiont('badger')).toBe(false);
+    expect(sim.setBondSymbiont('bees')).toBe(true);
+    expect(sim.setBondSymbiont(null)).toBe(true);
+    expect(sim.state.bondSymbiont).toBeNull();
+  });
+});
+
+describe('two runs in a row', () => {
+  /**
+   * Lifetime Sap earned by a fixed script of taps and purchases.
+   *
+   * The same hands doing the same thing for the same length of time, so the only
+   * difference between the two numbers is what the tree brought with it.
+   */
+  function scriptedRun(sim: Simulation, taps: number): number {
+    for (let i = 0; i < taps; i += 1) sim.click(i * 400, NEVER_CRIT);
+    run(sim, 30, 0.1);
+    return sim.state.resources.total('sap').toNumber();
+  }
+
+  it('completes the whole loop twice, and the forest grows both times', () => {
+    const sim = new Simulation();
+
+    mature(sim);
+    goToSeed(sim);
+    expect(sim.state.forest).toHaveLength(1);
+    expect(sim.state.resources.amount('seeds').toNumber()).toBeGreaterThan(0);
+
+    mature(sim);
+    expect(sim.canGoToSeed()).toBe(true);
+    goToSeed(sim);
+    expect(sim.state.forest).toHaveLength(2);
+    expect(sim.state.resources.amount('seeds').toNumber()).toBeGreaterThan(1);
+  });
+
+  it('runs the second one noticeably faster than the first', () => {
+    const first = new Simulation();
+    const firstEarned = scriptedRun(first, 40);
+
+    // Everything the first run left behind: a Seed, a tree on the hills, and
+    // whatever the Vault was able to buy with the one.
+    mature(first);
+    goToSeed(first);
+    expect(first.buyHeirloom('seedcase')).toBe(true);
+
+    const secondEarned = scriptedRun(first, 40);
+
+    expect(secondEarned).toBeGreaterThan(firstEarned);
+    // Not a rounding difference: the seed case alone is 200 Sap up front.
+    expect(secondEarned - firstEarned).toBeGreaterThan(150);
+  });
+
+  it('records what each tree was made of, so the grove is not all one colour', () => {
+    const sim = new Simulation();
+    mature(sim, 'maple');
+    goToSeed(sim);
+    mature(sim, 'pine');
+    goToSeed(sim);
+
+    expect(sim.state.forest.map((tree) => tree.speciesId)).toEqual(['maple', 'pine']);
   });
 });

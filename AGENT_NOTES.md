@@ -15,6 +15,149 @@ Do not refactor unrelated code.
 
 ## Changelog
 
+### 2026-08-27 — STEP 13: Prestige — Go to Seed, Heirlooms, Old Growth forest
+
+Every system so far has made the tree bigger. This is the first one that takes it
+away, and the whole step is about making that trade legible before it is made and
+visible after: a maturity gate the player can watch fill, a payout quoted on the
+button they press, six seconds in which the canopy leaves, and a hill that is one
+tree fuller every time.
+
+- `src/content/prestige.ts` — **new**. The gate, the yield, the forest bonus, and
+  the Seed Vault as data: four branches of five nodes, each knowing what a level
+  of it grants. Adding an heirloom is an edit here and nowhere else.
+  - **The maturity gate is set *equal to* the yield's divisor, not near it.**
+    `Seeds = ⌊√(light / 1e6)⌋`, so the tree can seed at exactly 1e6 lifetime
+    Light — the point the formula first pays a whole Seed. A prestige that reset
+    the run and handed back nothing would be a trap, and tying the two constants
+    together is the one line that makes it impossible. There is a test asserting
+    it that will fail if either moves without the other.
+  - **The height gate had to be measured before it could be chosen.** A canopy has
+    a hard ceiling: `depthFalloff` shrinks every generation, so each branch above
+    the last buys less height, and a tree grown as greedily upward as the rules
+    allow tops out near 1.32 canonical units. The first pass at this file said
+    1.25 — 95% of an unreachable maximum. It is 1.15, roughly a dozen deliberate
+    parts, with real headroom for a player who builds a round tree instead of a
+    spire.
+- `src/engine/prestige.ts` — **new**, and pure throughout. Height, spread,
+  dominant species, the yield, the forest's modifiers, the memory capture and the
+  ceremony's clock. The gate is quoted in the HUD sixty times a second, the payout
+  on the confirm button, the ceremony on the canvas — three consumers that must
+  agree, and none that should be able to change anything by asking.
+  - **The design's `+ seedFragments/100` awards a fraction of a Seed**, and a
+    fraction of a Seed cannot buy anything: every heirloom is priced in whole
+    ones. So the fragment term is floored like the other one and the remainder is
+    *kept* — ninety fragments the songbird worked for are ninety fragments in the
+    next run, not a rounding error nobody sees.
+- `src/engine/heirlooms.ts` — **new**. A levels-only ledger, the one in the game
+  that a reset copies rather than replaces. Most heirlooms are ordinary modifiers
+  under one revocable source; the rest are capabilities the engine reads directly,
+  the same shape the Rake takes.
+- `src/engine/simulation.ts` — **the reset is a swap, not an unwind.** A fresh
+  `createInitialState` is built and the handful of things that outlive a tree are
+  copied onto it. Everything else resets *because it was never carried*, which is
+  the safe way round: a field added by a later step starts clean rather than
+  leaking into the next run because someone forgot a line in a thirty-field
+  teardown. `state` became reassignable for this, and only `goToSeed` reassigns it.
+  The constructor's republish sequence is now `hydrate()`, shared by both paths.
+  - **Heirlooms top the current run up rather than waiting for the next reset.**
+    The Vault is spent *after* a prestige, so a Seedcase bought with the Seed the
+    reset just paid would sit inert for a whole run — the first purchase every
+    player makes, appearing to do nothing. `runStartLevels` records what this run
+    has already been handed, and a purchase grants the difference. A remembered
+    *layout* stays deferred, and deliberately: replaying a tree into one the
+    player is already building would fight for slots that are taken.
+  - Buying Quickening re-derives the season on the spot and re-marks the index as
+    seen. A shorter year is a different reading of the same moment, and the
+    winters that would suddenly be "behind" the tree were never lived through —
+    paying rings for them would make Tempo a way to buy the one multiplier that
+    cannot be bought.
+- `src/render/forest.ts` — **new**. Silhouettes standing on the near hill band,
+  each at the spot its own planting index gave it (golden-ratio spacing, so a new
+  tree lands in the largest gap and no existing one ever moves). Past thirty it is
+  a counter. The **most recent** thirty are drawn, so the tree just planted is
+  always among them.
+- `src/render/ceremony.ts` — **new**. The canopy lets go from the top down and
+  drifts *upward* — the one thing in the game that moves against gravity, which
+  is why it reads as an ending rather than as another effect. Pure functions of
+  the leaf positions and one fraction: no pool, no RNG at draw time.
+- `src/ui/SeedVault.tsx` — the Vault drawn as **a trunk in cross-section**,
+  because the season badge already taught the player to read rings as this tree's
+  own wood. Four limbs, each a chain: a node opens only once the one before it is
+  owned, so the shape on screen *is* the dependency.
+- `src/engine/resourceRegistry.ts` — `restore(id, amount, total)`: the one write
+  that is neither a gain nor a spend. Carrying Seeds across into a fresh registry
+  cannot be `add` — that would restate the whole lifetime as this run's earnings.
+  STEP 15's loader wants exactly this for every resource.
+- Tests: **939 pass** (up from 797). New `engine/prestige.test.ts` (33),
+  `engine/heirlooms.test.ts` (32), `render/forest.test.ts` (19),
+  `render/ceremony.test.ts` (16); `simulation.test.ts` gained 42 across both
+  maturity gates, the ceremony's timing and locked payout, exactly what the reset
+  keeps and gives up, the forest accumulating and paying, the Vault's chain
+  gating and run-start top-up, and the acceptance criterion itself — the same
+  scripted forty taps earn strictly more on the second run than the first.
+- Verified in a real browser (Chromium/Playwright, 1280×800): the Vault reads
+  "READY TO SEED" with both bars full; Go to Seed dims the world and sends the
+  canopy up as glowing seeds on trails; the reset leaves a seedling, banks the
+  Seeds and stands the old tree on the hills; buying Seedcase puts 200 Sap on the
+  counter immediately. 58–59 fps, no page errors.
+
+**Two things the screenshots changed**
+
+- **The grove was drawn too large and too saturated.** At a tenth of the canvas
+  it read as a hedge in *front* of the ridgeline and pulled the eye straight off
+  the player's own tree. It is 7.5% now, hazed 58% toward the hill behind it —
+  enough that no two neighbouring species look alike and no further.
+- **The counter was in the bottom-right corner, behind the upgrade panel.** Both
+  corners of the sky already hold a panel; it is centred now.
+
+**Design decisions worth knowing**
+
+- **The ceremony's payout is locked in when it opens, not when it lands.** The
+  number on the button is the number the player agreed to, and six more seconds of
+  Light must not quietly change it. There is no cancel: going to seed is the one
+  irreversible thing in the game, and a cancel button would make it a dialog.
+- **Planted totems and residents do not survive.** The recipes are content and are
+  never forgotten, but a carving stands at the base of a tree that no longer
+  exists, and a creature lived in *that* tree. Bond is the supported way to keep
+  one, and it costs Seeds precisely because free symbionts across a reset would
+  make the whole branch pointless.
+- **The ground is carried over.** Soil does not change because a tree died — and
+  it is what keeps Memory honest: a remembered root layout has to come up in the
+  veins it was dug for.
+- **The forest's bonus is per resource, like a Ring's.** "Base production" has to
+  mean all of it, and a tag is something a future producer can forget to carry.
+
+**Open TODOs**
+
+- [ ] **Nothing persists (STEP 15).** `heirlooms`, `forest`, `memory`,
+      `bondSymbiont`, `runStartLevels` and the banked Seeds are all in `GameState`
+      and snapshotted. `HeirloomLedger.clear()` is the load hook. Note that
+      `runStartLevels` must be saved *with* the ledger or a reload would re-grant
+      every starting balance the run has already spent.
+- [ ] **A million lifetime Light is roughly a day of a first-pass canopy.** The
+      formula is the design's and the gate is tied to it, so the knob is
+      `SEED_LIGHT_DIVISOR` alone — but STEP 19 owns whether a first prestige
+      should be a day away. It is the single most important number in the file.
+- [ ] `offlineCapHours` is read by the Vault and by nothing else. STEP 14 owns
+      what the cap *does*; `BASE_OFFLINE_CAP_HOURS` is a placeholder until it does.
+- [ ] Canopy Map replays the whole previous tree, which makes the next run mature
+      on its first tick — the height gate is satisfied by construction and only
+      the Light gate remains. That may be exactly right for a 25-Seed node deep in
+      a branch, or it may need the gate to move. STEP 19.
+- [ ] The Vault is visible from the first frame, quoting a gate the player has no
+      way to understand yet. STEP 17's progressive disclosure should hide it until
+      the tree is some way toward maturity.
+- [ ] The ceremony ignores `prefers-reduced-motion` (STEP 16 owns this) and has no
+      audio cue of its own — the largest event in the game currently happens in
+      silence.
+- [ ] Forest silhouettes are not culled against the viewport, and with thirty of
+      them spread over 1.9 screen-widths a zoomed-in player sees only a few. The
+      counter says how many there are; it does not say where.
+- [ ] Achievements are named in the design's keep-list and do not exist yet
+      (STEP 19). Nothing about the reset will need to change when they do — they
+      are simply another ledger to copy across.
+
 ### 2026-08-26 — STEP 12: Seasons and weather events
 
 The tree has had a clock since STEP 8 — a day that gets dark and comes back.

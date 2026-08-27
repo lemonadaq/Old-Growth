@@ -50,6 +50,8 @@ import {
   layoutSpeciesPicker,
   type SpeciesChip,
 } from './speciesPicker';
+import { drawCeremony } from './ceremony';
+import { drawForest, layoutForest, visibleForest } from './forest';
 import { drawBackdrop } from './sky';
 import { drawSymbionts, symbiontScene, EMPTY_SCENE, type SymbiontScene } from './symbionts';
 import { drawTotems } from './totems';
@@ -548,12 +550,20 @@ export class Renderer {
 
     // Sky, the sun or moon crossing it, and the hills on the horizon — under
     // whatever the season and the weather are casting over them.
-    drawBackdrop(
+    const casts = skyCasts(snapshot.season.id, snapshot.weather);
+    drawBackdrop(ctx, viewport, this.layout, snapshot.day, casts);
+
+    // Every tree the player has already given up, standing on those hills. Drawn
+    // straight after the ridgeline it stands on and before anything underground,
+    // which is what puts the grove firmly *behind* the world rather than in it.
+    const forest = visibleForest(snapshot.prestige.forest);
+    drawForest(
       ctx,
+      layoutForest(forest.drawn, viewport, this.layout),
+      forest.hidden,
       viewport,
       this.layout,
-      snapshot.day,
-      skyCasts(snapshot.season.id, snapshot.weather),
+      casts,
     );
 
     // Soil: strata bands and the mineral pockets buried in them, drawn at
@@ -638,6 +648,19 @@ export class Renderer {
         braceAnchorLayout(viewport, this.layout),
         snapshot.weather.storm.brace,
         snapshot.elapsedSeconds,
+      );
+    }
+
+    // Going to Seed goes over everything: for six seconds it is the only thing
+    // happening, and the click feedback of a tree that is about to stop existing
+    // is not worth reading through it.
+    const ceremony = snapshot.prestige.ceremony;
+    if (ceremony) {
+      drawCeremony(
+        ctx,
+        viewport,
+        this.screenTree.filter((segment) => segment.kind === 'leafCluster'),
+        ceremony.fraction,
       );
     }
 

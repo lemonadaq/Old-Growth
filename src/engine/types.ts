@@ -11,6 +11,7 @@ import type { Producer } from './economy';
 import { HeirloomLedger } from './heirlooms';
 import { computeHydration, type HydrationState } from './hydration';
 import { LitterGround } from './litter';
+import { DEFAULT_SETTINGS, type GameSettings } from '../content/settings';
 import { STARTER_SPECIES_ID } from '../content/species';
 import { lightFactorAt, type LeafExposure } from './light';
 import { ModifierSet } from './modifiers';
@@ -177,6 +178,18 @@ export interface GameState {
   elapsedSeconds: number;
   /** Wall-clock timestamp (ms) of the last update; used later for offline calc. */
   lastUpdatedAt: number;
+  /**
+   * Seconds the player has actually spent with the game open, across every
+   * session of this save.
+   *
+   * Distinct from `elapsedSeconds`, which is the *tree's* clock and jumps
+   * forward on an offline catch-up. This one only ever advances at the rate a
+   * person experiences it, which is what makes it the honest answer to "how long
+   * have I been playing".
+   */
+  playtimeSeconds: number;
+  /** What the player has chosen about how the game behaves. */
+  settings: GameSettings;
 }
 
 /** Combo meter state as read by the UI and renderer. */
@@ -489,5 +502,7 @@ export function createInitialState(now: number = Date.now()): GameState {
     tick: 0,
     elapsedSeconds: 0,
     lastUpdatedAt: now,
+    playtimeSeconds: 0,
+    settings: DEFAULT_SETTINGS,
   };
 }

@@ -14,6 +14,26 @@
  * degrades to silence instead of throwing into the input handler.
  */
 
+/**
+ * Whether the placeholder SFX are silenced.
+ *
+ * Module-level rather than passed to every call: the sound functions are called
+ * from input handlers wired once on mount, which cannot read React state. The
+ * setting itself lives in the engine's state — this is only its mirror, pushed
+ * here whenever it changes, and STEP 16's `AudioManager` inherits the same job.
+ */
+let muted = false;
+
+/** Silence, or unsilence, every placeholder sound. */
+export function setSfxMuted(next: boolean): void {
+  muted = next;
+}
+
+/** Whether sound is currently silenced. */
+export function isSfxMuted(): boolean {
+  return muted;
+}
+
 /** Peak gain of the snip. Quiet: it punctuates a cut, it does not announce one. */
 const SNIP_GAIN = 0.12;
 
@@ -83,6 +103,7 @@ function blade(ctx: AudioContext, at: number, centerHz: number, seconds: number)
  * first, so the pair reads as scissors closing rather than as one click.
  */
 export function playSnip(): void {
+  if (muted) return;
   const ctx = audioContext();
   if (!ctx) return;
 
@@ -133,6 +154,7 @@ function tone(
  * player should be able to tell which one is coming without looking up.
  */
 export function playWeatherCue(kind: 'rain' | 'storm' | 'drought'): void {
+  if (muted) return;
   const ctx = audioContext();
   if (!ctx) return;
   if (ctx.state === 'suspended') void ctx.resume().catch(() => undefined);

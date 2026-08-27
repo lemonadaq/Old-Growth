@@ -64,6 +64,10 @@ export interface HudProps {
   readonly symbiontsOpen: boolean;
   /** Toggle the Symbionts panel. Mirrors the S hotkey. */
   readonly onToggleSymbionts: () => void;
+  /** Whether the Settings panel is open. */
+  readonly settingsOpen: boolean;
+  /** Toggle Settings. Mirrors the comma hotkey. */
+  readonly onToggleSettings: () => void;
   /** Whether the Seed Vault is open. */
   readonly vaultOpen: boolean;
   /** Toggle the Seed Vault. Mirrors the V hotkey. */
@@ -84,6 +88,8 @@ export function Hud({
   onToggleVault,
   vaultOpen,
   onToggleSymbionts,
+  settingsOpen,
+  onToggleSettings,
 }: HudProps) {
   const discovered = useGameStore((s) => s.snapshot.species.discovered.length);
   const residents = useGameStore((s) => s.snapshot.symbionts.filter((r) => r.active).length);
@@ -160,6 +166,16 @@ export function Hud({
                 <span className="hud-toggle__badge">{prestige.forest.length}</span>
               )
             )}
+          </button>
+          <button
+            type="button"
+            className="hud-toggle"
+            aria-pressed={settingsOpen}
+            aria-keyshortcuts=","
+            title="Settings (,) — sound, export, import, hard reset"
+            onClick={onToggleSettings}
+          >
+            <span aria-hidden>⚙</span> Settings
           </button>
           <SeasonBadge />
           <DaylightGauge />

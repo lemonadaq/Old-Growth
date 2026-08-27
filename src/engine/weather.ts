@@ -165,6 +165,26 @@ export class WeatherScheduler {
   }
 
   /**
+   * Put the sky back the way a save left it.
+   *
+   * The schedule is restored rather than re-rolled, so a player who saves during
+   * a rain comes back into that rain with the right amount of it left. A roll
+   * time in the past is pulled forward to `now`: a save loaded a week later must
+   * not owe a week of weather, and `update` would otherwise spend its whole step
+   * budget catching one up.
+   */
+  restore(
+    active: ActiveWeather | null,
+    pending: PendingWeather | null,
+    nextRollAt: number,
+    now = 0,
+  ): void {
+    this.running = active ? { ...active } : null;
+    this.announced = pending ? { ...pending } : null;
+    this.rollAt = Math.max(nextRollAt, now);
+  }
+
+  /**
    * Advance the sky to `now`, returning everything that happened on the way.
    *
    * Each transition is timestamped with the moment it was *due* rather than with

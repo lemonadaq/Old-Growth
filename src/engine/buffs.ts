@@ -109,6 +109,18 @@ export class BuffLedger {
     return [...this.active.values()];
   }
 
+  /**
+   * Replace every running buff with the ones a save carried.
+   *
+   * Clears first, so a load can never leave a buff from the run before it
+   * standing over the run after. The caller has already dropped anything that
+   * lapsed while the tab was shut; what arrives here is what is still running.
+   */
+  restore(buffs: readonly ActiveBuff[]): void {
+    this.active.clear();
+    for (const buff of buffs) this.active.set(buff.id, { ...buff });
+  }
+
   /** Drop every buff without reporting it. Used when loading a save. */
   clear(): void {
     this.active.clear();

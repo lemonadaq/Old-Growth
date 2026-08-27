@@ -86,6 +86,22 @@ export class LitterGround {
     return this.piles.splice(0, this.piles.length);
   }
 
+  /**
+   * Replace the ground with the piles a save carried.
+   *
+   * The id counter is advanced past everything restored, so the next pile to
+   * fall cannot collide with one already lying there — a collision would make
+   * `collect` take the wrong heap.
+   */
+  restore(piles: readonly LitterPile[]): void {
+    this.piles.splice(0, this.piles.length);
+    for (const pile of piles.slice(0, LITTER_MAX_PILES)) {
+      this.piles.push({ ...pile });
+      const serial = Number.parseInt(pile.id.replace('litter-', ''), 10);
+      if (Number.isFinite(serial) && serial >= this.nextId) this.nextId = serial + 1;
+    }
+  }
+
   /** Every pile, oldest first. */
   entries(): readonly LitterPile[] {
     return this.piles;

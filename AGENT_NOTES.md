@@ -15,6 +15,129 @@ Do not refactor unrelated code.
 
 ## Changelog
 
+### 2026-08-27 — STEP 15: Save system and migrations
+
+Fourteen steps of state that lived exactly as long as a tab. This one writes it
+down — and, more to the point, is built around the assumption that **writing it
+down will sometimes go wrong**: a disk that is full, a tab killed mid-write, a
+browser that refuses storage, a file from a build that does not exist yet.
+
+- `src/content/save.ts` + `src/content/settings.ts` — the format version, the
+  two storage keys, the 30 s autosave interval, the `UPROOT` phrase, the export
+  markers; and `GameSettings`, read through `normaliseSettings` so a file written
+  before a field existed still loads.
+- `src/engine/save.ts` — `captureSave` / `restoreState`, and the whole file is
+  written to the rule that **the strict gate is at the door and everything past
+  it is defensive**. `validateEnvelope` refuses anything without a version, a
+  timestamp and a tree; after that, every field is read through `num`, `count`,
+  `str` and friends, and an id the game no longer has is skipped rather than
+  fatal. A save is a file a player may have edited.
+  - **Derived state is not saved.** Modifiers, producers, exposures, hydration
+    and the season are all rebuilt by `hydrate()` on the way in. Saving them
+    would let a load double an aura that is also re-granted — and a save format
+    that carries derived values is one that goes stale the moment a balance
+    number moves.
+  - Cadence intervals come from the *catalogue*, not the file, so a change to how
+    often the songbird sings reaches saves that already exist.
+  - A buff whose time ran out while the tab was shut is dropped on load rather
+    than restored-then-expired, which would flash its modifiers across one frame.
+- `src/engine/migrations.ts` — an ordered list of one-version steps, walked one
+  at a time so a save three versions behind is migrated three times rather than
+  jumped. **Empty at 1.0, and that is the point**: the machinery runs on every
+  load *before* the first breaking change rather than being written after it.
+  Versions compare as numbers, so `1.10` is correctly newer than `1.9`, and a
+  save from a newer build is refused with a sentence rather than guessed at.
+- `src/engine/storage.ts` — one rule: **a save is replaced, never edited.** The
+  live key is rotated into the backup key before it is overwritten, and only if
+  it still parses — promoting a corrupt file into the backup slot would destroy
+  the very thing the slot is for. Every `localStorage` call is wrapped, including
+  the *reach* for it (a blocked-cookies setting throws on property access), so a
+  browser that refuses storage gets a playable game and a warning rather than a
+  blank screen.
+  - Export is deflate-then-base64 behind an `OG1:` marker, with an `OG0:` plain
+    fallback for browsers without `CompressionStream`; the reader is driven by
+    the marker, so a save exported on a desktop imports on an old phone. Raw
+    JSON is accepted too, and whitespace is stripped, because chat clients wrap
+    long lines and a paste that fails on a newline is a support request.
+- `src/engine/simulation.ts` — `save()`, `load()`, `hardReset()`, and
+  `playtimeSeconds` advancing only on ticks a person sat through (an offline
+  catch-up moves the *tree's* clock, and calling that "time played" would make
+  the stat a measure of how long the tab was shut). **A failed load changes
+  nothing**: the fresh state is built and fully populated before it is swapped
+  in, the same swap-don't-unwind shape `goToSeed` uses.
+- `src/ui/Settings.tsx` + `.css` — mute, Export (to clipboard, with the text
+  shown as well because clipboard permission is not guaranteed), Import
+  (validated *before* anything is replaced), and Hard Reset behind the typed
+  phrase. `src/ui/App.tsx` loads before the offline catch-up — reversed, a
+  returning player would be paid for time their seedling was never alive for —
+  and autosaves on three triggers: the interval, `visibilitychange` (the only one
+  iOS Safari reliably delivers), and `pagehide`.
+- Tests: **1016 pass** (up from 981). New `engine/save.test.ts` (35) covers the
+  round-trip against a fingerprint of every subsystem with its own restore path,
+  a load that fails changing nothing, unknown ids, lapsed buffs, playtime,
+  migrations (including the newer-than-us refusal and the `1.10 > 1.9` ordering),
+  the backup rotation, the corrupt-live fallback, a store that throws on every
+  call, and **the acceptance case: export → hard reset → import restores the
+  exact state**.
+- Verified in a real browser (Chromium/Playwright, production build): 80 taps →
+  **231.72 Sap**, a `visibilitychange` wrote `old-growth:save`, a reload came
+  back at **231.72**; Export produced a **772-character `OG1:` string**; Hard
+  Reset with `UPROOT` emptied the game to **0**; Import restored **231.72**.
+  Recovery was checked in a pre-seeded context (truncated live save, good
+  backup): the game opened at **144.32** with the toast *"Recovered from a
+  backup — the last save was damaged, so the one before it was opened instead"*,
+  and a context with both slots wrecked opened a fresh tree saying *"Save could
+  not be read"*. No page errors.
+
+**Manual test — verifying an offline absence**
+
+STEP 14's note asked for this once saves existed, and now they do. In devtools:
+
+```js
+const save = JSON.parse(localStorage['old-growth:save']);
+save.data.lastUpdatedAt -= 5 * 3600 * 1000;   // five hours ago
+localStorage['old-growth:save'] = JSON.stringify(save);
+location.reload();
+```
+
+The "While you were away" modal opens on a five-hour absence. The same edit with
+a number past the cap shows the capped line.
+
+**Design decisions worth knowing**
+
+- **The registry is empty and tested anyway.** A migration system written after
+  the first breaking change has to be retrofitted to a format nobody planned to
+  migrate. One written before it costs an afternoon and a test that starts
+  failing the moment someone adds a step with a gap in the chain.
+- **Refuse forward, never convert backward.** A player on an old tab is told
+  their save is too new. A lossy down-conversion would be silent data loss
+  dressed as helpfulness.
+- **Hard Reset clears the backup too.** A reset the next load could undo is not
+  a reset.
+- **The corruption guard could not be demonstrated by reloading the page** —
+  `pagehide` fires on reload, so the app's own autosave overwrote the deliberate
+  corruption before the next load could see it. That is the autosave doing its
+  job; the browser check seeds a fresh context instead. Worth remembering the
+  next time something "cannot be reproduced" in a live tab.
+
+**Open TODOs**
+
+- [ ] **`ENGINE_VERSION` is kept in step with `package.json` by hand.** A
+      build-time define would drag Vite's config into the engine's tests for the
+      sake of a string; STEP 20 owns the release build and is the place to
+      revisit it.
+- [ ] Settings holds one preference. STEP 16 (volumes) and STEP 18 (font scale,
+      colour-blind patterns, reduced motion) both add fields, and
+      `normaliseSettings` is where they land.
+- [ ] No autosave on prestige or on a graft — the interval covers them within
+      30 s, but the two most consequential single actions in the game deserve a
+      write of their own.
+- [ ] The export is a string in a textarea. A `.ogsave` file download is the
+      obvious next step and belongs with STEP 18's final UI.
+- [ ] Nothing prunes an old backup: two keys is the whole scheme. A rotating
+      three-deep history would survive a corruption that happened to be autosaved
+      twice, which this does not.
+
 ### 2026-08-27 — STEP 14: Offline progress
 
 Thirteen steps of systems that only run while someone is watching. This one asks

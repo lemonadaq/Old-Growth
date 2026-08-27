@@ -160,6 +160,18 @@ export class SymbiontLedger {
     return this.living.size;
   }
 
+  /**
+   * Replace the residents with the ones a save carried.
+   *
+   * Cadence intervals are *not* taken from the file — the caller reads them out
+   * of the catalogue — so a balance change to how often a bird sings reaches
+   * every save that already exists rather than only new ones.
+   */
+  restore(residents: readonly ActiveSymbiont[]): void {
+    this.living.clear();
+    for (const resident of residents) this.living.set(resident.id, { ...resident });
+  }
+
   /** Drop every resident. Used when loading a save. */
   clear(): void {
     this.living.clear();

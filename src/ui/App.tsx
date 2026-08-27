@@ -6,6 +6,11 @@ import { gameStore } from '../engine/store';
 import { formatNumber } from '../engine/format';
 import type { GraftAssessment } from '../engine/graft';
 import type { OfflineReport } from '../engine/offline';
+import { AUTOSAVE_INTERVAL_MS } from '../content/save';
+import { decodeSave, encodeSave, loadGame, saveGame, clearSave } from '../engine/storage';
+import { parseSaveText } from '../engine/save';
+import { migrateSave } from '../engine/migrations';
+import { Settings } from './Settings';
 import type { PricedGrowthOption } from '../engine/growth';
 import type { PruneQuote } from '../engine/prune';
 import { RESOURCE_BY_ID } from '../content/resources';
@@ -28,7 +33,7 @@ import { Toast } from './Toast';
 import { Tooltip } from './Tooltip';
 import { UpgradePanel } from './UpgradePanel';
 import { Workshop } from './Workshop';
-import { playSnip, playWeatherCue } from './sfx';
+import { playSnip, playWeatherCue, setSfxMuted } from './sfx';
 import { attachTreeInput } from './treeInput';
 import './App.css';
 
@@ -85,12 +90,17 @@ export function App() {
   const [vaultOpen, setVaultOpen] = useState(false);
   const [toast, setToast] = useState<DiscoveryToast | null>(null);
   const [away, setAway] = useState<OfflineReport | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [saveHealthy, setSaveHealthy] = useState(true);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [hover, setHover] = useState<HoverState | null>(null);
 
   // The input handlers are wired once, on mount, and must read the *current*
   // mode rather than the one that was in force when they were created.
   const pruneModeRef = useRef(false);
   const graftModeRef = useRef(false);
+  /** The autosave, exposed so Settings can force one after import or reset. */
+  const saveRef = useRef<(() => boolean) | null>(null);
 
   // The two canvas modes are mutually exclusive: they are different intentions
   // aimed at the same limb, and both live at once would make every click a guess.
@@ -140,11 +150,73 @@ export function App() {
         if (!open) {
           setJournalOpen(false);
           setSymbiontsOpen(false);
+          setSettingsOpen(false);
         }
         return !open;
       }),
     [],
   );
+  const toggleSettings = useCallback(
+    () =>
+      setSettingsOpen((open) => {
+        if (!open) {
+          setJournalOpen(false);
+          setSymbiontsOpen(false);
+          setVaultOpen(false);
+        }
+        return !open;
+      }),
+    [],
+  );
+
+  /** Hand the current save to the clipboard, compressed. */
+  const handleExport = useCallback(async () => {
+    const sim = simRef.current;
+    return sim ? encodeSave(sim.save()) : '';
+  }, []);
+
+  /**
+   * Apply a pasted save, or say why it will not go in. Resolves to `null` on
+   * success — every failure below is reported *before* anything is replaced, so
+   * a bad paste can never leave the player halfway into someone else's tree.
+   */
+  const handleImport = useCallback(async (text: string) => {
+    const sim = simRef.current;
+    if (!sim) return 'The game is not running.';
+
+    const json = await decodeSave(text);
+    if (json === null) return 'That does not look like an Old Growth save.';
+
+    const parsed = parseSaveText(json);
+    if (!parsed.ok) return parsed.reason;
+
+    const migrated = migrateSave(parsed.envelope);
+    if (!migrated.ok) return migrated.reason;
+
+    if (!sim.load(migrated.envelope)) return 'The save could not be rebuilt into a tree.';
+
+    saveRef.current?.();
+    return null;
+  }, []);
+
+  const [muted, setMuted] = useState(false);
+
+  /** Flip the mute, in the engine's state so the save carries it. */
+  const handleToggleMute = useCallback(() => {
+    const sim = simRef.current;
+    if (!sim) return;
+    const next = !sim.state.settings.muted;
+    sim.state.settings = { ...sim.state.settings, muted: next };
+    setMuted(next);
+    setSfxMuted(next);
+  }, []);
+
+  /** Uproot everything: the state and both storage keys. */
+  const handleHardReset = useCallback(() => {
+    simRef.current?.hardReset();
+    clearSave();
+    setLastSavedAt(null);
+  }, []);
   const dismissToast = useCallback(() => setToast(null), []);
   const dismissAway = useCallback(() => setAway(null), []);
 
@@ -155,9 +227,50 @@ export function App() {
     const sim = new Simulation();
     simRef.current = sim;
 
-    // Before the first frame: catch up on the time the tab was shut. Doing it
-    // here rather than inside the loop means the tree the player sees on the
-    // first frame is already the one they came back to, roots and all.
+    // Order matters here more than anywhere else on the mount path. The save is
+    // read *first*, because everything below it operates on the tree it
+    // restores; the offline catch-up runs *second*, on that tree, using the
+    // `lastUpdatedAt` the save carried. Reversed, a returning player would be
+    // paid for time their seedling was never alive for.
+    const outcome = loadGame();
+    if (outcome.kind === 'loaded' || outcome.kind === 'recovered') {
+      if (!sim.load(outcome.envelope)) {
+        setToast({
+          title: 'Save could not be opened',
+          body: 'The tree it described could not be rebuilt, so this run starts fresh.',
+          glyph: '🌱',
+          color: '#ff8a72',
+          key: Date.now(),
+        });
+      } else if (outcome.kind === 'recovered') {
+        // Calm on purpose: the player lost at most one autosave interval, and
+        // the backup did exactly what it is there for.
+        setToast({
+          title: 'Recovered from a backup',
+          body: 'The last save was damaged, so the one before it was opened instead.',
+          glyph: '🛟',
+          color: '#6fb7e0',
+          key: Date.now(),
+        });
+      }
+    } else if (outcome.kind === 'failed') {
+      setToast({
+        title: 'Save could not be read',
+        body: outcome.reason,
+        glyph: '🌱',
+        color: '#ff8a72',
+        key: Date.now(),
+      });
+    }
+
+    // The save carries the mute; the module-level mirror in `sfx.ts` and the
+    // React state both have to be told, since neither can read engine state.
+    setMuted(sim.state.settings.muted);
+    setSfxMuted(sim.state.settings.muted);
+
+    // Then catch up on the time the tab was shut. Doing it here rather than
+    // inside the loop means the tree the player sees on the first frame is
+    // already the one they came back to, roots and all.
     setAway(sim.catchUpOffline());
 
     const renderer = new Renderer(canvas);
@@ -606,6 +719,10 @@ export function App() {
         toggleJournal();
         return;
       }
+      if (event.key === ',') {
+        toggleSettings();
+        return;
+      }
       if (event.key === 's' || event.key === 'S') {
         toggleSymbionts();
         return;
@@ -753,15 +870,46 @@ export function App() {
 
     loop.start();
 
+    /**
+     * Write the game down. Reported to the panel so a browser refusing storage
+     * is visible before the tab closes rather than after.
+     */
+    const persist = () => {
+      const ok = saveGame(sim.save());
+      setSaveHealthy(ok);
+      if (ok) setLastSavedAt(Date.now());
+      return ok;
+    };
+
+    const autosave = window.setInterval(persist, AUTOSAVE_INTERVAL_MS);
+
+    // Three triggers, because none of them fires reliably on its own: the
+    // interval covers a tab left open, `visibilitychange` covers a phone being
+    // pocketed (the only one iOS Safari reliably delivers), and `pagehide`
+    // covers a desktop close. Saving twice costs one write; missing the last one
+    // costs the session.
+    const handleHide = () => {
+      if (document.visibilityState === 'hidden') persist();
+    };
+    document.addEventListener('visibilitychange', handleHide);
+    window.addEventListener('pagehide', persist);
+
+    saveRef.current = persist;
+
     return () => {
+      persist();
+      window.clearInterval(autosave);
+      document.removeEventListener('visibilitychange', handleHide);
+      window.removeEventListener('pagehide', persist);
       loop.stop();
       detachInput();
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('keydown', handleKeyDown);
+      saveRef.current = null;
       simRef.current = null;
       rendererRef.current = null;
     };
-  }, [togglePrune, toggleGraft, toggleJournal, toggleSymbionts, toggleVault]);
+  }, [togglePrune, toggleGraft, toggleJournal, toggleSymbionts, toggleVault, toggleSettings]);
 
   // Mirror the canvas modes into the places that cannot read React state: the
   // input handlers (through a ref) and the renderer (which draws the marks).
@@ -836,6 +984,8 @@ export function App() {
         onToggleSymbionts={toggleSymbionts}
         vaultOpen={vaultOpen}
         onToggleVault={toggleVault}
+        settingsOpen={settingsOpen}
+        onToggleSettings={toggleSettings}
       />
       <Workshop onCraft={handleCraft} />
       {journalOpen ? (
@@ -847,6 +997,16 @@ export function App() {
           onBuyHeirloom={handleBuyHeirloom}
           onChooseBond={handleChooseBond}
           onGoToSeed={handleGoToSeed}
+        />
+      ) : settingsOpen ? (
+        <Settings
+          muted={muted}
+          onToggleMute={handleToggleMute}
+          onExport={handleExport}
+          onImport={handleImport}
+          onHardReset={handleHardReset}
+          saveHealthy={saveHealthy}
+          lastSavedAt={lastSavedAt}
         />
       ) : (
         <UpgradePanel onBuy={handleBuy} />

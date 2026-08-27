@@ -50,6 +50,7 @@ import {
 } from './light';
 import { litterAmount, litterPosition, type LitterPile } from './litter';
 import { applyModifiers, type Modifier } from './modifiers';
+import { captureSave, restoreState, type SaveEnvelope } from './save';
 import {
   gainBetween,
   offlineModifiers,
@@ -1615,11 +1616,59 @@ export class Simulation {
     return { plan, gains, notes, rings, steps: steps.length };
   }
 
+  /* ------------------------------------------------------------ persistence */
+
+  /**
+   * Take a complete record of the game as it stands, ready to be written down.
+   *
+   * A plain read: nothing is stamped on the state, so a save can be taken at any
+   * moment — including from a test, mid-tick, or twice in a row — without the act
+   * of saving being visible in what is saved.
+   */
+  save(now: number = Date.now()): SaveEnvelope {
+    return captureSave(this.state, now);
+  }
+
+  /**
+   * Replace the running game with the one in `envelope`.
+   *
+   * Returns `false` and changes **nothing** when the data cannot be read. That
+   * is the whole contract: a failed load must leave the player in the game they
+   * already had rather than half in a new one, so the fresh state is built and
+   * fully populated *before* it is swapped in — the same swap-don't-unwind shape
+   * `goToSeed` uses, and for the same reason.
+   */
+  load(envelope: SaveEnvelope): boolean {
+    const restored = restoreState(envelope.data);
+    if (!restored) return false;
+
+    this.state = restored;
+    this.hydrate();
+    return true;
+  }
+
+  /**
+   * Throw the save away and start over, keeping nothing — no Seeds, no
+   * heirlooms, no forest, no Journal.
+   *
+   * Deliberately not built on `goToSeed`, which keeps most of that on purpose.
+   * This is the other button, and the only honest implementation of it is a
+   * state that has never been played.
+   */
+  hardReset(now: number = Date.now()): void {
+    this.state = createInitialState(now);
+    this.hydrate();
+  }
+
   /** Advance the simulation by one fixed step of `dtSeconds`. */
   tick(dtSeconds: number, options: TickOptions = {}): void {
     this.state.tick += 1;
     this.state.elapsedSeconds += dtSeconds;
     this.state.lastUpdatedAt = Date.now();
+    // Playtime counts only ticks a person sat through: an offline catch-up
+    // advances the *tree's* clock by hours, and calling that "time played" would
+    // make the stat a measure of how long the tab was shut.
+    if (options.offline !== true) this.state.playtimeSeconds += dtSeconds;
 
     // Order matters. Lapsed buffs go first — a tick must not pay out through a
     // modifier whose time ran out before it started. The season and the sky

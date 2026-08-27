@@ -1,0 +1,125 @@
+/* STEP 15's save controls. The final UI (STEP 18) folds this into the dock. */
+.settings {
+  pointer-events: auto;
+  position: absolute;
+  top: 56px;
+  right: 12px;
+  width: 340px;
+  max-height: calc(100% - 96px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 10px;
+  backdrop-filter: blur(4px);
+}
+
+.settings__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hud-muted);
+}
+
+.settings__block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* The one section that can lose work gets its own edge, not its own colour
+   scheme: a red panel reads as an error rather than as a door marked "sure?" */
+.settings__block--danger {
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 138, 114, 0.4);
+}
+
+.settings__heading {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--hud-text);
+}
+
+.settings__toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--hud-text);
+}
+
+.settings__status {
+  margin: 0;
+  font-size: 11px;
+  color: var(--hud-muted);
+}
+
+.settings__status--bad {
+  color: #ff8a72;
+}
+
+.settings__note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--hud-muted);
+}
+
+.settings__error {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #ff8a72;
+}
+
+.settings__text,
+.settings__input {
+  width: 100%;
+  padding: 7px 8px;
+  font: inherit;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  resize: vertical;
+  color: var(--hud-text);
+  background: rgba(20, 14, 9, 0.55);
+  border: 1px solid var(--hud-border);
+  border-radius: 7px;
+}
+
+.settings__button {
+  padding: 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  color: var(--hud-text);
+  background: rgba(255, 240, 214, 0.08);
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.settings__button:hover:not(:disabled) {
+  background: rgba(255, 210, 122, 0.16);
+  border-color: var(--hud-accent);
+}
+
+.settings__button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.settings__button--danger:not(:disabled) {
+  color: #ffe2d8;
+  border-color: #ff8a72;
+  background: rgba(120, 34, 26, 0.6);
+}

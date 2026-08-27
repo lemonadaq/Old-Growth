@@ -1,0 +1,141 @@
+/* STEP 14's "while you were away". The only modal in the game. */
+.away {
+  pointer-events: auto;
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(16, 11, 7, 0.55);
+  backdrop-filter: blur(3px);
+  animation: away-fade 220ms ease;
+}
+
+@keyframes away-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.away__card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(420px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 18px;
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  animation: away-rise 260ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+@keyframes away-rise {
+  from {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.away__title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--hud-text);
+}
+
+.away__duration {
+  margin: 0;
+  font-size: 12px;
+  color: var(--hud-accent);
+}
+
+/* The cap is a fact, not a scolding: stated once, in the quiet voice. */
+.away__capped {
+  color: var(--hud-muted);
+  font-style: italic;
+}
+
+.away__gains {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.away__gain {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 10px;
+  background: rgba(255, 240, 214, 0.06);
+  border: 1px solid var(--hud-border);
+  border-left-width: 3px;
+  border-radius: 8px;
+}
+
+.away__glyph {
+  font-size: 15px;
+}
+
+.away__label {
+  font-size: 12px;
+  color: var(--hud-muted);
+}
+
+.away__amount {
+  margin-left: auto;
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--hud-accent);
+}
+
+.away__quiet,
+.away__notes {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--hud-muted);
+}
+
+.away__notes {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--hud-border);
+}
+
+.away__collect {
+  margin-top: 6px;
+  padding: 10px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  color: #2a1d10;
+  background: var(--hud-accent);
+  border: none;
+  border-radius: 9px;
+  transition: filter 120ms ease;
+}
+
+.away__collect:hover {
+  filter: brightness(1.08);
+}

@@ -5,6 +5,7 @@ import { Simulation } from '../engine/simulation';
 import { gameStore } from '../engine/store';
 import { formatNumber } from '../engine/format';
 import type { GraftAssessment } from '../engine/graft';
+import type { OfflineReport } from '../engine/offline';
 import type { PricedGrowthOption } from '../engine/growth';
 import type { PruneQuote } from '../engine/prune';
 import { RESOURCE_BY_ID } from '../content/resources';
@@ -22,6 +23,7 @@ import { LeafTooltip } from './LeafTooltip';
 import { PruneTooltip } from './PruneTooltip';
 import { SeedVault } from './SeedVault';
 import { Symbionts } from './Symbionts';
+import { AwayModal } from './AwayModal';
 import { Toast } from './Toast';
 import { Tooltip } from './Tooltip';
 import { UpgradePanel } from './UpgradePanel';
@@ -82,6 +84,7 @@ export function App() {
   const [symbiontsOpen, setSymbiontsOpen] = useState(false);
   const [vaultOpen, setVaultOpen] = useState(false);
   const [toast, setToast] = useState<DiscoveryToast | null>(null);
+  const [away, setAway] = useState<OfflineReport | null>(null);
   const [hover, setHover] = useState<HoverState | null>(null);
 
   // The input handlers are wired once, on mount, and must read the *current*
@@ -143,6 +146,7 @@ export function App() {
     [],
   );
   const dismissToast = useCallback(() => setToast(null), []);
+  const dismissAway = useCallback(() => setAway(null), []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -150,6 +154,12 @@ export function App() {
 
     const sim = new Simulation();
     simRef.current = sim;
+
+    // Before the first frame: catch up on the time the tab was shut. Doing it
+    // here rather than inside the loop means the tree the player sees on the
+    // first frame is already the one they came back to, roots and all.
+    setAway(sim.catchUpOffline());
+
     const renderer = new Renderer(canvas);
     rendererRef.current = renderer;
     renderer.setSoil(sim.state.soil);
@@ -168,7 +178,9 @@ export function App() {
     // the species list rather than being handed it per draw. Pushed only when it
     // actually changes — an unlock or a chip click — not sixty times a second.
     let speciesKey = '';
-    const syncSpecies = (snapshot: { species: { unlocked: readonly string[]; planting: string } }) => {
+    const syncSpecies = (snapshot: {
+      species: { unlocked: readonly string[]; planting: string };
+    }) => {
       const key = `${snapshot.species.planting}|${snapshot.species.unlocked.join(',')}`;
       if (key === speciesKey) return;
       speciesKey = key;
@@ -552,7 +564,10 @@ export function App() {
     const handleKeyDown = (event: KeyboardEvent) => {
       // Never steal a keystroke aimed at a control the player is typing into.
       const target = event.target as HTMLElement | null;
-      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) {
+      if (
+        target &&
+        (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))
+      ) {
         return;
       }
 
@@ -682,9 +697,7 @@ export function App() {
             body:
               `The old tree stands on the hills now — ${report.forestSize} of them, worth ` +
               `+${report.forestSize}% to everything the next one makes.` +
-              (report.remembered > 0
-                ? ` ${report.remembered} parts came back from memory.`
-                : ''),
+              (report.remembered > 0 ? ` ${report.remembered} parts came back from memory.` : ''),
             glyph: '🌰',
             color: '#a9c46c',
             key: now + 4,
@@ -838,6 +851,7 @@ export function App() {
       ) : (
         <UpgradePanel onBuy={handleBuy} />
       )}
+      {away && <AwayModal report={away} onCollect={dismissAway} />}
       {toast && (
         <Toast
           key={toast.key}

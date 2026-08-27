@@ -23,6 +23,8 @@ import {
   WINTER_PENALTY,
 } from '../content/balance';
 import { RAKE_ID } from '../content/upgrades';
+import { CANOPY_OFFLINE_RATE, OFFLINE_MIN_SECONDS } from '../content/offline';
+import { OFFLINE_SOURCE } from './offline';
 import {
   CEREMONY_SECONDS,
   FOREST_PRODUCTION_BONUS,
@@ -1398,7 +1400,9 @@ describe('rings', () => {
     expect(sim.state.rings).toBe(3);
 
     const events = sim.drainSeasonEvents().filter((event) => event.kind === 'ring');
-    expect(events.reduce((total, event) => total + (event.kind === 'ring' ? event.rings : 0), 0)).toBe(3);
+    expect(
+      events.reduce((total, event) => total + (event.kind === 'ring' ? event.rings : 0), 0),
+    ).toBe(3);
   });
 
   it('report themselves once, with the running total', () => {
@@ -1682,11 +1686,7 @@ describe('the ground a root is working in', () => {
     expect(rate()).toBeCloseTo(before * DROUGHT_WATER_MULTIPLIER, 9);
 
     // The same drought, measured against a root that reached the rock.
-    const deep = sim.state.modifiers.matching('water', [
-      'root',
-      'soil:rock',
-      'soil:rock/water',
-    ]);
+    const deep = sim.state.modifiers.matching('water', ['root', 'soil:rock', 'soil:rock/water']);
     expect(applyModifiers(new Decimal(1), deep).toNumber()).toBeCloseTo(1, 9);
   });
 });
@@ -1869,9 +1869,7 @@ describe('what prestige keeps and what it gives up', () => {
     expect(sim.state.rings).toBe(3);
     expect(sim.state.discoveries.has('ghostwillow')).toBe(true);
     expect(sim.state.heirlooms.level('seedcase')).toBe(1);
-    expect(sim.state.resources.amount('seeds').toNumber()).toBe(
-      seedsBefore.toNumber() + paid,
-    );
+    expect(sim.state.resources.amount('seeds').toNumber()).toBe(seedsBefore.toNumber() + paid);
   });
 
   it('keeps the rings working — they are still a live multiplier after the reset', () => {
@@ -2243,5 +2241,158 @@ describe('two runs in a row', () => {
     goToSeed(sim);
 
     expect(sim.state.forest.map((tree) => tree.speciesId)).toEqual(['maple', 'pine']);
+  });
+});
+
+describe('offline progress', () => {
+  const HOUR = 3600;
+
+  /**
+   * A tree with roots below and leaves above, and a clock that says the player
+   * left `secondsAgo` seconds ago.
+   *
+   * Both halves matter: the whole rule of being away is that they are paid
+   * differently, so a fixture with only one of them could not tell the
+   * difference between working and broken.
+   */
+  function away(secondsAgo: number): Simulation {
+    const sim = new Simulation();
+    sim.state.resources.add('sap', new Decimal(100_000));
+
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch') as TreeNode;
+    sim.growPart(branch.id, 'leafCluster');
+    sim.growPart(branch.id, 'leafCluster');
+    sim.growPart(sim.state.tree.rootId, 'rootSegment');
+    sim.growPart(sim.state.tree.rootId, 'rootSegment');
+
+    sim.state.lastUpdatedAt = Date.now() - secondsAgo * 1000;
+    return sim;
+  }
+
+  it('says nothing about a 30-second absence', () => {
+    const sim = away(30);
+    const water = sim.state.resources.amount('water').toNumber();
+
+    expect(sim.catchUpOffline()).toBeNull();
+    // Not simulated at all — the balance is exactly where it was left.
+    expect(sim.state.resources.amount('water').toNumber()).toBe(water);
+  });
+
+  it('re-stamps the clock even when it reports nothing', () => {
+    const sim = away(30);
+    const now = Date.now();
+    sim.catchUpOffline(now);
+    // Otherwise a second reload a minute later would count from the first
+    // reload's start and pay for time already dismissed.
+    expect(sim.state.lastUpdatedAt).toBe(now);
+  });
+
+  it('pays two hours of roots in full', () => {
+    const live = away(0);
+    live.tick(1);
+    const waterPerSecond = live.state.resources.perSecond('water').toNumber();
+
+    const sim = away(2 * HOUR);
+    const report = sim.catchUpOffline();
+
+    expect(report).not.toBeNull();
+    if (!report) return;
+    expect(report.plan.capped).toBe(false);
+    expect(report.plan.simulatedSeconds).toBe(2 * HOUR);
+    expect(report.steps).toBe(120);
+
+    const water = report.gains.find((g) => g.resource === 'water');
+    expect(water?.amount.toNumber()).toBeCloseTo(waterPerSecond * 2 * HOUR, 0);
+  });
+
+  it('pays the canopy a quarter over the same span', () => {
+    const live = away(0);
+    live.tick(1);
+    const lightPerSecond = live.state.resources.perSecond('light').toNumber();
+    expect(lightPerSecond).toBeGreaterThan(0);
+
+    const sim = away(2 * HOUR);
+    const report = sim.catchUpOffline();
+    const light = report?.gains.find((g) => g.resource === 'light');
+
+    // A quarter — but only roughly: the sun still rises and sets across those
+    // two hours, so the exact figure is the day cycle's business.
+    const full = lightPerSecond * 2 * HOUR;
+    expect(light?.amount.toNumber()).toBeLessThan(full * CANOPY_OFFLINE_RATE * 1.6);
+    expect(light?.amount.toNumber()).toBeGreaterThan(0);
+  });
+
+  it('caps a twenty-hour absence and says what it threw away', () => {
+    const sim = away(20 * HOUR);
+    const cap = sim.snapshot(0).prestige.offlineCapHours;
+
+    const report = sim.catchUpOffline();
+    expect(report).not.toBeNull();
+    if (!report) return;
+
+    expect(report.plan.capped).toBe(true);
+    expect(report.plan.simulatedSeconds).toBe(cap * HOUR);
+    // To the second: the fixture and the catch-up read the wall clock a
+    // millisecond apart, and that millisecond is not what this test is about.
+    expect(report.plan.forfeitedSeconds).toBeCloseTo((20 - cap) * HOUR, 1);
+  });
+
+  it('never hands back the penalty modifier it borrowed', () => {
+    const sim = away(2 * HOUR);
+    sim.catchUpOffline();
+    expect(sim.state.modifiers.all().some((m) => m.source === OFFLINE_SOURCE)).toBe(false);
+  });
+
+  it('leaves the HUD reading the live rate, not the offline one', () => {
+    const sim = away(2 * HOUR);
+    sim.catchUpOffline();
+    const banked = sim.state.resources.perSecond('light').toNumber();
+
+    // One live tick, then compare: the sun has moved a tenth of a second, so the
+    // two differ slightly — but a rate still carrying the penalty would be four
+    // times smaller, which no amount of sun movement accounts for.
+    sim.tick(0.1);
+    const live = sim.state.resources.perSecond('light').toNumber();
+    expect(banked).toBeGreaterThan(live * 0.9);
+    expect(banked).toBeLessThan(live * 1.1);
+  });
+
+  it('never reports a negative gain', () => {
+    const sim = away(4 * HOUR);
+    const report = sim.catchUpOffline();
+    expect(report?.gains.every((g) => g.amount.gt(0))).toBe(true);
+  });
+
+  it('advances the season and pays the rings a winter owes', () => {
+    const sim = away(0);
+    const year = sim.state.seasonLengthSeconds * 4;
+    sim.state.lastUpdatedAt = Date.now() - year * 1000;
+    // A full year is longer than the cap, so lift it for this one measurement:
+    // the question here is whether a closed winter pays, not how long a cap is.
+    const report = sim.catchUpOffline(Date.now(), OFFLINE_MIN_SECONDS);
+
+    expect(report).not.toBeNull();
+    if (!report) return;
+    // Whatever the cap allowed, the seasons the clock crossed were paid for.
+    expect(sim.state.season.index).toBeGreaterThan(0);
+    expect(report.rings).toBe(sim.state.rings);
+  });
+
+  it('never lets the weather fire while nobody is watching', () => {
+    const sim = away(8 * HOUR);
+    sim.catchUpOffline();
+    expect(sim.state.weather.active).toBeNull();
+  });
+
+  it('advances the symbionts’ clocks', () => {
+    const sim = away(0);
+    // Settle the songbird in by hand: the point here is the clock, not the
+    // conditions, which have their own tests.
+    sim.state.symbionts.arrive(SYMBIONT_BY_ID.songbird, sim.state.elapsedSeconds);
+    sim.state.lastUpdatedAt = Date.now() - 2 * HOUR * 1000;
+
+    const report = sim.catchUpOffline();
+    expect(sim.state.seedFragments).toBeGreaterThan(0);
+    expect(report?.notes.some((n) => n.includes('songbird'))).toBe(true);
   });
 });

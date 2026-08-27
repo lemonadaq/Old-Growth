@@ -15,6 +15,115 @@ Do not refactor unrelated code.
 
 ## Changelog
 
+### 2026-08-27 — STEP 14: Offline progress
+
+Thirteen steps of systems that only run while someone is watching. This one asks
+what the tree does with the other twenty-three hours, and answers it with the
+oldest rule in the game: **the tree rests and the roots work.**
+
+- `src/content/offline.ts` — **new**. The threshold (60 s), the chunk (60 s), the
+  canopy's offline share (0.25), the tag it lands on, and the count-up's 1.5 s.
+- `src/engine/offline.ts` — **new**, and pure throughout: `planOffline` (how much
+  of an absence counts), `offlineSteps` (how it is cut up), `offlineModifiers`
+  (what the canopy works under), `offlineNotes` (what to say about it),
+  `gainBetween`, `formatDuration`.
+- `src/engine/simulation.ts` — `catchUpOffline(now?, minSeconds?)`, and the whole
+  design is that **it drives ordinary ticks**. The season, the sky, the
+  symbionts' clocks, the litter, the lapsing buffs — every one of them advances
+  through exactly the code that advances it while the player is watching. A
+  second implementation that "simulates the same thing faster" is a second
+  implementation to keep in step, and it would drift within two steps.
+  - **The canopy penalty is one revocable modifier on the `canopy` tag**, not a
+    branch in the payout loop. Underground producers carry `OFFLINE_TAG` and not
+    that one, so the rule is expressed by *which producers the modifier can
+    reach*. It is granted in a `try` and revoked in the matching `finally`:
+    leaving it published would quarter the canopy for the rest of the session,
+    and that is a bug that would look like balance.
+  - **Rings are not special-cased.** `updateSeason` pays every boundary the clock
+    crossed, so a winter the tree stood through pays whether anyone watched it.
+  - Per-second rates are re-read *after* the penalty is revoked, so the HUD opens
+    on the tree's real Light/s rather than on a quarter of it.
+- `src/engine/weather.ts` — `update()` gained `allowAny`. STEP 12's `allowStorm`
+  only skipped the storm, so **a drought fired during the first offline test
+  run** — a penalty applied to somebody who was not there to react to it, which
+  is exactly the "never cause losses" line this step is supposed to hold. Weather
+  already *running* when the player left still ends normally; only what has yet
+  to land is skipped, and the schedule rolls on rather than queueing a backlog.
+- `src/ui/AwayModal.tsx` + `.css` — **new**, and the only modal in the game. The
+  gains are **already in the balances** when it opens: the simulation ran, and
+  holding numbers back from their own systems to hand over on a button would be a
+  second source of truth. Collect animates the *count-up* — each row from zero to
+  its total over 1.5 s — and a second press skips it.
+- Tests: **981 pass** (up from 939). New `engine/offline.test.ts` (30) covers the
+  threshold from both sides, the cap at and past its edge, a clock that ran
+  backwards, a `NaN`/`Infinity` elapsed, chunking that sums to exactly what it
+  was given, the penalty's shape and revocability, the never-negative floor, and
+  every note line. `simulation.test.ts` gained 12, including the three the
+  acceptance criteria name — **30 s (no modal), 2 h (roots in full, canopy at a
+  quarter), 20 h (capped)** — plus the penalty never outliving the catch-up, the
+  weather staying away, and the symbionts' clocks advancing.
+- Verified in a real browser (Chromium/Playwright, dev server, harness deleted
+  before commit): a 5 h absence rendered **300 chunks → +1.73K Light, +12.23K
+  Water**, with the season turn, the songbird's 100 fragments and the squirrel's
+  37 nuts written out underneath; Collect counted both rows up and fired its
+  callback. A 20 h absence rendered **capped to 8 h**, its line reading "8h of
+  growing — you were gone 20h". No page errors beyond the pre-existing favicon 404.
+
+**Manual test — how to verify an absence by hand**
+
+Nothing persists yet (STEP 15), so `lastUpdatedAt` cannot be edited in a save
+file. Until it can, either of these works:
+
+1. **In the running game**, from the devtools console before the first frame is
+   awkward — the `Simulation` is held in a React ref. Easiest is to add a
+   temporary line to `App.tsx` immediately before `sim.catchUpOffline()`:
+   `sim.state.lastUpdatedAt = Date.now() - 5 * 3600 * 1000;` — reload, and the
+   modal opens on a five-hour absence. Delete the line afterwards.
+2. **From a test**, which needs no edit at all:
+   `sim.state.lastUpdatedAt = Date.now() - hours * 3600 * 1000; sim.catchUpOffline();`
+   — this is what `simulation.test.ts`'s `away(secondsAgo)` helper does.
+
+Once STEP 15 lands, the intended route is to edit `lastSeen` in the exported save
+and re-import it; this note should be replaced with that.
+
+**Design decisions worth knowing**
+
+- **60-second chunks, not finer.** Every system the catch-up advances is written
+  against elapsed seconds rather than tick counts, so a smaller step buys nothing
+  but arithmetic. Twelve hours is 720 chunks; the same span at the live 100 ms
+  step would be 432,000 and the load would hang.
+- **A broken clock earns nothing.** A negative elapsed (timezone change, NTP
+  correction, a save carried between machines) is treated as zero, and so are
+  `NaN` and `Infinity` — paying out the cap for a corrupt timestamp would turn a
+  broken clock into a reward.
+- **`gainBetween` floors at zero even though nothing offline spends.** The
+  guarantee belongs where the number is produced, not in the memory of whoever
+  later adds a system that *does* spend while away.
+- **The cap is stated, not hidden.** A 20 h absence says "you were gone 20h" next
+  to what it paid. A player who lost eight hours should be told, once, in the
+  quiet voice — that is what makes Tempo's "+4h offline cap" legible as an
+  upgrade rather than as a number in a menu.
+
+**Open TODOs**
+
+- [ ] **The squirrel's cadence is loud over a long absence.** A day is 480 s, so
+      five hours buries 37 nuts and a full 12 h cap buries ~90 — every one of
+      which sprouts a free root segment on the next load. Correct per STEP 11's
+      data and harmless to this step's arithmetic, but it is the first place the
+      offline multiplier makes a per-day payout look different. STEP 19 owns it.
+- [ ] The songbird pays 100 fragments — a whole Seed — in five idle hours, same
+      cause, same owner.
+- [ ] Nothing persists (STEP 15), so `lastUpdatedAt` only ever spans one page
+      session and the modal is unreachable in ordinary play. Everything below the
+      clock is finished and tested; it is one field away from being live.
+- [ ] The count-up runs in the modal's own rows. STEP 16 owns "HUD numbers tween
+      instead of jumping", and when it lands the two should share one tween
+      rather than the modal keeping its own.
+- [ ] `catchUpOffline` is not called again on `visibilitychange`. A tab left open
+      but backgrounded is throttled rather than stopped, so it drifts slowly
+      behind wall-clock time; STEP 15's autosave hooks are the natural place to
+      settle that.
+
 ### 2026-08-27 — STEP 13: Prestige — Go to Seed, Heirlooms, Old Growth forest
 
 Every system so far has made the tree bigger. This is the first one that takes it

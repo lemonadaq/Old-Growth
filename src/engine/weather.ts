@@ -170,8 +170,16 @@ export class WeatherScheduler {
    * Each transition is timestamped with the moment it was *due* rather than with
    * `now`, so a long jump replays the schedule on its own timeline instead of
    * bunching every event onto the first tick back.
+   *
+   * `allowStorm` false lets everything but the storm land — the storm is a
+   * minigame, and one that blew unwatched is only damage. `allowAny` false
+   * suppresses the sky entirely, which is what STEP 14's offline catch-up passes:
+   * a drought nobody could react to is a bill for having closed the tab. Weather
+   * already *running* when the player left still ends normally either way; only
+   * what has yet to land is skipped, and the schedule rolls on rather than
+   * queueing a backlog to dump on the first tick back.
    */
-  update(now: number, random: RandomSource, allowStorm = true): WeatherEvent[] {
+  update(now: number, random: RandomSource, allowStorm = true, allowAny = true): WeatherEvent[] {
     const events: WeatherEvent[] = [];
 
     for (let step = 0; step < MAX_WEATHER_STEPS; step += 1) {
@@ -188,9 +196,9 @@ export class WeatherScheduler {
         const def = WEATHER_BY_ID[pending.id];
         this.announced = null;
 
-        if (def.onlineOnly && !allowStorm) {
-          // The player left between the warning and the gust. The storm blows
-          // itself out unwitnessed and unrecorded — see the module note.
+        if (!allowAny || (def.onlineOnly && !allowStorm)) {
+          // The player left between the warning and the gust. It blows itself
+          // out unwitnessed and unrecorded — see the module note.
           this.rollAt = pending.startsAt + weatherGap(random);
           continue;
         }

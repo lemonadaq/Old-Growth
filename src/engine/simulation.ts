@@ -8,7 +8,8 @@ import { BUFF_BY_ID, LATERAL_SURGE_ID } from '../content/buffs';
 import { GROWTH_RULE_BY_TYPE, type TreeNodeType } from '../content/growth';
 import type { HybridDef } from '../content/hybrids';
 import { DEW_MIN_TAPS, DEW_SECONDS, EXPOSURE_INTERVAL_SECONDS } from '../content/light';
-import { RESOURCE_IDS } from '../content/resources';
+import { OFFLINE_MIN_SECONDS } from '../content/offline';
+import { RESOURCE_IDS, type ResourceId } from '../content/resources';
 import { SPECIES, STARTER_SPECIES_ID } from '../content/species';
 import { SYMBIONTS, SYMBIONT_BY_ID } from '../content/symbionts';
 import { TOTEM_BY_ID } from '../content/totems';
@@ -49,6 +50,16 @@ import {
 } from './light';
 import { litterAmount, litterPosition, type LitterPile } from './litter';
 import { applyModifiers, type Modifier } from './modifiers';
+import {
+  gainBetween,
+  offlineModifiers,
+  offlineNotes,
+  offlineSteps,
+  planOffline,
+  OFFLINE_SOURCE,
+  type OfflineGain,
+  type OfflineReport,
+} from './offline';
 import {
   beginCeremony,
   captureMemory,
@@ -650,7 +661,9 @@ export class Simulation {
    * negotiation.
    */
   updateSymbionts(): string[] {
-    const ctx = symbiontContext(this.state.tree, (resource) => this.state.resources.total(resource));
+    const ctx = symbiontContext(this.state.tree, (resource) =>
+      this.state.resources.total(resource),
+    );
 
     const arrived: string[] = [];
     for (const def of SYMBIONTS) {
@@ -793,7 +806,12 @@ export class Simulation {
       const host = hosts[Math.min(hosts.length - 1, Math.floor(random() * hosts.length))];
       // A squirrel buries acorns, and it took up residence in an oak — so what
       // comes up is oak, whatever the player happens to be planting today.
-      const node = this.state.tree.grow(host.id, 'rootSegment', STARTER_SPECIES_ID, this.state.tick);
+      const node = this.state.tree.grow(
+        host.id,
+        'rootSegment',
+        STARTER_SPECIES_ID,
+        this.state.tick,
+      );
       if (!node) break;
 
       this.state.buriedNuts -= 1;
@@ -923,6 +941,7 @@ export class Simulation {
     const events = this.state.weather.update(
       this.state.elapsedSeconds,
       this.random,
+      !offline,
       !offline,
     );
     if (events.length === 0) return [];
@@ -1225,7 +1244,10 @@ export class Simulation {
 
   /** How close the tree is to maturity, against both gates. */
   prestigeProgress(): PrestigeProgress {
-    return computePrestigeProgress(treeHeight(this.state.tree), this.state.resources.total('light'));
+    return computePrestigeProgress(
+      treeHeight(this.state.tree),
+      this.state.resources.total('light'),
+    );
   }
 
   /** What going to seed right now would pay. */
@@ -1381,9 +1403,7 @@ export class Simulation {
 
     const domains = memoryDomains(heirlooms);
     const remembered =
-      replayed && state.memory && domains.size > 0
-        ? this.replayMemory(state.memory, domains)
-        : 0;
+      replayed && state.memory && domains.size > 0 ? this.replayMemory(state.memory, domains) : 0;
 
     // Loose parts go on *after* the layout: with Memory owned the trunk may
     // already be carrying what the previous run put there, and First Limb should
@@ -1444,11 +1464,7 @@ export class Simulation {
    * Grow a part without charging for it. The Vault's purchases are made in Seeds,
    * and the part is what the Seeds already bought.
    */
-  private growFree(
-    parentId: string,
-    type: TreeNodeType,
-    speciesId: string,
-  ): TreeNode | null {
+  private growFree(parentId: string, type: TreeNodeType, speciesId: string): TreeNode | null {
     return this.state.tree.grow(parentId, type, speciesId, this.state.tick);
   }
 
@@ -1491,8 +1507,7 @@ export class Simulation {
     // the same time: the winters that would suddenly be "behind" the tree were
     // never lived through, and paying rings for them would make the heirloom a
     // way to buy the one multiplier that cannot be bought.
-    this.state.seasonLengthSeconds =
-      SEASON_LENGTH_SECONDS * seasonLengthFactor(heirlooms);
+    this.state.seasonLengthSeconds = SEASON_LENGTH_SECONDS * seasonLengthFactor(heirlooms);
     this.state.season = seasonAt(this.state.elapsedSeconds, this.state.seasonLengthSeconds);
     this.state.seasonIndexSeen = this.state.season.index;
     this.republishSeason();
@@ -1518,6 +1533,86 @@ export class Simulation {
     if (!SYMBIONT_BY_ID[id]) return false;
     this.state.bondSymbiont = id;
     return true;
+  }
+
+  /**
+   * Catch up on the time the player was away for, and report what happened.
+   *
+   * Returns `null` — having simply re-stamped the clock — when they were not
+   * away long enough to be worth a word about it. See {@link OFFLINE_MIN_SECONDS}.
+   *
+   * The catch-up drives **ordinary ticks**. Every system that moves with time —
+   * the season, the sky, the symbionts' clocks, the litter falling, the buffs
+   * lapsing — advances through exactly the code that advances it while the player
+   * is watching, because a second implementation that "simulates the same thing
+   * faster" is a second implementation to keep in step. Two rules make an offline
+   * tick different from a live one, and both are already where they belong:
+   * `TickOptions.offline` keeps the weather from firing (STEP 12), and one
+   * revocable modifier drops the canopy to its offline share (see
+   * `CANOPY_OFFLINE_RATE`).
+   *
+   * Rings are *not* special-cased. A winter that closed while the tab was shut is
+   * a winter the tree stood through, and `updateSeason` pays it because it pays
+   * every season boundary the clock crossed.
+   */
+  catchUpOffline(
+    now: number = Date.now(),
+    minSeconds: number = OFFLINE_MIN_SECONDS,
+  ): OfflineReport | null {
+    const elapsed = (now - this.state.lastUpdatedAt) / 1000;
+    const plan = planOffline(elapsed, offlineCapHours(this.state.heirlooms), minSeconds);
+
+    if (!plan.worthRunning) {
+      // Still re-stamp: a player who reloads twice in a minute must not have the
+      // second reload counted from the first one's start.
+      this.state.lastUpdatedAt = now;
+      return null;
+    }
+
+    const before = {} as Record<ResourceId, Decimal>;
+    for (const id of RESOURCE_IDS) before[id] = new Decimal(this.state.resources.amount(id));
+
+    const ringsBefore = this.state.rings;
+    const fragmentsBefore = this.state.seedFragments;
+    const nutsBefore = this.state.buriedNuts;
+    const litterBefore = this.state.litter.size;
+    const seasonBefore = this.state.season.id;
+
+    for (const modifier of offlineModifiers()) this.state.modifiers.add(modifier);
+
+    const steps = offlineSteps(plan.simulatedSeconds);
+    try {
+      for (const step of steps) this.tick(step, { offline: true });
+    } finally {
+      // In a `finally` because leaving the penalty published would quarter the
+      // canopy for the rest of the session — a bug that would look like balance.
+      this.state.modifiers.removeBySource(OFFLINE_SOURCE);
+    }
+
+    // The rates cached by the last offline tick were measured through the
+    // penalty. Re-read them now it is gone, so the HUD opens on the tree's real
+    // Light/s rather than on a quarter of it for the first tenth of a second.
+    const perSecond = computeProduction(this.state.producers.values(), this.state.modifiers);
+    for (const id of RESOURCE_IDS) this.state.resources.setPerSecond(id, perSecond[id]);
+
+    const gains: OfflineGain[] = [];
+    for (const id of RESOURCE_IDS) {
+      const amount = gainBetween(before[id], this.state.resources.amount(id));
+      if (amount.gt(0)) gains.push({ resource: id, amount });
+    }
+
+    const rings = Math.max(0, this.state.rings - ringsBefore);
+    const notes = offlineNotes({
+      rings,
+      seasonBefore,
+      seasonAfter: this.state.season.def,
+      fragments: this.state.seedFragments - fragmentsBefore,
+      nuts: this.state.buriedNuts - nutsBefore,
+      litter: this.state.litter.size - litterBefore,
+    });
+
+    this.state.lastUpdatedAt = now;
+    return { plan, gains, notes, rings, steps: steps.length };
   }
 
   /** Advance the simulation by one fixed step of `dtSeconds`. */
@@ -1684,7 +1779,9 @@ export class Simulation {
               ),
             }
           : null,
-      pending: pending ? { id: pending.id, inSeconds: Math.max(0, pending.startsAt - elapsed) } : null,
+      pending: pending
+        ? { id: pending.id, inSeconds: Math.max(0, pending.startsAt - elapsed) }
+        : null,
       storm:
         active?.id === 'storm'
           ? {
@@ -1696,14 +1793,12 @@ export class Simulation {
     };
 
     // Cloned: the ground hands out its own records and the engine splices them.
-    const litter: LitterSnapshot[] = this.state.litter
-      .entries()
-      .map((pile) => ({
-        id: pile.id,
-        x: pile.x,
-        amount: new Decimal(pile.amount),
-        spawnedAt: pile.spawnedAt,
-      }));
+    const litter: LitterSnapshot[] = this.state.litter.entries().map((pile) => ({
+      id: pile.id,
+      x: pile.x,
+      amount: new Decimal(pile.amount),
+      spawnedAt: pile.spawnedAt,
+    }));
 
     return {
       resources,

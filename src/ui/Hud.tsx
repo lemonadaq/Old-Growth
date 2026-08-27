@@ -64,6 +64,10 @@ export interface HudProps {
   readonly symbiontsOpen: boolean;
   /** Toggle the Symbionts panel. Mirrors the S hotkey. */
   readonly onToggleSymbionts: () => void;
+  /** Whether the Seed Vault is open. */
+  readonly vaultOpen: boolean;
+  /** Toggle the Seed Vault. Mirrors the V hotkey. */
+  readonly onToggleVault: () => void;
 }
 
 /** React HUD overlay that sits above the full-screen canvas. */
@@ -77,10 +81,13 @@ export function Hud({
   journalOpen,
   onToggleJournal,
   symbiontsOpen,
+  onToggleVault,
+  vaultOpen,
   onToggleSymbionts,
 }: HudProps) {
   const discovered = useGameStore((s) => s.snapshot.species.discovered.length);
   const residents = useGameStore((s) => s.snapshot.symbionts.filter((r) => r.active).length);
+  const prestige = useGameStore((s) => s.snapshot.prestige);
   return (
     <div className="hud">
       <header className="hud-header">
@@ -130,6 +137,29 @@ export function Hud({
           >
             <span aria-hidden>🐝</span> Symbionts
             {residents > 0 && <span className="hud-toggle__badge">{residents}</span>}
+          </button>
+          {/*
+            The Vault is the only toggle that announces itself: maturity is the
+            one milestone the player cannot see on the tree, and a Go to Seed
+            button buried in a panel nobody opened would be a whole system that
+            never happens.
+          */}
+          <button
+            type="button"
+            className={`hud-toggle${prestige.progress.ready ? ' hud-toggle--ready' : ''}`}
+            aria-pressed={vaultOpen}
+            aria-keyshortcuts="V"
+            title="Seed Vault (V) — Heirlooms, the Old Growth forest, and Go to Seed"
+            onClick={onToggleVault}
+          >
+            <span aria-hidden>🌰</span> Vault
+            {prestige.progress.ready ? (
+              <span className="hud-toggle__badge">ready</span>
+            ) : (
+              prestige.forest.length > 0 && (
+                <span className="hud-toggle__badge">{prestige.forest.length}</span>
+              )
+            )}
           </button>
           <SeasonBadge />
           <DaylightGauge />

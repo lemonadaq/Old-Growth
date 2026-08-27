@@ -20,6 +20,7 @@ import { Hud } from './Hud';
 import { Journal } from './Journal';
 import { LeafTooltip } from './LeafTooltip';
 import { PruneTooltip } from './PruneTooltip';
+import { SeedVault } from './SeedVault';
 import { Symbionts } from './Symbionts';
 import { Toast } from './Toast';
 import { Tooltip } from './Tooltip';
@@ -79,6 +80,7 @@ export function App() {
   const [graftMode, setGraftMode] = useState(false);
   const [journalOpen, setJournalOpen] = useState(false);
   const [symbiontsOpen, setSymbiontsOpen] = useState(false);
+  const [vaultOpen, setVaultOpen] = useState(false);
   const [toast, setToast] = useState<DiscoveryToast | null>(null);
   const [hover, setHover] = useState<HoverState | null>(null);
 
@@ -110,7 +112,10 @@ export function App() {
   const toggleJournal = useCallback(
     () =>
       setJournalOpen((open) => {
-        if (!open) setSymbiontsOpen(false);
+        if (!open) {
+          setSymbiontsOpen(false);
+          setVaultOpen(false);
+        }
         return !open;
       }),
     [],
@@ -118,7 +123,21 @@ export function App() {
   const toggleSymbionts = useCallback(
     () =>
       setSymbiontsOpen((open) => {
-        if (!open) setJournalOpen(false);
+        if (!open) {
+          setJournalOpen(false);
+          setVaultOpen(false);
+        }
+        return !open;
+      }),
+    [],
+  );
+  const toggleVault = useCallback(
+    () =>
+      setVaultOpen((open) => {
+        if (!open) {
+          setJournalOpen(false);
+          setSymbiontsOpen(false);
+        }
         return !open;
       }),
     [],
@@ -576,6 +595,10 @@ export function App() {
         toggleSymbionts();
         return;
       }
+      if (event.key === 'v' || event.key === 'V') {
+        toggleVault();
+        return;
+      }
       // Zoom from the keyboard, for mice with no pinch gesture to offer.
       if (event.key === '+' || event.key === '=') {
         renderer.zoomBy(ZOOM_STEP);
@@ -647,6 +670,27 @@ export function App() {
           });
         }
 
+        // A tree going to seed is the largest thing that happens in the game,
+        // and the only one the player cannot undo. Drained like the rest: the
+        // ceremony lands inside a tick, and the card celebrating it belongs to
+        // the frame that noticed, not to every frame afterwards.
+        for (const report of sim.drainPrestigeEvents()) {
+          // The camera was framed on a tree that no longer exists.
+          renderer.resetCamera();
+          setToast({
+            title: `🌰 ${report.yield.total} Seed${report.yield.total === 1 ? '' : 's'}`,
+            body:
+              `The old tree stands on the hills now — ${report.forestSize} of them, worth ` +
+              `+${report.forestSize}% to everything the next one makes.` +
+              (report.remembered > 0
+                ? ` ${report.remembered} parts came back from memory.`
+                : ''),
+            glyph: '🌰',
+            color: '#a9c46c',
+            key: now + 4,
+          });
+        }
+
         // Weather announces itself in the sky and in the ear; the banner is
         // driven off the snapshot, so all that is owed here is the cue and the
         // one-off report of what a storm did.
@@ -704,7 +748,7 @@ export function App() {
       simRef.current = null;
       rendererRef.current = null;
     };
-  }, [togglePrune, toggleGraft, toggleJournal, toggleSymbionts]);
+  }, [togglePrune, toggleGraft, toggleJournal, toggleSymbionts, toggleVault]);
 
   // Mirror the canvas modes into the places that cannot read React state: the
   // input handlers (through a ref) and the renderer (which draws the marks).
@@ -743,6 +787,21 @@ export function App() {
     simRef.current?.upgradeSymbiont(id);
   }, []);
 
+  const handleBuyHeirloom = useCallback((id: string) => {
+    simRef.current?.buyHeirloom(id);
+  }, []);
+
+  const handleChooseBond = useCallback((id: string) => {
+    simRef.current?.setBondSymbiont(id);
+  }, []);
+
+  // Committing closes the Vault: the next six seconds are the ceremony, and a
+  // panel of buy buttons over a tree that is coming apart would be the wrong
+  // thing to be looking at.
+  const handleGoToSeed = useCallback(() => {
+    if (simRef.current?.goToSeed()) setVaultOpen(false);
+  }, []);
+
   return (
     <div className="app">
       <canvas
@@ -762,12 +821,20 @@ export function App() {
         onToggleJournal={toggleJournal}
         symbiontsOpen={symbiontsOpen}
         onToggleSymbionts={toggleSymbionts}
+        vaultOpen={vaultOpen}
+        onToggleVault={toggleVault}
       />
       <Workshop onCraft={handleCraft} />
       {journalOpen ? (
         <Journal />
       ) : symbiontsOpen ? (
         <Symbionts onUpgrade={handleSymbiontUpgrade} />
+      ) : vaultOpen ? (
+        <SeedVault
+          onBuyHeirloom={handleBuyHeirloom}
+          onChooseBond={handleChooseBond}
+          onGoToSeed={handleGoToSeed}
+        />
       ) : (
         <UpgradePanel onBuy={handleBuy} />
       )}

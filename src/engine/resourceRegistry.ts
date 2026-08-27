@@ -64,4 +64,19 @@ export class ResourceRegistry {
   setPerSecond(id: ResourceId, rate: Decimal): void {
     this.entries[id].perSecond = rate;
   }
+
+  /**
+   * Set a balance and its lifetime total outright.
+   *
+   * The one write that is not a gain or a spend, and deliberately narrow: it
+   * exists so a prestige can carry Seeds across into a fresh registry with their
+   * lifetime intact, which {@link add} cannot express — adding the balance would
+   * quietly restate the whole lifetime as this run's earnings. STEP 15's loader
+   * wants exactly the same thing for every resource.
+   */
+  restore(id: ResourceId, amount: Decimal, total: Decimal = amount): void {
+    const entry = this.entries[id];
+    entry.amount = new Decimal(amount);
+    entry.total = new Decimal(total);
+  }
 }

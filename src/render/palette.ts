@@ -143,6 +143,27 @@ export const PALETTE = {
   hillFarNight: '#2c3a4a',
   hillNearNight: '#232f3d',
   /**
+   * The Old Growth forest. Only the counter has a colour of its own — every
+   * silhouette is drawn in its own species' foliage, hazed toward `hillNear`, so
+   * the grove is a *record* of what the player planted rather than a row of
+   * identical marks.
+   */
+  /* Opaque, and faded with `globalAlpha` at the draw: it is cast over by the
+     season like everything else on the ridge, and the blender parses hex and
+     `rgb(...)` but not `rgba(...)`. */
+  forestCount: '#fdf3e0',
+  /**
+   * Going to Seed. The seeds are deliberately the same warm gold a critical tap
+   * throws: the ceremony is the biggest payout in the game, and it should read as
+   * one. The dim is near-black rather than a colour — the world is not turning
+   * a shade, it is going quiet.
+   */
+  ceremonyDim: 'rgba(10, 8, 6, 0.55)',
+  ceremonySeed: '#ffd27a',
+  ceremonyGlow: 'rgba(255, 226, 150, 0.45)',
+  ceremonyGlowEdge: 'rgba(255, 226, 150, 0)',
+  ceremonyTrailEnd: 'rgba(255, 210, 122, 0)',
+  /**
    * Weather. Rain is drawn as pale streaks rather than blue ones — a blue line
    * over a blue sky is a line nobody sees — and the storm's flash is white light
    * thrown over the whole canvas for a few frames.

@@ -8,11 +8,13 @@ import type { ClickStats } from './clicker';
 import { createComboState, type ComboState } from './combo';
 import { dayCycle, type DayCycle } from './daylight';
 import type { Producer } from './economy';
+import { HeirloomLedger } from './heirlooms';
 import { computeHydration, type HydrationState } from './hydration';
 import { LitterGround } from './litter';
 import { STARTER_SPECIES_ID } from '../content/species';
 import { lightFactorAt, type LeafExposure } from './light';
 import { ModifierSet } from './modifiers';
+import type { Ceremony, ForestTree, PrestigeProgress, SeedYield, TreeMemory } from './prestige';
 import { ResourceRegistry } from './resourceRegistry';
 import { seasonAt, type SeasonCycle, type SeasonEvent } from './seasons';
 import { createSoilMap, type SoilMap } from './soil';
@@ -106,10 +108,43 @@ export interface GameState {
    */
   veinReach: number;
   /**
-   * Seed Fragments the songbird has dropped. A hundred make a Seed at prestige
-   * (STEP 13); until then they simply accrue.
+   * Seed Fragments the songbird has dropped. A hundred make a Seed when the
+   * tree goes to seed; whatever is left over is carried into the next run.
    */
   seedFragments: number;
+  /** Heirlooms bought in the Seed Vault. The one ledger prestige carries over. */
+  heirlooms: HeirloomLedger;
+  /**
+   * Heirloom levels this run has already been handed its run-start grants for.
+   *
+   * The Vault is spent *after* a prestige, not before it, so a Seedcase bought
+   * with the Seed the reset just paid would otherwise sit inert for a whole run
+   * — the one purchase every player makes first, appearing to do nothing. This
+   * is what lets a purchase top the current run up by the difference instead:
+   * `Simulation.grantRunStart` grants `ledger − this` and then records the new
+   * levels here. Reset to zero by prestige, because a fresh run has been given
+   * nothing yet.
+   */
+  runStartLevels: Record<string, number>;
+  /**
+   * Trees that have already gone to seed, oldest first. Each grants +1% to all
+   * production and stands as a silhouette on the hills.
+   */
+  forest: ForestTree[];
+  /**
+   * The tree the last run ended with, for the Memory heirlooms to rebuild.
+   *
+   * Kept whether or not Memory is owned: it costs nothing to record, and a
+   * player who buys Root Map *after* their third prestige should get the tree
+   * they actually left rather than an empty ground and a note apologising.
+   */
+  memory: TreeMemory | null;
+  /** Which creature the Bond heirloom brings, or `null` when none is chosen. */
+  bondSymbiont: string | null;
+  /** The Go to Seed ceremony currently playing, or `null`. */
+  ceremony: Ceremony | null;
+  /** Prestiges completed since the UI last looked. */
+  prestigeEvents: PrestigeReport[];
   /**
    * Nuts the squirrel has buried and not dug up. They sprout into free root
    * segments on the way into the *next* session — see
@@ -255,6 +290,68 @@ export interface LitterSnapshot {
   readonly spawnedAt: number;
 }
 
+/**
+ * What one completed prestige did, for the UI to celebrate.
+ *
+ * Queued rather than flagged on the snapshot, exactly as a season turning is: it
+ * is an event, and a flag would replay its card on every frame afterwards.
+ */
+export interface PrestigeReport {
+  /** What the run paid out. */
+  readonly yield: SeedYield;
+  /** The tree that was given up, as the hills will remember it. */
+  readonly tree: ForestTree;
+  /** How many trees now stand in the forest, this one included. */
+  readonly forestSize: number;
+  /** Seeds in hand once the payout landed. */
+  readonly seeds: Decimal;
+  /** Parts rebuilt from memory on the way into the new run. */
+  readonly remembered: number;
+}
+
+/** One heirloom's purchase state, resolved against the player's Seeds. */
+export interface HeirloomSnapshot {
+  readonly id: string;
+  readonly level: number;
+  /** Seeds the next level costs. */
+  readonly cost: Decimal;
+  readonly affordable: boolean;
+  readonly maxed: boolean;
+  /** Whether the node before it on its branch is owned. */
+  readonly unlocked: boolean;
+}
+
+/** Everything the Seed Vault and the Go to Seed button read. */
+export interface PrestigeSnapshot {
+  /** How close the tree is to being able to seed. */
+  readonly progress: PrestigeProgress;
+  /** What going to seed right now would pay. */
+  readonly yield: SeedYield;
+  /** The ceremony currently playing, or `null`. */
+  readonly ceremony: {
+    /** How far through it is, in `[0, 1]`. */
+    readonly fraction: number;
+    /** Engine seconds left before the tree is gone. */
+    readonly remainingSeconds: number;
+    /** What it will pay when it lands. */
+    readonly yield: SeedYield;
+  } | null;
+  /** Trees standing in the Old Growth forest. */
+  readonly forest: readonly ForestTree[];
+  /** What that forest multiplies all production by. */
+  readonly forestMultiplier: number;
+  /** Every heirloom in Vault order, owned or not. */
+  readonly heirlooms: readonly HeirloomSnapshot[];
+  /** Which creature the Bond heirloom would bring, or `null`. */
+  readonly bondSymbiont: string | null;
+  /** Whether a bond has been bought at all — the picker is dead without one. */
+  readonly bonded: boolean;
+  /** Hours of absence the tree currently pays for (STEP 14 spends this). */
+  readonly offlineCapHours: number;
+  /** Parts the previous tree carried, or `0` when there is nothing remembered. */
+  readonly remembered: number;
+}
+
 /** One upgrade's purchase state, resolved against the player's balance. */
 export interface UpgradeSnapshot {
   readonly id: string;
@@ -308,6 +405,8 @@ export interface GameSnapshot {
   readonly symbionts: readonly SymbiontSnapshot[];
   /** How far out root tips currently feel for ore, as a radius multiplier. */
   readonly veinReach: number;
+  /** Maturity, the Seed Vault, the forest and the ceremony. */
+  readonly prestige: PrestigeSnapshot;
   /** Seed Fragments banked toward a Seed at prestige. */
   readonly seedFragments: number;
   /** Nuts waiting in the ground for next session. */
@@ -372,6 +471,13 @@ export function createInitialState(now: number = Date.now()): GameState {
     symbiontProgress: [],
     veinReach: 1,
     seedFragments: 0,
+    heirlooms: new HeirloomLedger(),
+    runStartLevels: {},
+    forest: [],
+    memory: null,
+    bondSymbiont: null,
+    ceremony: null,
+    prestigeEvents: [],
     buriedNuts: 0,
     symbiontArrivals: [],
     totems: [],

@@ -11,6 +11,7 @@ import type { Producer } from './economy';
 import { HeirloomLedger } from './heirlooms';
 import { computeHydration, type HydrationState } from './hydration';
 import { LitterGround } from './litter';
+import type { BeatStyle, FeatureId, HintAnchor } from '../content/progression';
 import { DEFAULT_SETTINGS, type GameSettings } from '../content/settings';
 import { STARTER_SPECIES_ID } from '../content/species';
 import { lightFactorAt, type LeafExposure } from './light';
@@ -188,6 +189,21 @@ export interface GameState {
    * have I been playing".
    */
   playtimeSeconds: number;
+  /**
+   * Features whose gate has been passed, by id.
+   *
+   * A **latch**, not a reading: `src/engine/progression.ts` measures whether a
+   * gate is open, and this remembers that it once was. Pruning unlocks at eight
+   * parts and the first thing anyone does with the scissors is cut back to six —
+   * a tool that disappeared at that moment would read as the game breaking.
+   *
+   * Reset by prestige along with everything else it does not carry, exactly as
+   * the species unlocks are: they are milestones against *this* run, and a tree
+   * that starts with heirlooms re-earns them in seconds.
+   */
+  features: Set<FeatureId>;
+  /** Gates that opened since the UI last looked, in the order they opened. */
+  featureEvents: FeatureId[];
   /** What the player has chosen about how the game behaves. */
   settings: GameSettings;
 }
@@ -365,6 +381,44 @@ export interface PrestigeSnapshot {
   readonly remembered: number;
 }
 
+/** One feature gate, as the HUD and the Help tab read it. */
+export interface FeatureSnapshot {
+  readonly id: FeatureId;
+  /** Whether the control may be shown at all. Latched — see `GameState.features`. */
+  readonly unlocked: boolean;
+  /** Progress toward the gate, in `[0, 1]`. */
+  readonly fraction: number;
+  /** One line naming what is still needed; empty once it is open. */
+  readonly hint: string;
+}
+
+/** The mark the scripted opening is currently putting on the tree. */
+export interface BeatSnapshot {
+  readonly id: string;
+  readonly line: string;
+  readonly style: BeatStyle;
+}
+
+/** The one contextual bubble waiting to be read. */
+export interface HintSnapshot {
+  readonly id: string;
+  readonly title: string;
+  readonly body: string;
+  readonly anchor: HintAnchor;
+}
+
+/** Everything the UI needs to know about what the player has been shown. */
+export interface ProgressionSnapshot {
+  /** Every gate in table order, latched. */
+  readonly features: readonly FeatureSnapshot[];
+  /** The open gates, for a one-line `has()` at a call site. */
+  readonly unlocked: ReadonlySet<FeatureId>;
+  /** The beat whose window is open, or `null`. */
+  readonly beat: BeatSnapshot | null;
+  /** The next unseen hint whose moment has come, or `null`. */
+  readonly hint: HintSnapshot | null;
+}
+
 /** One upgrade's purchase state, resolved against the player's balance. */
 export interface UpgradeSnapshot {
   readonly id: string;
@@ -428,6 +482,8 @@ export interface GameSnapshot {
   readonly totems: readonly string[];
   /** What the tree is made of, and what the player may plant next. */
   readonly species: SpeciesSnapshot;
+  /** Which systems are open, where the opening beat is, and what to say next. */
+  readonly progression: ProgressionSnapshot;
   /** Lifetime count of successful taps on the tree. */
   readonly clicks: number;
   /** Lifetime count of limbs cut. */
@@ -503,6 +559,8 @@ export function createInitialState(now: number = Date.now()): GameState {
     elapsedSeconds: 0,
     lastUpdatedAt: now,
     playtimeSeconds: 0,
+    features: new Set(),
+    featureEvents: [],
     settings: DEFAULT_SETTINGS,
   };
 }

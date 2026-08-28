@@ -1,0 +1,125 @@
+/*
+ * The hint bubble.
+ *
+ * Absolutely positioned inside the HUD rather than placed in its flow, for one
+ * reason: it must be able to appear and disappear without moving a single
+ * control the player might be reaching for. A tip that shoves the Prune button
+ * two pixels sideways as it lands is worse than useless.
+ */
+.hint {
+  position: absolute;
+  pointer-events: auto;
+  /*
+   * Above the side panels, which are later siblings of the HUD and would
+   * otherwise paint over the bubble — and, worse, swallow the ✕ that dismisses
+   * it. A hint that cannot be dismissed is a hint that has to be waited out.
+   */
+  z-index: 5;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 268px;
+  padding: 9px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--hud-text);
+  background: rgba(28, 20, 12, 0.88);
+  border: 1px solid var(--hud-accent);
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(4px);
+  animation: hint-in 220ms ease-out;
+}
+
+/*
+ * Under the tool buttons, with a caret pointing back up at them — and clear of
+ * the right-hand panel, which starts at `top: 56px; right: 12px` and is 232px
+ * wide. Sitting beside it rather than over it means the Upgrades list stays
+ * readable while the bubble is up.
+ */
+.hint--tools {
+  top: 52px;
+  right: 256px;
+}
+
+/* Above the resource readout, pointing down at the numbers it is about. */
+.hint--resources {
+  bottom: 64px;
+  left: 12px;
+}
+
+.hint::after {
+  content: '';
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: rgba(28, 20, 12, 0.88);
+  border: 1px solid var(--hud-accent);
+  transform: rotate(45deg);
+}
+
+.hint--tools::after {
+  top: -5px;
+  right: 22px;
+  border-bottom: 0;
+  border-right: 0;
+}
+
+.hint--resources::after {
+  bottom: -5px;
+  left: 22px;
+  border-top: 0;
+  border-left: 0;
+}
+
+.hint__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hint__title {
+  font-size: 12px;
+  color: var(--hud-accent);
+}
+
+.hint__body {
+  color: var(--hud-muted);
+}
+
+.hint__close {
+  pointer-events: auto;
+  cursor: pointer;
+  flex: none;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+  color: var(--hud-muted);
+  background: none;
+  border: 0;
+  border-radius: 6px;
+}
+
+.hint__close:hover {
+  color: var(--hud-text);
+  background: rgba(255, 240, 214, 0.12);
+}
+
+@keyframes hint-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* A bubble that slides in is decoration; a bubble that is there is information. */
+@media (prefers-reduced-motion: reduce) {
+  .hint {
+    animation: none;
+  }
+}

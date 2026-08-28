@@ -25,6 +25,8 @@ export interface SettingsProps {
   readonly onSetVolume: (channel: 'master' | 'music' | 'sfx', value: number) => void;
   /** Whether the system has asked for reduced motion. Reported, not settable. */
   readonly reducedMotion: boolean;
+  /** Forget every contextual hint, so the game explains itself again. */
+  readonly onResetHints: () => void;
   /** Produce the export text. Async: it compresses. */
   readonly onExport: () => Promise<string>;
   /** Apply pasted text. Resolves to `null` on success, or a reason it failed. */
@@ -82,6 +84,7 @@ export function Settings({
   onToggleMute,
   onSetVolume,
   reducedMotion,
+  onResetHints,
   onExport,
   onImport,
   onHardReset,
@@ -93,6 +96,7 @@ export function Settings({
   const [importText, setImportText] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
   const [resetPhrase, setResetPhrase] = useState('');
+  const [hintsReset, setHintsReset] = useState(false);
 
   const handleExport = async () => {
     const text = await onExport();
@@ -165,6 +169,31 @@ export function Settings({
           </p>
         </section>
       )}
+
+      {/*
+        Hints are shown once and then never again, which is the only thing that
+        makes them worth reading — and the only thing that makes an undo
+        necessary. Somebody dismissed the one about grafting while reaching for
+        the trunk, and there has to be a way back that is not "start a new save".
+      */}
+      <section className="settings__block">
+        <h3 className="settings__heading">Hints</h3>
+        <p className="settings__note">
+          Contextual bubbles appear once each, when the thing they are about first becomes possible.
+          The Journal’s Help tab has all of it in one place, whenever you want it.
+        </p>
+        <button
+          type="button"
+          className="settings__button"
+          onClick={() => {
+            onResetHints();
+            setHintsReset(true);
+          }}
+        >
+          Show hints again
+        </button>
+        {hintsReset && <p className="settings__note">Cleared — the game will explain itself.</p>}
+      </section>
 
       <section className="settings__block">
         <h3 className="settings__heading">Save</h3>

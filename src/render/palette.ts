@@ -188,6 +188,16 @@ export const PALETTE = {
   litter: '#c08a3a',
   litterDark: '#96682a',
   litterRim: 'rgba(253, 243, 224, 0.35)',
+  /**
+   * The opening beats. Warm gold, the same family as the combo meter and a
+   * critical tap: everything in the game that means *press this* is already this
+   * colour, and a tutorial mark in a colour of its own would read as a different
+   * game's interface laid over this one.
+   */
+  beatRing: 'rgba(255, 210, 122, 0.9)',
+  beatRingSoft: 'rgba(255, 210, 122, 0.2)',
+  beatPanel: 'rgba(28, 20, 12, 0.82)',
+  beatText: '#fdf3e0',
 } as const;
 
 /** Fraction of the canvas height occupied by sky (above the soil line). */

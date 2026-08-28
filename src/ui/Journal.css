@@ -172,3 +172,104 @@
   color: var(--hud-muted);
   opacity: 0.8;
 }
+
+/*
+ * The tabs (STEP 17). Two of them, and they sit inside the panel rather than
+ * above it: the Journal is one sheet of paper with two things written on it, not
+ * two panels sharing a corner of the screen.
+ */
+.journal__tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.journal__tab {
+  pointer-events: auto;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 12px;
+  color: var(--hud-muted);
+  background: rgba(253, 243, 224, 0.06);
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+}
+
+.journal__tab:hover {
+  color: var(--hud-text);
+  border-color: var(--hud-accent);
+}
+
+.journal__tab[aria-selected='true'] {
+  color: var(--hud-accent);
+  border-color: var(--hud-accent);
+  background: rgba(255, 210, 122, 0.1);
+}
+
+.journal__help {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.journal__help-lede {
+  margin: 0;
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.45;
+  color: var(--hud-muted);
+}
+
+.journal__help-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.journal__help-topic {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: rgba(253, 243, 224, 0.05);
+  border-left: 3px solid var(--hud-accent);
+  border-radius: 6px;
+}
+
+/* A system that has not arrived yet is dimmed, not hidden: Help answers "what
+   does this game contain", and that question includes the parts you have not
+   reached. */
+.journal__help-topic--locked {
+  border-left-color: var(--hud-border);
+  opacity: 0.72;
+}
+
+.journal__help-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--hud-text);
+}
+
+.journal__help-open {
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #2a1d10;
+  background: var(--hud-accent);
+  border-radius: 8px;
+}
+
+.journal__help-body {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--hud-muted);
+}

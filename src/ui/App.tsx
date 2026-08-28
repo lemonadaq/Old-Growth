@@ -35,6 +35,7 @@ import { UpgradePanel } from './UpgradePanel';
 import { Workshop } from './Workshop';
 import { audio, type AudioVolumes } from './audio';
 import { MUTE_HOTKEY, WEATHER_CUE } from '../content/audio';
+import { ROOT_REVEAL_BODY, ROOT_REVEAL_TITLE } from '../content/progression';
 import { DEFAULT_SETTINGS } from '../content/settings';
 import { watchReducedMotion } from './motion';
 import { attachTreeInput } from './treeInput';
@@ -249,6 +250,23 @@ export function App() {
     },
     [applyVolumes],
   );
+
+  /**
+   * Mark a hint read, and write it down on the spot.
+   *
+   * The autosave would carry it within thirty seconds, but "the game explained
+   * the scissors to me twice" is exactly the kind of small broken promise a
+   * player remembers, and a hard tab close inside that window would produce it.
+   */
+  const handleDismissHint = useCallback((id: string) => {
+    if (simRef.current?.dismissHint(id)) saveRef.current?.();
+  }, []);
+
+  /** Let the game explain itself again from the beginning. */
+  const handleResetHints = useCallback(() => {
+    simRef.current?.resetHints();
+    saveRef.current?.();
+  }, []);
 
   /** Uproot everything: the state and both storage keys. */
   const handleHardReset = useCallback(() => {
@@ -777,12 +795,15 @@ export function App() {
         handleToggleMute();
         return;
       }
+      // A hotkey for a tool the player does not have yet is a way into a mode
+      // with no button, no tooltip and no explanation. The gate is the same one
+      // the HUD draws from, asked of the same simulation.
       if (event.key === 'p' || event.key === 'P') {
-        togglePrune();
+        if (sim.hasFeature('pruning')) togglePrune();
         return;
       }
       if (event.key === 'g' || event.key === 'G') {
-        toggleGraft();
+        if (sim.hasFeature('grafting')) toggleGraft();
         return;
       }
       if (event.key === 'j' || event.key === 'J') {
@@ -794,11 +815,11 @@ export function App() {
         return;
       }
       if (event.key === 's' || event.key === 'S') {
-        toggleSymbionts();
+        if (sim.hasFeature('symbionts')) toggleSymbionts();
         return;
       }
       if (event.key === 'v' || event.key === 'V') {
-        toggleVault();
+        if (sim.hasFeature('prestige')) toggleVault();
         return;
       }
       // Zoom from the keyboard, for mice with no pinch gesture to offer.
@@ -823,8 +844,30 @@ export function App() {
         syncTree(now);
         const snapshot = sim.snapshot(now);
         syncSpecies(snapshot);
+        // The opening beat is a mark on the trunk, so the renderer owns drawing
+        // it; which beat is live is a reading of the run, so the engine owns
+        // deciding it. Pushed per frame because it is one field assignment, and
+        // because the window can shut inside a single tap.
+        renderer.setBeat(snapshot.progression.beat);
         gameStore.getState().setSnapshot(snapshot);
         renderer.draw(snapshot, alpha, now);
+
+        // A gate opening is the game getting larger, and exactly one of them is
+        // worth stopping for: the ground. The camera dips once to show the
+        // player what is under their tree — and if it will not (they have taken
+        // the camera themselves, or asked for less motion), the card still says
+        // what happened, because the event is the unlock and not the pan.
+        for (const feature of sim.drainFeatureEvents()) {
+          if (feature !== 'roots') continue;
+          renderer.lookBelow(now);
+          setToast({
+            title: ROOT_REVEAL_TITLE,
+            body: ROOT_REVEAL_BODY,
+            glyph: '🌱',
+            color: '#a8875e',
+            key: now + 5,
+          });
+        }
 
         // The pad and the weather loops are driven off the snapshot rather than
         // off events, because they are *states* rather than things that happen:
@@ -1079,6 +1122,7 @@ export function App() {
         onToggleVault={toggleVault}
         settingsOpen={settingsOpen}
         onToggleSettings={toggleSettings}
+        onDismissHint={handleDismissHint}
       />
       <Workshop onCraft={handleCraft} />
       {journalOpen ? (
@@ -1097,6 +1141,7 @@ export function App() {
           onToggleMute={handleToggleMute}
           onSetVolume={handleSetVolume}
           reducedMotion={reducedMotion}
+          onResetHints={handleResetHints}
           onExport={handleExport}
           onImport={handleImport}
           onHardReset={handleHardReset}

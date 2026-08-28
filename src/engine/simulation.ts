@@ -9,6 +9,7 @@ import { GROWTH_RULE_BY_TYPE, type TreeNodeType } from '../content/growth';
 import type { HybridDef } from '../content/hybrids';
 import { DEW_MIN_TAPS, DEW_SECONDS, EXPOSURE_INTERVAL_SECONDS } from '../content/light';
 import { OFFLINE_MIN_SECONDS } from '../content/offline';
+import { FEATURES, FEATURE_BY_ID, type FeatureId } from '../content/progression';
 import { RESOURCE_IDS, type ResourceId } from '../content/resources';
 import { SPECIES, STARTER_SPECIES_ID } from '../content/species';
 import { SYMBIONTS, SYMBIONT_BY_ID } from '../content/symbionts';
@@ -78,6 +79,13 @@ import {
   type SeedYield,
   type TreeMemory,
 } from './prestige';
+import {
+  activeBeat,
+  featureProgress,
+  nextHint,
+  requirementProgress,
+  type ProgressionContext,
+} from './progression';
 import { deadwoodFor, quotePrune, woodVolume, type PruneQuote } from './prune';
 import { quoteGraft, type GraftAssessment, type GraftQuote } from './graft';
 import type { RandomSource } from './rng';
@@ -124,6 +132,7 @@ import {
 import {
   createInitialState,
   type BuffSnapshot,
+  type FeatureSnapshot,
   type GameSnapshot,
   type GameState,
   type HeirloomSnapshot,
@@ -131,6 +140,7 @@ import {
   type LitterSnapshot,
   type PrestigeReport,
   type PrestigeSnapshot,
+  type ProgressionSnapshot,
   type Resources,
   type SpeciesSnapshot,
   type SymbiontSnapshot,
@@ -274,6 +284,9 @@ export class Simulation {
     this.updateHydration();
     this.updateLightExposure();
     this.updateSymbionts();
+    // Last, because the gates are measured against everything above them — and
+    // silently, because a save being read is not a discovery being made.
+    this.updateFeatures(false);
   }
 
   /** Register (or replace) a producer by its id. */
@@ -351,15 +364,115 @@ export class Simulation {
     return dew;
   }
 
+  /* ---------------------------------------------------------- progression */
+
+  /**
+   * The live state the gating table is measured against.
+   *
+   * Every reading is either a counter the tree already keeps or a value the tick
+   * has just cached — `symbiontProgress` is refreshed by `updateSymbionts`, and
+   * the maturity gate reuses the same `prestigeProgress` the HUD quotes. Nothing
+   * here walks the graph twice.
+   */
+  private progressionContext(): ProgressionContext {
+    const tree = this.state.tree;
+    return {
+      lifetime: (resource) => this.state.resources.total(resource).toNumber(),
+      // The trunk is not something the player grew, exactly as the species
+      // milestones count it.
+      parts: Math.max(0, tree.size - 1),
+      partsOfType: (type) => tree.countOfType(type),
+      speciesAvailable: this.unlockedSpecies().length,
+      speciesOnTree: tree.countBySpecies().size,
+      symbiontInterest: this.state.symbiontProgress.reduce(
+        (best, row) => Math.max(best, row.fraction),
+        0,
+      ),
+      maturity: this.prestigeProgress().fraction,
+      forest: this.state.forest.length,
+    };
+  }
+
+  /**
+   * Latch every gate whose measurement now holds, and queue what opened.
+   *
+   * `announce` is what separates a gate opening *now* from one that was already
+   * open when the game was read off disk: a load latches silently, because the
+   * camera swinging down to show a player the roots they dug last week would be
+   * the game mistaking its own start-up for a discovery.
+   */
+  updateFeatures(announce = true): FeatureId[] {
+    const ctx = this.progressionContext();
+    const opened: FeatureId[] = [];
+
+    for (const def of FEATURES) {
+      if (this.state.features.has(def.id)) continue;
+      if (!requirementProgress(def.requirement, ctx).met) continue;
+      this.state.features.add(def.id);
+      opened.push(def.id);
+    }
+
+    if (announce && opened.length > 0) this.state.featureEvents.push(...opened);
+    return opened;
+  }
+
+  /** Take the gates nobody has reacted to yet. Drained, like every other event. */
+  drainFeatureEvents(): FeatureId[] {
+    if (this.state.featureEvents.length === 0) return [];
+    return this.state.featureEvents.splice(0, this.state.featureEvents.length);
+  }
+
+  /**
+   * Whether a system is open to the player. The one question every caller asks.
+   *
+   * The latch first, and the live measurement behind it. Both, rather than only
+   * the latch, because the latch is refreshed on a clock and on player actions —
+   * and a tap that crosses 150 lifetime Sap opens the ground *at that tap*, not
+   * up to a tenth of a second later when the next tick gets round to noticing. A
+   * gate that answered "no" to the menu the player opened in between would be a
+   * gate that flickers.
+   */
+  hasFeature(id: FeatureId): boolean {
+    if (this.state.features.has(id)) return true;
+    const def = FEATURE_BY_ID[id];
+    return def !== undefined && requirementProgress(def.requirement, this.progressionContext()).met;
+  }
+
+  /**
+   * Mark a contextual hint as read, so it is never shown again.
+   *
+   * Written into the settings rather than the tree, because it is a fact about
+   * the player: going to seed does not un-tell someone what the scissors do.
+   */
+  dismissHint(id: string): boolean {
+    if (this.state.settings.seenHints.includes(id)) return false;
+    this.state.settings = {
+      ...this.state.settings,
+      seenHints: [...this.state.settings.seenHints, id],
+    };
+    return true;
+  }
+
+  /** Forget every hint, so the game explains itself again. Settings offers this. */
+  resetHints(): void {
+    this.state.settings = { ...this.state.settings, seenHints: [] };
+  }
+
   /**
    * Everything growable on `nodeId` right now, priced against the player's
    * balances. This is what the radial grow menu renders.
+   *
+   * Parts belonging to a system that has not opened yet are **not offered**. The
+   * gate is applied here rather than inside `priceGrowthOptions` because it is a
+   * fact about the player's progress rather than about the tree's shape: the
+   * graph's own rules answer "may a root attach here", and that answer must stay
+   * the same for the heirloom that plants one for free.
    */
   growthOptions(
     nodeId: string,
     speciesId: string = this.state.plantingSpecies,
   ): PricedGrowthOption[] {
-    return priceGrowthOptions(
+    const priced = priceGrowthOptions(
       this.state.tree,
       nodeId,
       this.state.resources,
@@ -368,6 +481,8 @@ export class Simulation {
       speciesId,
       this.state.veinReach,
     );
+    if (this.hasFeature('roots')) return priced;
+    return priced.filter((option) => option.rule.domain !== 'root');
   }
 
   /**
@@ -438,6 +553,9 @@ export class Simulation {
     if (!SPECIES.some((def) => def.id === speciesId)) return null;
 
     const rule = GROWTH_RULE_BY_TYPE[childType];
+    // The same gate the menu applies, enforced at the till. A purchase that only
+    // the menu refuses is a purchase a hotkey or a stale click can still make.
+    if (rule.domain === 'root' && !this.hasFeature('roots')) return null;
     // Priced through the modifiers *and* the species, so a cheap species and a
     // growth discount both reach the till and not just the menu label.
     const cost = partCost(childType, tree.countOfType(childType), this.state.modifiers, speciesId);
@@ -470,6 +588,9 @@ export class Simulation {
     // the third blossom brings the bees on the purchase rather than up to a
     // tenth of a second later.
     this.updateSymbionts();
+    // And the eighth part hands over the scissors on the purchase, for the same
+    // reason: the menu is about to be re-priced and re-drawn from this state.
+    this.updateFeatures();
     return node;
   }
 
@@ -519,6 +640,9 @@ export class Simulation {
     // has not arrived yet, and the panel should not read a tenth of a second
     // stale.
     this.updateSymbionts();
+    // A cut never *closes* a gate — the latch sees to that — but the third one
+    // earns Pine, and a second species is a gate of its own.
+    this.updateFeatures();
     return { quote, removed, surge };
   }
 
@@ -565,6 +689,7 @@ export class Simulation {
     this.updateLightExposure();
     // The scion changed species, and the squirrel counts oak branches.
     this.updateSymbionts();
+    this.updateFeatures();
 
     return { quote, hybrid: quote.hybrid, changed: changed.map((node) => node.id), discovered };
   }
@@ -1340,6 +1465,15 @@ export class Simulation {
     next.soil = old.soil;
     next.rings = old.rings;
     next.discoveries = old.discoveries;
+    // Progression is knowledge, exactly as a discovered hybrid is. A player who
+    // has been handed the scissors has been handed them; making a veteran
+    // re-earn the tutorial's gates on every run — and watch the camera dip to
+    // introduce them to roots for the ninth time — would be a reset of the one
+    // thing a reset should never touch.
+    next.features = new Set(old.features);
+    // The mixer, the mute and the hints the player has already read. Carried for
+    // the same reason: they are facts about the person, not about the tree.
+    next.settings = old.settings;
     next.heirlooms = old.heirlooms;
     next.bondSymbiont = old.bondSymbiont;
     next.forest = [...old.forest, tree];
@@ -1693,6 +1827,10 @@ export class Simulation {
     this.collectSymbiontPayouts();
     this.updateDaylight();
     this.updateHydration();
+    // Gates last: they are measured against everything the tick has just moved,
+    // and the one that matters most — the ground opening at 150 lifetime Sap —
+    // is tripped by tapping, which happens outside the tick entirely.
+    this.updateFeatures();
 
     if (this.state.elapsedSeconds >= this.state.nextExposureAt) {
       this.state.nextExposureAt = this.state.elapsedSeconds + EXPOSURE_INTERVAL_SECONDS;
@@ -1752,6 +1890,32 @@ export class Simulation {
       counts: new Map(this.state.tree.countBySpecies()),
       discovered: [...this.state.discoveries],
       grafts: this.state.grafts,
+    };
+
+    // Measured once and read three ways: the gates the HUD draws buttons from,
+    // the beat the canvas marks the trunk with, and the one bubble waiting to be
+    // read. All three are the same reading of the same run.
+    const progressCtx = this.progressionContext();
+    const seenHints = new Set(this.state.settings.seenHints);
+    const features: FeatureSnapshot[] = FEATURES.map((def) => {
+      const measured = featureProgress(def, progressCtx);
+      const latched = this.state.features.has(def.id);
+      return {
+        id: def.id,
+        // The latch wins over the measurement, never the other way round: a gate
+        // is opened by the reading and kept open by the record.
+        unlocked: latched,
+        fraction: latched ? 1 : measured.fraction,
+        hint: latched ? '' : measured.hint,
+      };
+    });
+    const beat = activeBeat(progressCtx);
+    const hint = nextHint(progressCtx, seenHints);
+    const progression: ProgressionSnapshot = {
+      features,
+      unlocked: new Set(this.state.features),
+      beat: beat ? { id: beat.id, line: beat.line, style: beat.style } : null,
+      hint: hint ? { id: hint.id, title: hint.title, body: hint.body, anchor: hint.anchor } : null,
     };
 
     const elapsed = this.state.elapsedSeconds;
@@ -1885,6 +2049,7 @@ export class Simulation {
       // Copied, not shared: the engine pushes onto this array in place.
       totems: [...this.state.totems],
       species,
+      progression,
       clicks: this.state.clicks,
       prunes: this.state.prunes,
       treeRevision: this.state.tree.revision,

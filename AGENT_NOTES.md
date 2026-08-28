@@ -15,6 +15,138 @@ Do not refactor unrelated code.
 
 ## Changelog
 
+### 2026-08-28 — STEP 17: Onboarding and feature gating
+
+Sixteen steps of systems, all of them switched on at once for a player who has
+never seen any of them. This one decides what a new tree shows and when — and
+does it without a single modal, because the whole game is a canvas you tap and a
+dialog box in front of it is a game you are not playing.
+
+- `src/content/progression.ts` — **new, and it is the step**. Three tables and
+  one shared vocabulary. `FEATURES` is the gating table the prompt asked for and
+  it is genuinely the only opinion in the codebase about when a system exists:
+  the HUD asks it whether to draw a button, `App` asks it whether a hotkey does
+  anything, `Simulation.growPart` asks it whether a root may be bought, and the
+  Journal's Help tab asks it what is still missing. `BEATS` is the scripted
+  opening. `HINTS` is the bubbles. Requirements are **declarations measured by
+  the engine**, in deliberately the same shape as `SpeciesUnlock` — a player
+  cannot tell "birch is available" from "pruning is available", so the two are
+  not written in different languages.
+- `src/engine/progression.ts` — the evaluator, pure and taking a context rather
+  than the simulation, the same way `prestige.ts` does. `any` reports the _best_
+  of its parts rather than their sum, because it is a choice of routes to one
+  door and adding two unrelated routes would claim progress nobody can spend.
+- **Measured open, remembered open.** `GameState.features` is a latch, saved with
+  everything else. Pruning unlocks at eight parts and the first thing anybody does
+  with the scissors is cut back to six; a tool that vanished at that moment would
+  read as the game breaking rather than as a rule about the game. `hasFeature`
+  checks the latch _and_ the live measurement, so the tap that crosses 150
+  lifetime Sap opens the ground **on that tap** rather than up to a tick later.
+- **The root gate is enforced at the till, not only in the menu.**
+  `growthOptions` filters root-domain options out and `growPart` refuses them —
+  a purchase only the menu declines is a purchase a stale click can still make.
+  The graph's own rules are untouched, so the heirloom that plants a free root
+  still can. That distinction is why the gate lives in `Simulation` rather than
+  in `priceGrowthOptions`.
+- `src/render/onboarding.ts` + the renderer — the two beats, drawn **on the tree**:
+  a ring that breathes around the trunk until it has been tapped, then an arrow
+  leaning at the same trunk until something has been grown. A box has to describe
+  where to press; a ring simply _is_ where to press. Both vanish while the ring of
+  buds is open, because an open menu is the thing they were asking for.
+- **The camera's one-off look underground**, `Renderer.lookBelow`: down, a beat of
+  stillness, and back, with the auto-fit still tracking underneath so there is
+  nothing to unwind. It refuses in two cases and returns `false` so the caller can
+  say in words what it would have shown — when the player has taken the camera
+  themselves (STEP 4's promise: from that moment the framing is theirs) and under
+  `prefers-reduced-motion`. The card fires either way, because the event is the
+  unlock and not the pan.
+- `src/ui/Hint.tsx` + `.css` — one bubble at a time, in table order, dismissed by
+  its ✕ or by a fourteen-second timeout, and then never again. Absolutely
+  positioned and beside the right-hand panel rather than under it, so it can
+  neither move a control the player is reaching for nor have its ✕ swallowed by
+  the Upgrades list.
+- `src/content/help.ts` + `src/ui/Help.tsx` — the Journal's second tab. Eight
+  always-on mechanics written from inside the world, then the gated systems read
+  **straight out of the gating table**, locked ones included with the same line
+  and the same progress bar the gate would show. Nothing is described twice.
+- `src/content/settings.ts` — `seenHints`, defaulted and de-duplicated on the way
+  in, so a save written by STEP 16 loads into this build with nothing explained
+  twice and no migration.
+- Tests: **1151 pass** (up from 1098). New `engine/progression.test.ts` (30) and
+  `render/onboarding.test.ts` (11), plus fourteen in `simulation.test.ts` — the
+  gate refusing a root and spending nothing, the latch surviving a cut back below
+  eight parts, a gate announced exactly once, a **loaded save announcing nothing**,
+  the beats opening and shutting, hints surviving a save round-trip, and the
+  acceptance criterion as an assertion: a fresh save reaching roots inside four
+  minutes of ordinary tapping.
+- Verified in a real browser (Chromium/Playwright, production build). A fresh save
+  opens with **three buttons** — Journal, Settings, the debug producer — and a
+  pulsing "Tap the trunk" on the trunk. Fourteen taps turn it into the arrow. The
+  ring of buds offers **one dial, `BR 12`**, with no root anywhere on it. The
+  first branch brings the Symbionts button and the first bubble. At 150 lifetime
+  Sap the card **"Something stirs below…"** lands, the camera dips to the clay and
+  comes back, and the same menu now offers **`BR 13.8` and `RT 9.6`**. `P` and `G`
+  do nothing while their tools are locked. Help lists 15 entries, 5 of them
+  locked. Dismissing a bubble wrote `seenHints: ["symbionts"]` into the save and it
+  did not return; "Show hints again" brought it back. A reload came back with
+  `features: ["seasons","roots"]` and **no toast**. Under an emulated
+  `prefers-reduced-motion: reduce` the card still landed and the camera did not
+  move. No page errors in any run.
+
+**Design decisions worth knowing**
+
+- **Gated tools are absent, not greyed.** A greyed button says "this exists and
+  you may not have it" without saying why. A row of three buttons that becomes
+  four is simply the game getting bigger. The Vault is the deliberate exception —
+  it appears at 75% maturity wearing its own progress, because the last quarter of
+  a run is exactly when the player should be weighing whether to end it, and they
+  cannot weigh a choice nobody told them was coming.
+- **Grafting is gated on species _on the tree_, not species unlocked.** A graft
+  joins two woods that are actually growing, so gating on what is merely available
+  would hand over a knife with nothing to cut.
+- **The Vault's gate is sticky past the first prestige** (`any` of maturity or a
+  forest). It is also where Seeds are spent, and hiding it from a player holding
+  Seeds would hide the point of having earned them.
+- **Progression and settings now survive a prestige.** Features are knowledge,
+  exactly as a discovered hybrid is; making a veteran re-earn the tutorial's gates
+  every run — and watch the camera introduce them to roots for the ninth time —
+  would reset the one thing a reset should not touch. Carrying `settings` at the
+  same time fixed a **pre-existing bug**: `commitPrestige` built a fresh state and
+  never copied them, so every Go to Seed since STEP 16 silently reset the mixer
+  and the mute.
+- **A hint is marked read whether it was dismissed or timed out.** It was shown;
+  that is what "at most once" means. And the write happens on the spot rather than
+  at the next autosave, because "the game explained the scissors to me twice" is
+  exactly the small broken promise a player remembers.
+- **The squirrel wants one oak branch**, which means the Symbionts gate at 50%
+  interest opens on the first branch, alongside the squirrel's own arrival card.
+  The bubble is worded to be true either way rather than the gate being moved:
+  STEP 11 owns that condition.
+
+**Open TODOs**
+
+- [ ] **The scripted opening asks for a leaf before roots exist, and one unwatered
+      leaf throttles every tap to the hydration floor (×0.25).** A tapping-only run
+      reaches the ground in ~73 s; the same run with a branch and a leaf takes ~69 s
+      of tapping _at three taps a second_ — roughly three times the taps for the
+      same Sap. It resolves itself at the root reveal and it is arguably the game
+      teaching what roots are for, but STEP 19 should decide whether `HYDRATION_MIN`
+      is the right number for a tree that is not _allowed_ roots yet.
+- [ ] The species picker's visibility is still decided by the renderer against
+      `PICKER_MIN_SPECIES` (which `progression.ts` imports and re-declares as a
+      gate). One constant, two readers — correct today, and worth collapsing into
+      the snapshot's gate when STEP 18 reworks the menu.
+- [ ] Beats are marks on the trunk only. Nothing yet points at the Workshop, the
+      litter piles, or the storm anchor, and the brace minigame in particular is
+      fifteen seconds that a first-timer will simply miss.
+- [ ] `HINT_DURATION_MS` is one number for every bubble. The Light card is two
+      lines and the grafting one is four; STEP 18's accessibility pass should
+      probably scale it by length, and honour a "never auto-dismiss" preference.
+- [ ] The Help tab is a wall of prose with no search and no links into the thing
+      it describes. Fine at eight topics; not fine at twenty.
+- [ ] Nothing gates the **debug producer button**, which is still in the HUD of a
+      brand-new save. STEP 20 owns the release build and should take it out.
+
 ### 2026-08-27 — STEP 16: Audio and game feel
 
 Fifteen steps of a game that was silent apart from one synthesised snip. This

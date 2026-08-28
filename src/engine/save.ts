@@ -2,6 +2,7 @@ import Decimal from 'break_infinity.js';
 import { SEASON_LENGTH_SECONDS } from '../content/balance';
 import { GROWTH_RULE_BY_TYPE, type TreeNodeType } from '../content/growth';
 import { RESOURCE_IDS, type ResourceId } from '../content/resources';
+import { FEATURE_BY_ID, type FeatureId } from '../content/progression';
 import { ENGINE_VERSION, SAVE_VERSION } from '../content/save';
 import { DEFAULT_SETTINGS, normaliseSettings, type GameSettings } from '../content/settings';
 import { SPECIES, STARTER_SPECIES_ID } from '../content/species';
@@ -120,6 +121,16 @@ export interface SaveData {
   readonly totems: readonly string[];
   /** Hybrid ids ever made. */
   readonly discoveries: readonly string[];
+  /**
+   * Feature gates already passed.
+   *
+   * Stored rather than re-measured because it is a latch: a player who unlocked
+   * pruning at eight parts and then cut back to six must not open their save to
+   * find the scissors gone. A file written before this field existed simply
+   * re-measures on load, which is right — every gate they had passed is still
+   * passed, and `Simulation.hydrate` latches them silently.
+   */
+  readonly features: readonly string[];
   /** The Old Growth forest, oldest first. */
   readonly forest: readonly ForestTree[];
   /** The tree the last run ended with, for the Memory heirlooms. */
@@ -224,6 +235,7 @@ export function captureSave(state: GameState, now: number = Date.now()): SaveEnv
     })),
     totems: [...state.totems],
     discoveries: [...state.discoveries],
+    features: [...state.features],
     forest: state.forest.map((tree) => ({ ...tree })),
     memory: state.memory
       ? { rootId: state.memory.rootId, parts: state.memory.parts.map((part) => ({ ...part })) }
@@ -527,6 +539,15 @@ export function restoreState(data: SaveData): GameState | null {
 
   state.discoveries = new Set(
     array(raw.discoveries).filter((id): id is string => typeof id === 'string'),
+  );
+
+  // An id the game no longer has is dropped rather than kept: unlike a hint,
+  // which is a note to the player, a feature id is a key to a control, and a key
+  // to a door that was removed is only a way for a `has()` to lie.
+  state.features = new Set(
+    array(raw.features)
+      .filter((id): id is string => typeof id === 'string')
+      .filter((id): id is FeatureId => FEATURE_BY_ID[id as FeatureId] !== undefined),
   );
 
   state.forest = restoreForest(raw.forest);

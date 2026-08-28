@@ -33,6 +33,20 @@ export interface GameSettings {
   readonly musicVolume: number;
   /** Cues and weather loops, as a fraction of master. */
   readonly sfxVolume: number;
+  /**
+   * Contextual hints the player has already been shown.
+   *
+   * Here rather than in the game state because a hint is about the *player*, not
+   * about the tree: someone who has been told what the scissors do has been told,
+   * and going to seed does not un-tell them. It is the one part of progression
+   * that deliberately outlives a run — see `Simulation.commitPrestige`, which
+   * carries the settings across.
+   *
+   * Ids are kept as written even when the game no longer has a hint by that name:
+   * a save that travels back to an older build should not start re-explaining
+   * things, and an unknown id costs a string.
+   */
+  readonly seenHints: readonly string[];
 }
 
 /** What a fresh save starts with. */
@@ -41,6 +55,7 @@ export const DEFAULT_SETTINGS: GameSettings = {
   masterVolume: DEFAULT_VOLUME,
   musicVolume: DEFAULT_VOLUME,
   sfxVolume: DEFAULT_VOLUME,
+  seenHints: [],
 };
 
 /** A volume read out of a save: clamped, and defaulted if it is not a number. */
@@ -65,5 +80,11 @@ export function normaliseSettings(value: unknown): GameSettings {
     masterVolume: volume(raw.masterVolume, DEFAULT_SETTINGS.masterVolume),
     musicVolume: volume(raw.musicVolume, DEFAULT_SETTINGS.musicVolume),
     sfxVolume: volume(raw.sfxVolume, DEFAULT_SETTINGS.sfxVolume),
+    // Duplicates are dropped rather than trusted: the list is only ever asked
+    // "has this been seen", and a file that grew the same id a thousand times
+    // through some future bug should not turn that question into a scan.
+    seenHints: Array.isArray(raw.seenHints)
+      ? [...new Set(raw.seenHints.filter((id): id is string => typeof id === 'string'))]
+      : [...DEFAULT_SETTINGS.seenHints],
   };
 }

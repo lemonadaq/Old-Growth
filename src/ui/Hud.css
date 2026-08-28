@@ -164,3 +164,17 @@
   font-size: 11px;
   color: var(--hud-muted);
 }
+
+/*
+ * The Vault before the tree is ready (STEP 17): present, legible, and plainly
+ * not the thing to press yet. Dimmed rather than disabled, because it still
+ * opens — the Heirlooms and the forest are in there, and only Go to Seed itself
+ * is waiting on maturity.
+ */
+.hud-toggle--dim {
+  opacity: 0.72;
+}
+
+.hud-toggle--dim:hover {
+  opacity: 1;
+}

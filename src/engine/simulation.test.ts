@@ -23,6 +23,7 @@ import {
   WINTER_PENALTY,
 } from '../content/balance';
 import { RAKE_ID } from '../content/upgrades';
+import { PRUNE_UNLOCK_PARTS, ROOT_REVEAL_SAP } from '../content/progression';
 import { CANOPY_OFFLINE_RATE, OFFLINE_MIN_SECONDS } from '../content/offline';
 import { OFFLINE_SOURCE } from './offline';
 import {
@@ -257,7 +258,8 @@ describe('growing the tree', () => {
   });
 
   it('offers the trunk’s options priced against the player’s Sap', () => {
-    const sim = withSap(new Simulation(), 20);
+    // Past the root gate (STEP 17), so the menu offers both halves of the tree.
+    const sim = withSap(new Simulation(), 200);
     const options = sim.growthOptions(sim.state.tree.rootId);
 
     const branch = options.find((o) => o.option.type === 'branch');
@@ -2394,5 +2396,199 @@ describe('offline progress', () => {
     const report = sim.catchUpOffline();
     expect(sim.state.seedFragments).toBeGreaterThan(0);
     expect(report?.notes.some((n) => n.includes('songbird'))).toBe(true);
+  });
+});
+
+/*
+ * STEP 17 — progression, onboarding and the gates.
+ *
+ * The rules under test are all one rule read from different sides: a system is
+ * measured into existence and then *stays* in existence. The measurement lives in
+ * `progression.ts` and has its own tests; what is checked here is what the
+ * simulation does with the answer — refuse a purchase, latch a gate, announce it
+ * once, carry it across a prestige, and remember what the player has been told.
+ */
+describe('progression and the gates', () => {
+  /** Tap the trunk `n` times, at a pace a person could actually manage. */
+  function tap(sim: Simulation, n: number, random: RandomSource = createSeededRandom(7)): void {
+    for (let i = 0; i < n; i += 1) sim.click(i * 300, random);
+  }
+
+  it('does not offer the ground to a tree that has not earned it', () => {
+    const sim = new Simulation();
+    const options = sim.growthOptions(sim.state.tree.rootId);
+    expect(options.some((o) => o.rule.domain === 'root')).toBe(false);
+    // The canopy is untouched: this is a gate, not an empty menu.
+    expect(options.some((o) => o.rule.domain === 'canopy')).toBe(true);
+  });
+
+  it('opens the ground at the lifetime Sap the table names', () => {
+    const sim = new Simulation();
+    sim.state.resources.add('sap', new Decimal(ROOT_REVEAL_SAP));
+    expect(
+      sim.growthOptions(sim.state.tree.rootId).some((o) => o.option.type === 'rootSegment'),
+    ).toBe(true);
+  });
+
+  it('refuses a root at the till too, and spends nothing doing it', () => {
+    const sim = new Simulation();
+    sim.state.resources.add('sap', new Decimal(ROOT_REVEAL_SAP - 1));
+    const before = sim.state.resources.amount('sap').toNumber();
+
+    expect(sim.growPart(sim.state.tree.rootId, 'rootSegment')).toBeNull();
+    expect(sim.state.tree.size).toBe(1);
+    expect(sim.state.resources.amount('sap').toNumber()).toBe(before);
+  });
+
+  it('measures lifetime rather than balance, so buying a branch never shuts the ground', () => {
+    const sim = new Simulation();
+    sim.state.resources.add('sap', new Decimal(ROOT_REVEAL_SAP));
+    sim.growPart(sim.state.tree.rootId, 'branch');
+
+    expect(sim.state.resources.amount('sap').toNumber()).toBeLessThan(ROOT_REVEAL_SAP);
+    expect(sim.hasFeature('roots')).toBe(true);
+  });
+
+  it('keeps the scissors once earned, even when the tree is cut back below the gate', () => {
+    const sim = new Simulation();
+    sim.state.resources.add('sap', new Decimal(1e6));
+
+    let parent = sim.state.tree.rootId;
+    for (let i = 0; i < PRUNE_UNLOCK_PARTS; i += 1) {
+      parent = sim.growPart(parent, 'branch')?.id ?? parent;
+    }
+    expect(sim.hasFeature('pruning')).toBe(true);
+
+    // Cut the lot. A tool that vanished here would read as the game breaking.
+    const first = sim.state.tree.children(sim.state.tree.rootId)[0];
+    sim.prunePart(first.id);
+    expect(sim.state.tree.size - 1).toBeLessThan(PRUNE_UNLOCK_PARTS);
+    expect(sim.hasFeature('pruning')).toBe(true);
+  });
+
+  it('announces a gate exactly once', () => {
+    const sim = new Simulation();
+    sim.state.resources.add('sap', new Decimal(ROOT_REVEAL_SAP));
+    sim.tick(0.1);
+
+    expect(sim.drainFeatureEvents()).toContain('roots');
+    sim.tick(0.1);
+    expect(sim.drainFeatureEvents()).toEqual([]);
+  });
+
+  it('says nothing about gates a loaded save had already passed', () => {
+    // The camera swinging down to introduce a player to roots they dug last week
+    // would be the game mistaking its own start-up for a discovery.
+    const sim = new Simulation();
+    sim.state.resources.add('sap', new Decimal(ROOT_REVEAL_SAP));
+    sim.tick(0.1);
+    sim.drainFeatureEvents();
+
+    const loaded = new Simulation();
+    expect(loaded.load(sim.save())).toBe(true);
+    expect(loaded.hasFeature('roots')).toBe(true);
+    expect(loaded.drainFeatureEvents()).toEqual([]);
+  });
+
+  it('carries the gates and the settings across a prestige', () => {
+    const sim = new Simulation();
+    sim.state.resources.add('sap', new Decimal(1e6));
+    sim.growPart(sim.state.tree.rootId, 'rootSegment');
+    sim.dismissHint('light');
+    expect(sim.hasFeature('roots')).toBe(true);
+
+    // Mature the tree the way the prestige tests do, then seed it.
+    sim.state.resources.restore(
+      'light',
+      new Decimal(PRESTIGE_LIGHT_REQUIREMENT),
+      new Decimal(PRESTIGE_LIGHT_REQUIREMENT),
+    );
+    let parent = sim.state.tree.rootId;
+    for (let i = 0; i < 8; i += 1) parent = sim.growPart(parent, 'branch')?.id ?? parent;
+    expect(sim.canGoToSeed()).toBe(true);
+    sim.goToSeed();
+    sim.tick(CEREMONY_SECONDS + 0.1);
+
+    // A fresh seedling with no lifetime Sap at all — and the ground still open.
+    expect(sim.state.resources.total('sap').toNumber()).toBe(0);
+    expect(sim.hasFeature('roots')).toBe(true);
+    expect(sim.state.settings.seenHints).toContain('light');
+  });
+
+  it('remembers a dismissed hint, and forgets it again on request', () => {
+    const sim = new Simulation();
+    expect(sim.snapshot().progression.hint).toBeNull();
+
+    sim.state.resources.add('sap', new Decimal(1e6));
+    sim.growPart(sim.state.tree.rootId, 'branch');
+    const branch = sim.state.tree.children(sim.state.tree.rootId)[0];
+    sim.growPart(branch.id, 'leafCluster');
+
+    expect(sim.snapshot().progression.hint?.id).toBe('light');
+    expect(sim.dismissHint('light')).toBe(true);
+    // Dismissing the same hint twice is not an error, it is simply nothing.
+    expect(sim.dismissHint('light')).toBe(false);
+    expect(sim.snapshot().progression.hint?.id).not.toBe('light');
+
+    sim.resetHints();
+    expect(sim.snapshot().progression.hint?.id).toBe('light');
+  });
+
+  it('carries what the player has been told through a save', () => {
+    const sim = new Simulation();
+    sim.dismissHint('light');
+    sim.dismissHint('pruning');
+
+    const loaded = new Simulation();
+    expect(loaded.load(sim.save())).toBe(true);
+    expect([...loaded.state.settings.seenHints].sort()).toEqual(['light', 'pruning']);
+  });
+
+  it('marks the trunk until it has been tapped, and then until something is grown', () => {
+    const sim = new Simulation();
+    expect(sim.snapshot().progression.beat?.id).toBe('firstTap');
+
+    tap(sim, 20);
+    expect(sim.snapshot().progression.beat?.id).toBe('firstBranch');
+
+    sim.growPart(sim.state.tree.rootId, 'branch');
+    expect(sim.snapshot().progression.beat).toBeNull();
+  });
+
+  /**
+   * The acceptance criterion, stated as an assertion.
+   *
+   * "A fresh-save playthrough reaches roots within ~4 minutes without reading
+   * anything." The player modelled here reads nothing and does nothing clever:
+   * three taps a second on the trunk, which is a comfortable pace, and one
+   * branch and one leaf bought along the way because the beat pointed at them.
+   */
+  it('reaches the roots inside four minutes of ordinary tapping', () => {
+    const sim = new Simulation();
+    const random = createSeededRandom(11);
+    const start = Date.now();
+    let bought = 0;
+
+    let second = 0;
+    for (; second < 240 && !sim.hasFeature('roots'); second += 1) {
+      for (let i = 0; i < 3; i += 1) sim.click(start + second * 1000 + i * 333, random);
+      for (let i = 0; i < 10; i += 1) sim.tick(0.1);
+
+      // What the arrow is pointing at: the first branch, then a leaf on it.
+      if (bought === 0 && sim.growPart(sim.state.tree.rootId, 'branch')) bought = 1;
+      else if (bought === 1) {
+        const branch = sim.state.tree.children(sim.state.tree.rootId)[0];
+        if (branch && sim.growPart(branch.id, 'leafCluster')) bought = 2;
+      }
+    }
+
+    expect(sim.hasFeature('roots')).toBe(true);
+    expect(second).toBeLessThanOrEqual(240);
+    // Both purchases went through, so the run measured is the one described.
+    expect(bought).toBe(2);
+    // And the ground is genuinely open, not merely measured as open.
+    expect(
+      sim.growthOptions(sim.state.tree.rootId).some((o) => o.option.type === 'rootSegment'),
+    ).toBe(true);
   });
 });

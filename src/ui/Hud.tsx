@@ -3,6 +3,7 @@ import { formatNumber } from '../engine/format';
 import { RESOURCES, type ResourceDef } from '../content/resources';
 import { useTweenedDecimal } from './tween';
 import { BuffBar } from './BuffBar';
+import { Hint } from './Hint';
 import { DaylightGauge } from './DaylightGauge';
 import { HydrationGauge } from './HydrationGauge';
 import { SeasonBadge } from './SeasonBadge';
@@ -113,6 +114,8 @@ export interface HudProps {
   readonly vaultOpen: boolean;
   /** Toggle the Seed Vault. Mirrors the V hotkey. */
   readonly onToggleVault: () => void;
+  /** Mark a contextual hint as read, so it never shows again. */
+  readonly onDismissHint: (id: string) => void;
 }
 
 /** React HUD overlay that sits above the full-screen canvas. */
@@ -132,10 +135,17 @@ export function Hud({
   onToggleSymbionts,
   settingsOpen,
   onToggleSettings,
+  onDismissHint,
 }: HudProps) {
   const discovered = useGameStore((s) => s.snapshot.species.discovered.length);
   const residents = useGameStore((s) => s.snapshot.symbionts.filter((r) => r.active).length);
   const prestige = useGameStore((s) => s.snapshot.prestige);
+  // The gating table, read once. Every control below that can be absent asks
+  // this and nothing else — there is no second opinion about when a tool exists.
+  const unlocked = useGameStore((s) => s.snapshot.progression.unlocked);
+  const hint = useGameStore((s) => s.snapshot.progression.hint);
+  const maturity = Math.round(prestige.progress.fraction * 100);
+
   return (
     <div className="hud">
       <header className="hud-header">
@@ -144,26 +154,37 @@ export function Hud({
           <BuffBar />
         </div>
         <div className="hud-header__right">
-          <button
-            type="button"
-            className="hud-toggle hud-toggle--prune"
-            aria-pressed={pruneMode}
-            aria-keyshortcuts="P"
-            title="Prune mode (P) — cut a limb for Sap and Deadwood"
-            onClick={onTogglePrune}
-          >
-            <span aria-hidden>✂</span> {pruneMode ? 'Pruning' : 'Prune'}
-          </button>
-          <button
-            type="button"
-            className="hud-toggle hud-toggle--graft"
-            aria-pressed={graftMode}
-            aria-keyshortcuts="G"
-            title="Graft mode (G) — join two limbs of different species into a hybrid"
-            onClick={onToggleGraft}
-          >
-            <span aria-hidden>🜋</span> {graftMode ? 'Grafting' : 'Graft'}
-          </button>
+          {/*
+            Gated controls are *absent* until their system opens, not disabled.
+            A greyed button is a promise the player cannot read — it says "this
+            exists and you may not have it" without saying why — while a row of
+            three buttons that becomes four is simply the game getting bigger.
+            The one exception is the Vault, below, which has a number to show.
+          */}
+          {unlocked.has('pruning') && (
+            <button
+              type="button"
+              className="hud-toggle hud-toggle--prune"
+              aria-pressed={pruneMode}
+              aria-keyshortcuts="P"
+              title="Prune mode (P) — cut a limb for Sap and Deadwood"
+              onClick={onTogglePrune}
+            >
+              <span aria-hidden>✂</span> {pruneMode ? 'Pruning' : 'Prune'}
+            </button>
+          )}
+          {unlocked.has('grafting') && (
+            <button
+              type="button"
+              className="hud-toggle hud-toggle--graft"
+              aria-pressed={graftMode}
+              aria-keyshortcuts="G"
+              title="Graft mode (G) — join two limbs of different species into a hybrid"
+              onClick={onToggleGraft}
+            >
+              <span aria-hidden>🜋</span> {graftMode ? 'Grafting' : 'Graft'}
+            </button>
+          )}
           <button
             type="button"
             className="hud-toggle"
@@ -175,40 +196,55 @@ export function Hud({
             <span aria-hidden>📖</span> Journal
             {discovered > 0 && <span className="hud-toggle__badge">{discovered}</span>}
           </button>
-          <button
-            type="button"
-            className="hud-toggle"
-            aria-pressed={symbiontsOpen}
-            aria-keyshortcuts="S"
-            title="Symbionts (S) — the creatures living in your tree"
-            onClick={onToggleSymbionts}
-          >
-            <span aria-hidden>🐝</span> Symbionts
-            {residents > 0 && <span className="hud-toggle__badge">{residents}</span>}
-          </button>
+          {unlocked.has('symbionts') && (
+            <button
+              type="button"
+              className="hud-toggle"
+              aria-pressed={symbiontsOpen}
+              aria-keyshortcuts="S"
+              title="Symbionts (S) — the creatures living in your tree"
+              onClick={onToggleSymbionts}
+            >
+              <span aria-hidden>🐝</span> Symbionts
+              {residents > 0 && <span className="hud-toggle__badge">{residents}</span>}
+            </button>
+          )}
           {/*
             The Vault is the only toggle that announces itself: maturity is the
             one milestone the player cannot see on the tree, and a Go to Seed
             button buried in a panel nobody opened would be a whole system that
             never happens.
+
+            It is also the one gated control that appears *before* it is any use
+            — at three quarters grown (STEP 17), dimmed, wearing its own progress.
+            That is deliberate and it is the opposite of the rule the tools
+            follow: the last quarter of a run is exactly when the player should be
+            deciding whether to spend it growing or to end it, and they cannot
+            weigh a choice they have not been told is coming.
           */}
-          <button
-            type="button"
-            className={`hud-toggle${prestige.progress.ready ? ' hud-toggle--ready' : ''}`}
-            aria-pressed={vaultOpen}
-            aria-keyshortcuts="V"
-            title="Seed Vault (V) — Heirlooms, the Old Growth forest, and Go to Seed"
-            onClick={onToggleVault}
-          >
-            <span aria-hidden>🌰</span> Vault
-            {prestige.progress.ready ? (
-              <span className="hud-toggle__badge">ready</span>
-            ) : (
-              prestige.forest.length > 0 && (
-                <span className="hud-toggle__badge">{prestige.forest.length}</span>
-              )
-            )}
-          </button>
+          {unlocked.has('prestige') && (
+            <button
+              type="button"
+              className={`hud-toggle${
+                prestige.progress.ready ? ' hud-toggle--ready' : ' hud-toggle--dim'
+              }`}
+              aria-pressed={vaultOpen}
+              aria-keyshortcuts="V"
+              title={
+                prestige.progress.ready
+                  ? 'Seed Vault (V) — Heirlooms, the Old Growth forest, and Go to Seed'
+                  : `Seed Vault (V) — ${maturity}% grown. Go to Seed opens at full maturity.`
+              }
+              onClick={onToggleVault}
+            >
+              <span aria-hidden>🌰</span> Vault
+              {prestige.progress.ready ? (
+                <span className="hud-toggle__badge">ready</span>
+              ) : (
+                <span className="hud-toggle__badge">{maturity}%</span>
+              )}
+            </button>
+          )}
           <button
             type="button"
             className="hud-toggle"
@@ -235,6 +271,12 @@ export function Hud({
       </header>
       <WeatherBanner />
       <ResourceReadout tween={!reducedMotion} />
+      {/*
+        One bubble, keyed by id so a second hint arriving replaces the first
+        outright rather than inheriting its timer. It is the last thing in the
+        HUD and absolutely positioned, so it can never move a control.
+      */}
+      {hint && <Hint key={hint.id} hint={hint} onDismiss={onDismissHint} />}
     </div>
   );
 }

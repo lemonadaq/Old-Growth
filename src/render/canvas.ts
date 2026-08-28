@@ -45,6 +45,7 @@ import {
   layoutSpeciesPicker,
   type SpeciesChip,
 } from './speciesPicker';
+import { drawBeat, type BeatMark } from './onboarding';
 import { drawCeremony } from './ceremony';
 import { drawForest, layoutForest, visibleForest } from './forest';
 import { drawBackdrop } from './sky';
@@ -61,6 +62,30 @@ import {
   seasonSoilCast,
   skyCasts,
 } from './weather';
+
+/** How long the one-off look underground takes, door to door, in ms. */
+export const LOOK_DURATION_MS = 3600;
+
+/** How far below the auto-fit that look dips, in canonical units. */
+export const LOOK_DEPTH_UNITS = 0.85;
+
+/**
+ * The look's shape: down, hold, back — `0 → 1 → 0` over `[0, 1]`.
+ *
+ * The hold is the point of it. A dip that turned round the instant it arrived
+ * would read as a glitch rather than as the game showing the player something,
+ * and a second of stillness at the bottom is what makes it a glance.
+ */
+export function lookCurve(t: number): number {
+  // The ends are stated rather than computed: a smoothstep of a value a float
+  // away from 1 lands a float away from 0, and "the camera is back where it
+  // started" should be exactly true rather than true to thirty decimal places.
+  if (!(t > 0) || t >= 1) return 0;
+  const smooth = (x: number) => x * x * (3 - 2 * x);
+  if (t < 0.3) return smooth(t / 0.3);
+  if (t < 0.7) return 1;
+  return smooth((1 - t) / 0.3);
+}
 
 /**
  * Canvas 2D renderer: the sky-to-soil scene, the player's tree, the radial grow
@@ -156,6 +181,21 @@ export class Renderer {
   /** Wall-clock time the next wind-drifted leaf is due, in ms. */
   private nextDriftAt = 0;
 
+  /** The mark the scripted opening wants on the trunk, or `null`. */
+  private beat: BeatMark | null = null;
+
+  /**
+   * The one-off look underground, or `null`.
+   *
+   * A scripted camera move rather than a permanent reframe: it dips, holds, and
+   * comes back, and the auto-fit has the framing again by the end. See
+   * {@link lookBelow}.
+   */
+  private look: { readonly startedAt: number; readonly depth: number } | null = null;
+
+  /** How far down the look is currently dragging the view, in canonical units. */
+  private lookOffset = 0;
+
   constructor(private readonly canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext('2d');
     if (!ctx) {
@@ -217,6 +257,56 @@ export class Renderer {
   /** Track the pointer so the combo meter can follow it. `null` hides it. */
   setPointer(point: Vec2 | null): void {
     this.pointer = point;
+  }
+
+  /** Put the opening beat's mark on the trunk, or take it off with `null`. */
+  setBeat(beat: BeatMark | null): void {
+    this.beat = beat;
+  }
+
+  /**
+   * Dip the camera below the ground line once, then bring it back.
+   *
+   * Returns whether the look was actually started, so the caller can tell the
+   * player in words what the camera would otherwise have shown them. Two reasons
+   * it refuses:
+   *
+   * - **The player has moved the camera themselves.** From that moment the
+   *   framing is theirs (see the class comment); taking it away to show them
+   *   something would be the one thing this renderer has promised not to do.
+   * - **Reduced motion.** A camera move is motion, and this one is decoration
+   *   over an event the toast reports anyway.
+   */
+  lookBelow(now: number, depth = LOOK_DEPTH_UNITS): boolean {
+    if (this.engaged || !this.motion) return false;
+    this.look = { startedAt: now, depth };
+    return true;
+  }
+
+  /** Whether the one-off look underground is still running. */
+  get isLooking(): boolean {
+    return this.look !== null;
+  }
+
+  /**
+   * Advance the look and re-project through it.
+   *
+   * The offset is applied inside {@link projectTreeToScreen} rather than written
+   * onto the camera, so the auto-fit underneath keeps tracking the tree — a limb
+   * grown mid-look still reframes, and when the look ends there is nothing to
+   * unwind.
+   */
+  private advanceLook(now: number): void {
+    if (!this.look) return;
+
+    const t = (now - this.look.startedAt) / LOOK_DURATION_MS;
+    if (t >= 1) {
+      this.look = null;
+      this.lookOffset = 0;
+    } else {
+      this.lookOffset = lookCurve(t) * this.look.depth;
+    }
+    this.projectTreeToScreen();
   }
 
   /** Open the grow menu on a node, or close it with `null`. */
@@ -470,11 +560,12 @@ export class Renderer {
   private projectTreeToScreen(): void {
     if (!this.engaged) {
       // Track the auto-fit: the early game reframes itself as the tree grows.
+      const fitted = cameraFromLayout(
+        computeTreeLayout(this.cssWidth, this.cssHeight, this.bounds),
+        this.viewport,
+      );
       this.camera = clampCamera(
-        cameraFromLayout(
-          computeTreeLayout(this.cssWidth, this.cssHeight, this.bounds),
-          this.viewport,
-        ),
+        this.lookOffset === 0 ? fitted : { ...fitted, y: fitted.y - this.lookOffset },
         this.viewport,
       );
     }
@@ -610,6 +701,10 @@ export class Renderer {
    * @param now      timestamp (ms) driving the time-based click effects.
    */
   draw(snapshot: GameSnapshot, _alpha: number, now: number = Date.now()): void {
+    // The scripted look moves the camera, so it has to land before anything is
+    // measured against the projection this frame.
+    this.advanceLook(now);
+
     const { ctx, cssWidth: w, cssHeight: h } = this;
     const viewport = this.viewport;
     // The soil surface is the trunk's own base, taken from the layout rather
@@ -693,6 +788,23 @@ export class Renderer {
     if (this.grafting && this.graftSelection) {
       drawGraftMark(ctx, this.screenTree, this.graftSelection, now);
       drawGraftBadge(ctx, this.screenTree, this.graftSelection);
+    }
+
+    // The opening beat sits on the trunk — and only while the ring of buds is
+    // shut. Both beats are asking for the same thing, an open menu, so once one
+    // is open the mark has been obeyed: leaving "tap it again" on screen over
+    // the dials it was asking for would be the tutorial talking past the player.
+    if (this.beat && !this.menu) {
+      const trunk = this.screenTree.find((segment) => segment.kind === 'trunk');
+      if (trunk) {
+        drawBeat(
+          ctx,
+          this.beat,
+          { x: (trunk.a.x + trunk.b.x) / 2, y: (trunk.a.y + trunk.b.y) / 2 },
+          now,
+          this.motion,
+        );
+      }
     }
 
     const ghost = this.ghostSegment();

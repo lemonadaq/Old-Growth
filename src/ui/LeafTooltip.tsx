@@ -7,6 +7,7 @@ import {
 import { formatNumber } from '../engine/format';
 import type { LeafLight } from '../engine/types';
 import { useGameStore } from './useGameStore';
+import { t } from './i18n';
 
 /**
  * What one leaf cluster on the tree is actually earning, and why.
@@ -35,14 +36,12 @@ export function LeafTooltip({ nodeId }: LeafTooltipProps) {
 
   return (
     <>
-      <p className="tooltip__title">Leaf Cluster</p>
-      <p className="tooltip__desc">
-        Catches sunlight. What it earns depends on how much sky it can still see.
-      </p>
+      <p className="tooltip__title">{t('leaf.title')}</p>
+      <p className="tooltip__desc">{t('leaf.desc')}</p>
 
       <dl>
         <div className="tooltip__row">
-          <dt>Exposure</dt>
+          <dt>{t('leaf.exposure')}</dt>
           <dd className={leaf.exposure < 1 ? 'tooltip__short' : 'tooltip__gain'}>
             {percent(leaf.exposure)}
           </dd>
@@ -50,19 +49,25 @@ export function LeafTooltip({ nodeId }: LeafTooltipProps) {
 
         <div className="tooltip__row">
           <dt>
-            Shaded by
-            <span className="tooltip__note"> −{percent(SHADE_PER_OCCLUDER)} each</span>
+            {t('leaf.shadedBy')}
+            <span className="tooltip__note">
+              {t('leaf.shadeEach', { percent: percent(SHADE_PER_OCCLUDER) })}
+            </span>
           </dt>
           <dd className={leaf.occluders > 0 ? 'tooltip__short' : undefined}>
-            {leaf.occluders} {leaf.occluders === 1 ? 'cluster' : 'clusters'}
+            {leaf.occluders === 1
+              ? t('leaf.oneCluster')
+              : t('leaf.clusters', { count: leaf.occluders })}
           </dd>
         </div>
 
         {leaf.blossoms > 0 && (
           <div className="tooltip__row">
             <dt>
-              Blossoms
-              <span className="tooltip__note"> +{percent(BLOSSOM_BOOST)} each</span>
+              {t('leaf.blossoms')}
+              <span className="tooltip__note">
+                {t('leaf.blossomEach', { percent: percent(BLOSSOM_BOOST) })}
+              </span>
             </dt>
             <dd className="tooltip__gain">×{leaf.boost.toFixed(2)}</dd>
           </div>
@@ -70,30 +75,28 @@ export function LeafTooltip({ nodeId }: LeafTooltipProps) {
 
         <div className="tooltip__row">
           <dt>
-            Daylight
+            {t('leaf.daylight')}
             <span className="tooltip__note"> {phase}</span>
           </dt>
           <dd>×{lightFactor.toFixed(2)}</dd>
         </div>
 
         <div className="tooltip__row">
-          <dt>Produces</dt>
+          <dt>{t('leaf.produces')}</dt>
           <dd className={leaf.rate.lte(0) ? 'tooltip__short' : 'tooltip__gain'}>
-            +{formatNumber(leaf.rate)} Light/s
+            {t('leaf.lightRate', { amount: formatNumber(leaf.rate) })}
           </dd>
         </div>
       </dl>
 
       {leaf.occluders > 0 && (
         <p className="tooltip__hint">
-          {floored
-            ? 'Buried. This cluster is down to its floor — spread the canopy out.'
-            : 'Crowded. Leaves out in the open catch far more than leaves stacked up.'}
+          {floored ? t('leaf.buried') : t('leaf.crowded')}
         </p>
       )}
       {leaf.blossoms >= BLOSSOM_BOOST_MAX_STACKS && (
         <p className="tooltip__hint">
-          Already carrying {BLOSSOM_BOOST_MAX_STACKS} blossoms — more nearby add nothing.
+          {t('leaf.blossomCap', { count: BLOSSOM_BOOST_MAX_STACKS })}
         </p>
       )}
     </>

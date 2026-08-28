@@ -4,6 +4,7 @@ import { MOONLIGHT_FRACTION } from '../content/light';
 import { Tooltip } from './Tooltip';
 import { useGameStore } from './useGameStore';
 import './DaylightGauge.css';
+import { t } from './i18n';
 
 /**
  * The sky's contribution to the canopy, as a HUD chip.
@@ -54,7 +55,10 @@ export function DaylightGauge() {
       <span
         className="daylight__value"
         role="img"
-        aria-label={`${PHASE_LABEL[day.phase]} — light ${lightFactor.toFixed(2)} times`}
+        aria-label={t('daylight.badge', {
+          phase: PHASE_LABEL[day.phase],
+          factor: lightFactor.toFixed(2),
+        })}
       >
         ×{lightFactor.toFixed(2)}
       </span>
@@ -64,32 +68,32 @@ export function DaylightGauge() {
           cursor ? (
             <>
               <p className="tooltip__title">
-                {PHASE_LABEL[day.phase]} — day {day.dayNumber + 1}
+                {t('daylight.title', {
+                  phase: PHASE_LABEL[day.phase],
+                  day: day.dayNumber + 1,
+                })}
               </p>
-              <p className="tooltip__desc">
-                Leaves make Light from sunlight. The canopy follows the sun up and back down again.
-              </p>
+              <p className="tooltip__desc">{t('daylight.desc')}</p>
 
               <dl>
                 <div className="tooltip__row">
-                  <dt>Light</dt>
+                  <dt>{t('daylight.light')}</dt>
                   <dd className={moonlit ? 'tooltip__short' : 'tooltip__gain'}>
                     ×{lightFactor.toFixed(2)}
                   </dd>
                 </div>
                 <div className="tooltip__row">
-                  <dt>Day ends in</dt>
+                  <dt>{t('daylight.endsIn')}</dt>
                   <dd>{remaining(day.t)}</dd>
                 </div>
               </dl>
 
               {moonlit ? (
                 <p className="tooltip__hint">
-                  After dark the canopy keeps a ×{MOONLIGHT_FRACTION} moonlight trickle. The roots
-                  do not care what time it is.
+                  {t('daylight.moonlit', { fraction: MOONLIGHT_FRACTION })}
                 </p>
               ) : (
-                <p className="tooltip__hint">The first tap of each new day shakes the Dew loose.</p>
+                <p className="tooltip__hint">{t('daylight.dewHint')}</p>
               )}
             </>
           ) : null

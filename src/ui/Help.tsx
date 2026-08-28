@@ -1,6 +1,7 @@
 import { HELP_TOPICS } from '../content/help';
 import { FEATURES } from '../content/progression';
 import { useGameStore } from './useGameStore';
+import { t } from './i18n';
 
 /**
  * The Journal's Help tab: what kind of thing this tree is.
@@ -23,13 +24,10 @@ export function Help() {
 
   return (
     <div className="journal__help">
-      <p className="journal__help-lede">
-        A tree is a slow argument between what is above the ground and what is below it. This is
-        everything it knows how to do.
-      </p>
+      <p className="journal__help-lede">{t('help.lede')}</p>
 
       <section>
-        <h3 className="journal__heading">The tree</h3>
+        <h3 className="journal__heading">{t('help.tree')}</h3>
         <ul className="journal__help-list">
           {HELP_TOPICS.map((topic) => (
             <li key={topic.id} className="journal__help-topic">
@@ -45,7 +43,7 @@ export function Help() {
       </section>
 
       <section>
-        <h3 className="journal__heading">What opens, and when</h3>
+        <h3 className="journal__heading">{t('help.gates')}</h3>
         <ul className="journal__help-list">
           {FEATURES.map((def) => {
             const gate = byId.get(def.id);
@@ -58,9 +56,7 @@ export function Help() {
                 <p className="journal__help-title">
                   {def.label}
                   {unlocked && (
-                    <span className="journal__help-open" aria-label="open">
-                      open
-                    </span>
+                    <span className="journal__help-open">{t('help.open')}</span>
                   )}
                 </p>
                 <p className="journal__help-body">{def.blurb}</p>

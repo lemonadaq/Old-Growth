@@ -47,6 +47,32 @@ export interface GameSettings {
    * things, and an unknown id costs a string.
    */
   readonly seenHints: readonly string[];
+  /**
+   * Text scale, as a multiplier in `[0.9, 1.3]`.
+   *
+   * A game read on a phone at arm's length and on a monitor at a desk cannot
+   * have one right font size. Applied as a CSS custom property on the root, so
+   * every panel scales from one number and nothing has to be re-measured.
+   */
+  readonly fontScale: number;
+  /**
+   * Draw a pattern on each leaf cluster as well as colouring it.
+   *
+   * The species palettes are chosen to stay distinguishable under the common
+   * colour-blindness simulations, but "distinguishable to most people" is not
+   * the same as "readable by everyone", and a canopy is exactly the case where
+   * hue is doing all the work. A pattern is a second channel that costs nothing
+   * to anyone who does not need it.
+   */
+  readonly leafPatterns: boolean;
+  /**
+   * Keep a hint on screen until it is dismissed, rather than fading it.
+   *
+   * A timed bubble is a reading-speed test. This is the setting that turns it
+   * off, and it belongs next to text size rather than in an accessibility
+   * ghetto — plenty of people who want it would never look under that heading.
+   */
+  readonly hintsStay: boolean;
 }
 
 /** What a fresh save starts with. */
@@ -56,12 +82,27 @@ export const DEFAULT_SETTINGS: GameSettings = {
   musicVolume: DEFAULT_VOLUME,
   sfxVolume: DEFAULT_VOLUME,
   seenHints: [],
+  fontScale: 1,
+  leafPatterns: false,
+  hintsStay: false,
 };
+
+/** The text-scale range the slider offers, as multipliers. */
+export const FONT_SCALE_MIN = 0.9;
+export const FONT_SCALE_MAX = 1.3;
+/** One notch of the text-size slider. Coarse enough to land on a phone. */
+export const FONT_SCALE_STEP = 0.05;
 
 /** A volume read out of a save: clamped, and defaulted if it is not a number. */
 function volume(value: unknown, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
   return Math.min(1, Math.max(0, value));
+}
+
+/** A text scale read out of a save, clamped to what the slider can offer. */
+export function clampFontScale(value: unknown, fallback = 1): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.min(FONT_SCALE_MAX, Math.max(FONT_SCALE_MIN, value));
 }
 
 /**
@@ -80,6 +121,10 @@ export function normaliseSettings(value: unknown): GameSettings {
     masterVolume: volume(raw.masterVolume, DEFAULT_SETTINGS.masterVolume),
     musicVolume: volume(raw.musicVolume, DEFAULT_SETTINGS.musicVolume),
     sfxVolume: volume(raw.sfxVolume, DEFAULT_SETTINGS.sfxVolume),
+    fontScale: clampFontScale(raw.fontScale, DEFAULT_SETTINGS.fontScale),
+    leafPatterns:
+      typeof raw.leafPatterns === 'boolean' ? raw.leafPatterns : DEFAULT_SETTINGS.leafPatterns,
+    hintsStay: typeof raw.hintsStay === 'boolean' ? raw.hintsStay : DEFAULT_SETTINGS.hintsStay,
     // Duplicates are dropped rather than trusted: the list is only ever asked
     // "has this been seen", and a file that grew the same id a thousand times
     // through some future bug should not turn that question into a scan.

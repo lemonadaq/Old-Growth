@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEW_MIN_TAPS } from '../content/light';
 import { CLICK_TOLERANCE_PX } from '../engine/clicker';
 import { COMBO_FULL_STACKS } from '../engine/combo';
@@ -12,6 +12,8 @@ import {
   attachTreeInput,
   wheelZoomFactor,
   DRAG_THRESHOLD_PX,
+  LONG_PRESS_MS,
+  LONG_PRESS_SLOP_PX,
   type PointerEventName,
   type PointerLikeEvent,
   type PointerListener,
@@ -149,6 +151,7 @@ function setup() {
   const drags: Vec2[] = [];
   const scrolls: Vec2[] = [];
   const zooms: { factor: number; at: Vec2 }[] = [];
+  const longPresses: Vec2[] = [];
   let pointer: Vec2 | null = null;
   let clock = 0;
 
@@ -175,6 +178,9 @@ function setup() {
     onZoom: (factor, at) => {
       zooms.push({ factor, at });
     },
+    onLongPress: (point) => {
+      longPresses.push(point);
+    },
   });
 
   return {
@@ -185,6 +191,7 @@ function setup() {
     drags,
     scrolls,
     zooms,
+    longPresses,
     detach,
     advance: (ms: number) => {
       clock += ms;
@@ -432,5 +439,136 @@ describe('wheelZoomFactor', () => {
 
   it('is symmetric, so a pinch in and back out returns to where it started', () => {
     expect(wheelZoomFactor(-80) * wheelZoomFactor(80)).toBeCloseTo(1);
+  });
+});
+
+describe('long press', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('asks about the limb under a finger held still', () => {
+    const { surface, longPresses } = setup();
+    surface.dispatch('pointerdown', { clientX: 100, clientY: 200, pointerType: 'touch' });
+    vi.advanceTimersByTime(LONG_PRESS_MS);
+    expect(longPresses).toEqual([{ x: 100, y: 200 }]);
+  });
+
+  it('does not fire before its time', () => {
+    const { surface, longPresses } = setup();
+    surface.dispatch('pointerdown', { clientX: 100, clientY: 200, pointerType: 'touch' });
+    vi.advanceTimersByTime(LONG_PRESS_MS - 1);
+    expect(longPresses).toEqual([]);
+  });
+
+  it('gives up once the finger wanders', () => {
+    const { surface, longPresses } = setup();
+    surface.dispatch('pointerdown', { clientX: 100, clientY: 200, pointerType: 'touch' });
+    surface.dispatch('pointermove', {
+      clientX: 100 + LONG_PRESS_SLOP_PX,
+      clientY: 200,
+      pointerType: 'touch',
+    });
+    vi.advanceTimersByTime(LONG_PRESS_MS * 2);
+    expect(longPresses).toEqual([]);
+  });
+
+  it('tolerates a wobble', () => {
+    const { surface, longPresses } = setup();
+    surface.dispatch('pointerdown', { clientX: 100, clientY: 200, pointerType: 'touch' });
+    surface.dispatch('pointermove', { clientX: 101, clientY: 200, pointerType: 'touch' });
+    vi.advanceTimersByTime(LONG_PRESS_MS);
+    expect(longPresses).toHaveLength(1);
+  });
+
+  it('is cancelled by lifting the finger', () => {
+    const { surface, longPresses } = setup();
+    surface.dispatch('pointerdown', { clientX: 100, clientY: 200, pointerType: 'touch' });
+    surface.dispatch('pointerup', { clientX: 100, clientY: 200, pointerType: 'touch' });
+    vi.advanceTimersByTime(LONG_PRESS_MS * 2);
+    expect(longPresses).toEqual([]);
+  });
+
+  it('is cancelled by a second finger, which is a pinch and not a question', () => {
+    const { surface, longPresses } = setup();
+    surface.dispatch('pointerdown', { clientX: 100, clientY: 200, pointerType: 'touch' });
+    surface.dispatch('pointerdown', {
+      clientX: 200,
+      clientY: 200,
+      pointerId: 2,
+      pointerType: 'touch',
+    });
+    vi.advanceTimersByTime(LONG_PRESS_MS * 2);
+    expect(longPresses).toEqual([]);
+  });
+
+  it('leaves the mouse alone — it has hover for this', () => {
+    const { surface, longPresses } = setup();
+    surface.dispatch('pointerdown', { clientX: 100, clientY: 200, pointerType: 'mouse' });
+    vi.advanceTimersByTime(LONG_PRESS_MS * 2);
+    expect(longPresses).toEqual([]);
+  });
+
+  it('stops firing once detached', () => {
+    const { surface, detach, longPresses } = setup();
+    surface.dispatch('pointerdown', { clientX: 100, clientY: 200, pointerType: 'touch' });
+    detach();
+    vi.advanceTimersByTime(LONG_PRESS_MS * 2);
+    expect(longPresses).toEqual([]);
+  });
+});
+
+describe('pinch zoom', () => {
+  /** Put two fingers down `apart` pixels either side of (200, 200). */
+  function twoFingers(surface: FakeSurface, apart: number): void {
+    surface.dispatch('pointerdown', { clientX: 200 - apart / 2, clientY: 200, pointerId: 1 });
+    surface.dispatch('pointerdown', { clientX: 200 + apart / 2, clientY: 200, pointerId: 2 });
+  }
+
+  it('zooms in as the fingers spread, about the point between them', () => {
+    const { surface, zooms } = setup();
+    twoFingers(surface, 100);
+    surface.dispatch('pointermove', { clientX: 100, clientY: 200, pointerId: 1 });
+    surface.dispatch('pointermove', { clientX: 300, clientY: 200, pointerId: 2 });
+
+    expect(zooms.length).toBeGreaterThan(0);
+    const total = zooms.reduce((product, zoom) => product * zoom.factor, 1);
+    expect(total).toBeCloseTo(2);
+    expect(zooms[zooms.length - 1].at).toEqual({ x: 200, y: 200 });
+  });
+
+  it('zooms out as they close', () => {
+    const { surface, zooms } = setup();
+    twoFingers(surface, 200);
+    surface.dispatch('pointermove', { clientX: 175, clientY: 200, pointerId: 1 });
+    surface.dispatch('pointermove', { clientX: 225, clientY: 200, pointerId: 2 });
+
+    const total = zooms.reduce((product, zoom) => product * zoom.factor, 1);
+    expect(total).toBeCloseTo(0.25);
+  });
+
+  it('never pans while pinching — one finger moving must not drag the camera', () => {
+    const { surface, drags } = setup();
+    twoFingers(surface, 100);
+    surface.dispatch('pointermove', { clientX: 40, clientY: 260, pointerId: 1 });
+    expect(drags).toEqual([]);
+  });
+
+  it('starts a fresh gesture after a finger lifts, rather than jumping', () => {
+    const { surface, zooms } = setup();
+    twoFingers(surface, 100);
+    surface.dispatch('pointerup', { clientX: 250, clientY: 200, pointerId: 2 });
+    zooms.length = 0;
+
+    // A second finger a long way from where the last one lifted: the new
+    // gesture's baseline is where it starts, so a pinch that has not moved yet
+    // is not a sudden hundred-pixel zoom.
+    surface.dispatch('pointerdown', { clientX: 600, clientY: 200, pointerId: 3 });
+    surface.dispatch('pointermove', { clientX: 600, clientY: 200, pointerId: 3 });
+    const total = zooms.reduce((product, zoom) => product * zoom.factor, 1);
+    expect(total).toBe(1);
   });
 });

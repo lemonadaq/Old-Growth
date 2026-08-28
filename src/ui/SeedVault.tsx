@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { formatNumber } from '../engine/format';
 import {
   FOREST_PRODUCTION_BONUS,
@@ -8,6 +9,7 @@ import { SPECIES_BY_ID } from '../content/species';
 import { HYBRID_BY_ID } from '../content/hybrids';
 import { SYMBIONTS, SYMBIONT_BY_ID } from '../content/symbionts';
 import type { HeirloomSnapshot } from '../engine/types';
+import { t } from './i18n';
 import { useGameStore } from './useGameStore';
 import './SeedVault.css';
 
@@ -61,7 +63,7 @@ function HeirloomNode({
     >
       <p className="vault__name">
         <span aria-hidden>{unlocked ? glyph : '🔒'}</span> {name}
-        <span className="vault__pips" aria-label={`level ${level} of ${maxLevel}`}>
+        <span className="vault__pips" aria-label={t('vault.heirloomLevel', { level, max: maxLevel })}>
           {Array.from({ length: maxLevel }, (_, i) => (
             <span
               key={i}
@@ -80,13 +82,13 @@ function HeirloomNode({
         onClick={() => onBuy(snapshot.id)}
         title={
           !unlocked
-            ? 'Buy the heirloom above this one first.'
+            ? t('vault.heirloomLocked')
             : maxed
-              ? 'Nothing more to learn here.'
-              : `Costs ${formatNumber(cost)} Seeds`
+              ? t('vault.heirloomMaxed')
+              : t('vault.heirloomCost', { amount: formatNumber(cost) })
         }
       >
-        {maxed ? 'Complete' : `🌰 ${formatNumber(cost)}`}
+        {maxed ? t('vault.heirloomComplete') : `🌰 ${formatNumber(cost)}`}
       </button>
     </li>
   );
@@ -101,7 +103,7 @@ export interface SeedVaultProps {
   readonly onGoToSeed: () => void;
 }
 
-export function SeedVault({ onBuyHeirloom, onChooseBond, onGoToSeed }: SeedVaultProps) {
+function SeedVaultPanel({ onBuyHeirloom, onChooseBond, onGoToSeed }: SeedVaultProps) {
   const prestige = useGameStore((s) => s.snapshot.prestige);
   const seeds = useGameStore((s) => s.snapshot.resources.seeds);
   const fragments = useGameStore((s) => s.snapshot.seedFragments);
@@ -111,12 +113,15 @@ export function SeedVault({ onBuyHeirloom, onChooseBond, onGoToSeed }: SeedVault
   const seeding = prestige.ceremony !== null;
 
   return (
-    <aside className="vault" aria-label="seed vault">
+    <aside className="vault" aria-label={t('vault.title')}>
       <header className="vault__head">
-        <h2 className="vault__title">Seed Vault</h2>
         <p className="vault__seeds">
-          <span aria-hidden>🌰</span> <b>{formatNumber(seeds)}</b> Seeds
-          {fragments > 0 && <span className="vault__fragments"> · {fragments}/100 fragments</span>}
+          <span aria-hidden>🌰</span> {t('vault.seeds', { amount: formatNumber(seeds) })}
+          {fragments > 0 && (
+            <span className="vault__fragments">
+              {t('vault.fragments', { have: fragments, needed: 100 })}
+            </span>
+          )}
         </p>
       </header>
 
@@ -129,11 +134,11 @@ export function SeedVault({ onBuyHeirloom, onChooseBond, onGoToSeed }: SeedVault
 
       <section className="vault__maturity">
         <h3 className="vault__heading">
-          Maturity
-          {progress.ready && <span className="vault__ready">ready to seed</span>}
+          {t('vault.maturity')}
+          {progress.ready && <span className="vault__ready">{t('vault.ready')}</span>}
         </h3>
         <p className="vault__gate">
-          <span>Height</span>
+          <span>{t('vault.height')}</span>
           <span className="vault__bar" aria-hidden>
             <span style={{ width: `${Math.round(progress.heightFraction * 100)}%` }} />
           </span>
@@ -142,7 +147,7 @@ export function SeedVault({ onBuyHeirloom, onChooseBond, onGoToSeed }: SeedVault
           </b>
         </p>
         <p className="vault__gate">
-          <span>Lifetime Light</span>
+          <span>{t('vault.lifetimeLight')}</span>
           <span className="vault__bar" aria-hidden>
             <span style={{ width: `${Math.round(progress.lightFraction * 100)}%` }} />
           </span>
@@ -151,11 +156,13 @@ export function SeedVault({ onBuyHeirloom, onChooseBond, onGoToSeed }: SeedVault
           </b>
         </p>
         <p className="vault__payout">
-          Going to seed now would pay <b>{payout.total}</b> Seed{payout.total === 1 ? '' : 's'}
+          {payout.total === 1 ? t('vault.payoutOne') : t('vault.payout', { count: payout.total })}
           {payout.fromFragments > 0 && (
             <span className="vault__muted">
-              {' '}
-              ({payout.fromLight} from Light, {payout.fromFragments} from fragments)
+              {t('vault.payoutSplit', {
+                light: payout.fromLight,
+                fragments: payout.fromFragments,
+              })}
             </span>
           )}
           .
@@ -166,39 +173,38 @@ export function SeedVault({ onBuyHeirloom, onChooseBond, onGoToSeed }: SeedVault
           disabled={!progress.ready || seeding}
           onClick={onGoToSeed}
         >
-          {seeding ? 'Seeding…' : '🌰 Go to Seed'}
+          {seeding ? t('vault.seeding') : `🌰 ${t('vault.goToSeed')}`}
         </button>
-        <p className="vault__warn">
-          The tree, its residents, its totems and everything it has earned are given up. Seeds,
-          Heirlooms, Rings and the Journal are not.
-        </p>
+        <p className="vault__warn">{t('vault.warning')}</p>
       </section>
 
       <section>
         <h3 className="vault__heading">
-          Old Growth
+          {t('vault.forest')}
           <span className="vault__count">
-            {prestige.forest.length} tree{prestige.forest.length === 1 ? '' : 's'}
+            {prestige.forest.length === 1
+              ? t('vault.oneTree')
+              : t('vault.trees', { count: prestige.forest.length })}
           </span>
         </h3>
         {prestige.forest.length === 0 ? (
           <p className="vault__empty">
-            Nothing on the hills yet. Every tree you give up stands there for good, and each one
-            adds {Math.round(FOREST_PRODUCTION_BONUS * 100)}% to everything the next one makes.
+            {t('vault.forestEmpty', { bonus: Math.round(FOREST_PRODUCTION_BONUS * 100) })}
           </p>
         ) : (
           <p className="vault__forest">
-            The grove is worth <b>×{prestige.forestMultiplier.toFixed(2)}</b> to all production.
-            Latest: a {speciesLabel(prestige.forest[prestige.forest.length - 1].speciesId)} of{' '}
-            {prestige.forest[prestige.forest.length - 1].parts} parts.
+            {t('vault.forestWorth', {
+              multiplier: prestige.forestMultiplier.toFixed(2),
+              species: speciesLabel(prestige.forest[prestige.forest.length - 1].speciesId),
+              parts: prestige.forest[prestige.forest.length - 1].parts,
+            })}
           </p>
         )}
       </section>
 
       {prestige.remembered > 0 && (
         <p className="vault__memory">
-          🧠 The last tree is remembered — {prestige.remembered} parts, waiting for a Memory
-          heirloom to put them back.
+          🧠 {t('vault.remembered', { parts: prestige.remembered })}
         </p>
       )}
 
@@ -213,9 +219,7 @@ export function SeedVault({ onBuyHeirloom, onChooseBond, onGoToSeed }: SeedVault
             {branch.id === 'bond' && (
               <div className={`vault__bond${prestige.bonded ? '' : ' vault__bond--idle'}`}>
                 <p className="vault__bondlabel">
-                  {prestige.bonded
-                    ? 'Who is waiting for you next run?'
-                    : 'Buy Old Friend to choose a companion.'}
+                  {prestige.bonded ? t('vault.bondReady') : t('vault.bondLocked')}
                 </p>
                 <div className="vault__chips">
                   {SYMBIONTS.map((def) => (
@@ -235,7 +239,9 @@ export function SeedVault({ onBuyHeirloom, onChooseBond, onGoToSeed }: SeedVault
                 </div>
                 {prestige.bonded && prestige.bondSymbiont && (
                   <p className="vault__bondpick">
-                    {SYMBIONT_BY_ID[prestige.bondSymbiont]?.name} will be here from the first tick.
+                    {t('vault.bondPicked', {
+                      name: SYMBIONT_BY_ID[prestige.bondSymbiont]?.name ?? '',
+                    })}
                   </p>
                 )}
               </div>
@@ -263,9 +269,15 @@ export function SeedVault({ onBuyHeirloom, onChooseBond, onGoToSeed }: SeedVault
         ))}
       </div>
 
-      <p className="vault__footer">
-        Offline the roots keep working for {prestige.offlineCapHours} hours.
-      </p>
+      <p className="vault__footer">{t('vault.offline', { hours: prestige.offlineCapHours })}</p>
     </aside>
   );
 }
+
+/**
+ * Memoised because `App` re-renders far more often than the vault changes — and
+ * this panel draws the whole heirloom tree every time it renders. Its props are
+ * all `useCallback`s from `App`, so the comparison holds; the store
+ * subscriptions still re-render it when Seeds or maturity move.
+ */
+export const SeedVault = memo(SeedVaultPanel);

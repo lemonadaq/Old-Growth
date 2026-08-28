@@ -1,0 +1,169 @@
+/*
+ * STEP 18's phone grow menu: the radial dials, unrolled into a bottom sheet.
+ *
+ * It sits above the dock rather than over it — the dock is how you leave, and a
+ * sheet that covers the way out is a trap — and its rows are 46px tall for the
+ * same reason the dock's buttons are: that is the smallest target a thumb hits
+ * reliably.
+ */
+.grow-sheet {
+  pointer-events: auto;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 58px;
+  z-index: 13;
+  display: flex;
+  flex-direction: column;
+  max-height: 55%;
+  padding-bottom: 6px;
+  overflow-y: auto;
+  color: var(--hud-text);
+  background: var(--hud-bg);
+  border-top: 1px solid var(--hud-border);
+  border-radius: 14px 14px 0 0;
+  backdrop-filter: blur(4px);
+  animation: grow-sheet-in 160ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+@keyframes grow-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grow-sheet {
+    animation: none;
+  }
+}
+
+.grow-sheet__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 6px;
+}
+
+.grow-sheet__title {
+  flex: 1;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hud-muted);
+}
+
+.grow-sheet__part {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.grow-sheet__close {
+  min-width: 44px;
+  min-height: 44px;
+  font: inherit;
+  color: var(--hud-muted);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.grow-sheet__close:hover {
+  color: var(--hud-text);
+  border-color: var(--hud-border);
+}
+
+.grow-sheet__species {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 12px 8px;
+}
+
+.grow-sheet__chip {
+  min-height: 44px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--hud-muted);
+  cursor: pointer;
+  background: rgba(0, 0, 0, 0.18);
+  /* The border colour is the species' own leaf, set inline: the chip is the one
+     place the palette has to be readable as an answer to "which tree is this". */
+  border: 1px solid var(--hud-border);
+  border-radius: 999px;
+}
+
+.grow-sheet__chip--on {
+  color: var(--hud-text);
+  background: rgba(255, 210, 122, 0.16);
+  border-width: 2px;
+}
+
+.grow-sheet__list {
+  margin: 0;
+  padding: 0 12px;
+  list-style: none;
+}
+
+.grow-sheet__list li + li {
+  margin-top: 6px;
+}
+
+.grow-sheet__option {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  width: 100%;
+  min-height: 46px;
+  padding: 8px 12px;
+  font: inherit;
+  text-align: left;
+  color: var(--hud-text);
+  cursor: pointer;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--hud-border);
+  border-radius: 10px;
+}
+
+.grow-sheet__option:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.grow-sheet__name {
+  font-weight: 600;
+}
+
+.grow-sheet__cost {
+  color: var(--hud-accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.grow-sheet__gain {
+  grid-column: 1;
+  font-size: 12px;
+  color: #9ed08a;
+}
+
+.grow-sheet__short {
+  grid-column: 2;
+  font-size: 12px;
+  color: var(--hud-muted);
+}
+
+.grow-sheet__empty {
+  margin: 0;
+  padding: 4px 12px 10px;
+  font-size: 13px;
+  color: var(--hud-muted);
+}

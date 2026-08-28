@@ -3,6 +3,7 @@ import { formatNumber } from '../engine/format';
 import { GRAFT_REFUSAL_TEXT, type GraftAssessment } from '../engine/graft';
 import { speciesOrStarter } from '../engine/species';
 import { useGameStore } from './useGameStore';
+import { t } from './i18n';
 
 /**
  * Tooltip body for graft mode: what the pair under the pointer would make, or
@@ -22,7 +23,7 @@ export function GraftTooltip({ assessment }: GraftTooltipProps) {
   if (!assessment.ok) {
     return (
       <>
-        <p className="tooltip__title">No graft here</p>
+        <p className="tooltip__title">{t('graft.refused')}</p>
         <p className="tooltip__desc">{GRAFT_REFUSAL_TEXT[assessment.reason]}</p>
       </>
     );
@@ -34,7 +35,7 @@ export function GraftTooltip({ assessment }: GraftTooltipProps) {
   return (
     <>
       <p className="tooltip__title">
-        {hybrid.glyph} {assessment.firstDiscovery ? 'Something new' : hybrid.name}
+        {hybrid.glyph} {assessment.firstDiscovery ? t('graft.newHybrid') : hybrid.name}
       </p>
       <p className="tooltip__desc">
         {parents}
@@ -50,15 +51,20 @@ export function GraftTooltip({ assessment }: GraftTooltipProps) {
               <dt>{def.label}</dt>
               <dd className={short ? 'tooltip__short' : undefined}>
                 {formatNumber(line.amount)}
-                {short && ` — short by ${formatNumber(line.amount.sub(resources[line.resource]))}`}
+                {short &&
+                  t('graft.shortBy', {
+                    amount: formatNumber(line.amount.sub(resources[line.resource])),
+                  })}
               </dd>
             </div>
           );
         })}
         <div className="tooltip__row">
-          <dt>Becomes</dt>
+          <dt>{t('graft.becomes')}</dt>
           <dd className="tooltip__gain">
-            {assessment.affected.length} part{assessment.affected.length === 1 ? '' : 's'}
+            {assessment.affected.length === 1
+              ? t('graft.onePart')
+              : t('graft.parts', { count: assessment.affected.length })}
           </dd>
         </div>
       </dl>
@@ -71,9 +77,7 @@ export function GraftTooltip({ assessment }: GraftTooltipProps) {
         ))}
 
       {assessment.firstDiscovery && (
-        <p className="tooltip__hint">
-          Nobody has grown this before. Graft it to find out what it does.
-        </p>
+        <p className="tooltip__hint">{t('graft.undiscovered')}</p>
       )}
     </>
   );

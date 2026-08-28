@@ -348,3 +348,38 @@ describe('reduced motion', () => {
     expect(still).toBeGreaterThan(0);
   });
 });
+
+describe('leaf patterns', () => {
+  /** What one species' foliage draws, with patterns on. */
+  function markFor(speciesId: string): string {
+    const leaves = SCREEN.filter((segment) => segment.kind === 'leafCluster').map((segment) => ({
+      ...segment,
+      speciesId,
+    }));
+    const ctx = recordingContext();
+    drawTree(ctx, leaves, 0, new Map(), undefined, undefined, undefined, false, true);
+    return ctx.calls.join('|');
+  }
+
+  it('draws nothing extra when the setting is off', () => {
+    const leaves = SCREEN.filter((segment) => segment.kind === 'leafCluster');
+    const off = recordingContext();
+    drawTree(off, leaves, 0, new Map(), undefined, undefined, undefined, false, false);
+    const on = recordingContext();
+    drawTree(on, leaves, 0, new Map(), undefined, undefined, undefined, false, true);
+
+    expect(on.calls.length).toBeGreaterThan(off.calls.length);
+  });
+
+  it('gives every species a visibly different mark', () => {
+    // The point of the setting is that a player who cannot separate the greens
+    // can separate the *shapes*, so two species drawing the same strokes would
+    // make the whole thing decorative.
+    const marks = Object.keys(SPECIES_BY_ID).map(markFor);
+    expect(new Set(marks).size).toBe(marks.length);
+  });
+
+  it('draws the same mark for the same species every time', () => {
+    expect(markFor('willow')).toBe(markFor('willow'));
+  });
+});

@@ -1,0 +1,140 @@
+/* STEP 18's panel shell: one sheet, sliding in from the right. */
+.panel {
+  pointer-events: auto;
+  position: absolute;
+  top: 56px;
+  right: 12px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  width: 340px;
+  /* Stops above the dock rather than under it: a panel whose last row is behind
+     the tab bar is a row nobody can press. */
+  max-height: calc(100% - 140px);
+  background: var(--hud-bg);
+  border: 1px solid var(--hud-border);
+  border-radius: 10px;
+  backdrop-filter: blur(4px);
+  animation: panel-in 180ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
+.panel:focus {
+  outline: none;
+}
+
+.panel:focus-visible {
+  outline: 2px solid var(--hud-accent);
+  outline-offset: 2px;
+}
+
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.panel__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 6px;
+}
+
+.panel__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hud-muted);
+}
+
+.panel__close {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  /* 44px of hit area without 44px of visible chrome: the padding does the work. */
+  min-width: 44px;
+  min-height: 32px;
+  justify-content: center;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--hud-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.panel__close:hover {
+  color: var(--hud-text);
+  background: rgba(255, 240, 214, 0.08);
+}
+
+.panel__close:focus-visible {
+  outline: 2px solid var(--hud-accent);
+  outline-offset: 2px;
+}
+
+.panel__key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  opacity: 0.7;
+}
+
+.panel__body {
+  overflow-y: auto;
+  padding: 0 12px 12px;
+}
+
+/* The panel's own children were written as free-standing panels; inside the
+   shell they are content, so their framing is dropped. */
+.panel__body > * {
+  position: static;
+  width: auto;
+  max-height: none;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+  backdrop-filter: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    animation: none;
+  }
+}
+
+/* Phone: a sheet from the bottom, above the tab bar, as wide as the screen. */
+@media (max-width: 620px) {
+  .panel {
+    top: auto;
+    right: 0;
+    left: 0;
+    bottom: 58px;
+    width: 100%;
+    max-height: 62%;
+    border-width: 1px 0 0;
+    border-radius: 14px 14px 0 0;
+    animation-name: panel-in-sheet;
+  }
+
+  @keyframes panel-in-sheet {
+    from {
+      opacity: 0;
+      transform: translateY(18px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}

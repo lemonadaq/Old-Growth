@@ -1,43 +1,49 @@
+import { memo } from 'react';
 import { UPGRADES } from '../content/upgrades';
 import { RESOURCE_BY_ID } from '../content/resources';
 import { formatNumber } from '../engine/format';
+import { t } from './i18n';
 import { useGameStore } from './useGameStore';
 import './UpgradePanel.css';
 
 /**
- * **Temporary** upgrade panel for STEP 5.
+ * The tap upgrades — click power, crit, combo — and what they currently add up
+ * to.
  *
- * The real upgrade UI is the tree itself — you buy growth by clicking limbs.
- * This side panel exists only so the click-power / crit / combo upgrades are
- * reachable and testable before that lands, and is driven entirely by the
- * `UPGRADES` content list, so it needs no edits when upgrades are added.
+ * Most of this game's upgrades are the tree itself: you buy growth by clicking
+ * limbs. These are the ones that have no limb to hang off, because they change
+ * what a tap *is* rather than what the tree is made of, so they need a list.
+ * It lives in the Grow panel alongside the Workshop, the other place Sap and
+ * Deadwood are spent on something that is not a part.
+ *
+ * Driven entirely by the `UPGRADES` content list, so adding an upgrade needs no
+ * edit here.
  */
 export interface UpgradePanelProps {
   readonly onBuy: (id: string) => void;
 }
 
-export function UpgradePanel({ onBuy }: UpgradePanelProps) {
+function UpgradeList({ onBuy }: UpgradePanelProps) {
   const upgrades = useGameStore((s) => s.snapshot.upgrades);
   const clickStats = useGameStore((s) => s.snapshot.clickStats);
   const combo = useGameStore((s) => s.snapshot.combo);
 
   return (
-    <aside className="upgrades" aria-label="upgrades">
-      <h2 className="upgrades__title">Upgrades</h2>
+    <aside className="upgrades" aria-label={t('upgrades.title')}>
 
       <dl className="upgrades__stats">
         <div>
-          <dt>Per tap</dt>
+          <dt>{t('upgrades.perTap')}</dt>
           <dd>{formatNumber(clickStats.clickPower)}</dd>
         </div>
         <div>
-          <dt>Crit</dt>
+          <dt>{t('upgrades.crit')}</dt>
           <dd>
             {(clickStats.critChance * 100).toFixed(1)}% ×{clickStats.critMult}
           </dd>
         </div>
         <div>
-          <dt>Combo</dt>
+          <dt>{t('upgrades.combo')}</dt>
           <dd>
             {Math.floor(combo.stacks)}/{combo.cap} (×{combo.multiplier.toFixed(2)})
           </dd>
@@ -62,11 +68,11 @@ export function UpgradePanel({ onBuy }: UpgradePanelProps) {
               >
                 <span className="upgrade__name">
                   {def.name}
-                  {state.level > 0 && <span className="upgrade__level">Lv {state.level}</span>}
+                  {state.level > 0 && <span className="upgrade__level">{t('upgrades.level', { level: state.level })}</span>}
                 </span>
                 <span className="upgrade__desc">{def.description}</span>
                 <span className="upgrade__cost">
-                  {state.maxed ? 'Maxed' : `${formatNumber(state.cost)} ${currency.label}`}
+                  {state.maxed ? t('upgrades.maxed') : `${formatNumber(state.cost)} ${currency.label}`}
                 </span>
               </button>
             </li>
@@ -76,3 +82,11 @@ export function UpgradePanel({ onBuy }: UpgradePanelProps) {
     </aside>
   );
 }
+
+/**
+ * Memoised because `App` re-renders far more often than this list changes — a
+ * pointer move over the canvas updates hover state sixty times a second. Its
+ * one prop is a `useCallback` from `App`, so the comparison holds; its own
+ * store subscriptions still re-render it when a price or a level moves.
+ */
+export const UpgradePanel = memo(UpgradeList);

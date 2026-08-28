@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { RESOURCE_BY_ID } from '../content/resources';
 import {
   SEED_FRAGMENTS_PER_SEED,
@@ -7,6 +8,7 @@ import {
 } from '../content/symbionts';
 import { formatNumber } from '../engine/format';
 import type { SymbiontSnapshot } from '../engine/types';
+import { t } from './i18n';
 import { useGameStore } from './useGameStore';
 import './Symbionts.css';
 
@@ -37,7 +39,7 @@ function clock(seconds: number): string {
 /** The level track as filled and empty pips. */
 function Levels({ level }: { readonly level: number }) {
   return (
-    <span className="symbiont__pips" aria-label={`level ${level} of ${SYMBIONT_MAX_LEVEL}`}>
+    <span className="symbiont__pips" aria-label={t('symbionts.level', { level, max: SYMBIONT_MAX_LEVEL })}>
       {Array.from({ length: SYMBIONT_MAX_LEVEL }, (_, i) => (
         <span
           key={i}
@@ -83,7 +85,9 @@ function SymbiontCard({
         <>
           <Levels level={level} />
           {row?.nextPayoutIn !== null && row?.nextPayoutIn !== undefined && (
-            <p className="symbiont__timer">Next in {clock(row.nextPayoutIn)}</p>
+            <p className="symbiont__timer">
+              {t('symbionts.nextIn', { clock: clock(row.nextPayoutIn) })}
+            </p>
           )}
           {cost ? (
             <button
@@ -104,7 +108,7 @@ function SymbiontCard({
               </span>
             </button>
           ) : (
-            <p className="symbiont__maxed">At home here. Nothing more to give it.</p>
+            <p className="symbiont__maxed">{t('symbionts.maxed')}</p>
           )}
         </>
       ) : (
@@ -119,7 +123,7 @@ function SymbiontCard({
   );
 }
 
-export function Symbionts({ onUpgrade }: SymbiontsProps) {
+function SymbiontsPanel({ onUpgrade }: SymbiontsProps) {
   const rows = useGameStore((s) => s.snapshot.symbionts);
   const fragments = useGameStore((s) => s.snapshot.seedFragments);
   const nuts = useGameStore((s) => s.snapshot.buriedNuts);
@@ -127,10 +131,13 @@ export function Symbionts({ onUpgrade }: SymbiontsProps) {
   const resident = rows.filter((row) => row.active).length;
 
   return (
-    <aside className="symbionts" aria-label="symbionts">
-      <h2 className="symbionts__title">
-        Symbionts <span className="symbionts__count">{resident}/{SYMBIONTS.length}</span>
-      </h2>
+    <aside className="symbionts" aria-label={t('symbionts.title')}>
+      {/* The count only; the shell above already names the panel. */}
+      <p className="symbionts__title">
+        <span className="symbionts__count">
+          {resident}/{SYMBIONTS.length}
+        </span>
+      </p>
 
       <ul className="symbionts__list">
         {SYMBIONTS.map((def) => (
@@ -139,9 +146,17 @@ export function Symbionts({ onUpgrade }: SymbiontsProps) {
       </ul>
 
       <p className="symbionts__footer">
-        Seed Fragments {fragments}/{SEED_FRAGMENTS_PER_SEED}
-        {nuts > 0 && ` · ${nuts} nut${nuts === 1 ? '' : 's'} buried for next session`}
+        {t('symbionts.fragments', { have: fragments, needed: SEED_FRAGMENTS_PER_SEED })}
+        {nuts === 1 && t('symbionts.oneNutBuried')}
+        {nuts > 1 && t('symbionts.nutsBuried', { count: nuts })}
       </p>
     </aside>
   );
 }
+
+/**
+ * Memoised because `App` re-renders far more often than the creature list
+ * changes. Its one prop is a `useCallback` from `App`, so the comparison holds;
+ * the store subscriptions still re-render it when a payout or a level moves.
+ */
+export const Symbionts = memo(SymbiontsPanel);

@@ -93,6 +93,15 @@ export const PALETTE = {
   /** Confetti thrown by a first-time hybrid discovery. */
   confetti: ['#ffd27a', '#8fd694', '#f0b6cd', '#fdf3e0', '#6fb7e0'] as readonly string[],
   /**
+   * Keyboard focus. A cool white-blue that appears nowhere else on the canvas,
+   * because it has to be findable at a glance against bark, leaves, soil and
+   * sky alike — and because a focus ring that could be mistaken for a game
+   * state is not a focus ring. Drawn as a halo *outside* the limb so it never
+   * hides the thing it is pointing at.
+   */
+  focusRing: '#e8f4ff',
+  focusHalo: 'rgba(120, 190, 255, 0.55)',
+  /**
    * The creatures. Each is drawn in two or three flat colours and nothing else:
    * they are a few pixels across at any sane zoom, and detail at that size reads
    * as noise. What has to survive is the *silhouette* — a bee is a striped dot

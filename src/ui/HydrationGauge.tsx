@@ -5,6 +5,7 @@ import type { HydrationSnapshot } from '../engine/types';
 import { Tooltip } from './Tooltip';
 import { useGameStore } from './useGameStore';
 import './HydrationGauge.css';
+import { t } from './i18n';
 
 /**
  * The droplet gauge: how well the roots are supplying the canopy.
@@ -33,12 +34,10 @@ function moodOf(value: number): HydrationMood {
   return 'overcharged';
 }
 
-const MOOD_LABEL: Record<HydrationMood, string> = {
-  parched: 'Parched',
-  thirsty: 'Thirsty',
-  steady: 'Watered',
-  overcharged: 'Overcharged',
-};
+/** Read at render time rather than at module load, so a language swap lands. */
+function moodLabel(mood: HydrationMood): string {
+  return t(`hydration.${mood}`);
+}
 
 /** Where a hydration value sits in the droplet, as a `[0, 1]` fill fraction. */
 function hydrationFill(value: number): number {
@@ -57,49 +56,49 @@ function HydrationTooltip({ hydration }: { readonly hydration: HydrationSnapshot
 
   return (
     <>
-      <p className="tooltip__title">Hydration ×{hydration.value.toFixed(2)}</p>
-      <p className="tooltip__desc">
-        The roots water the canopy. Light, and the Sap a tap is worth, are both multiplied by this.
+      <p className="tooltip__title">
+        {t('hydration.title', { value: hydration.value.toFixed(2) })}
       </p>
+      <p className="tooltip__desc">{t('hydration.desc')}</p>
 
       <dl>
         <div className="tooltip__row">
-          <dt>Roots draw</dt>
-          <dd className="tooltip__gain">{formatNumber(hydration.income)} Water/s</dd>
+          <dt>{t('hydration.rootsDraw')}</dt>
+          <dd className="tooltip__gain">
+            {t('hydration.waterRate', { amount: formatNumber(hydration.income) })}
+          </dd>
         </div>
         <div className="tooltip__row">
           <dt>
-            Canopy wants
-            <span className="tooltip__note"> ×{hydration.leaves}</span>
+            {t('hydration.canopyWants')}
+            <span className="tooltip__note">{t('hydration.perLeaf', { count: hydration.leaves })}</span>
           </dt>
-          <dd>{formatNumber(hydration.need)} Water/s</dd>
+          <dd>{t('hydration.waterRate', { amount: formatNumber(hydration.need) })}</dd>
         </div>
         <div className="tooltip__row">
-          <dt>Supply ÷ need</dt>
+          <dt>{t('hydration.ratio')}</dt>
           <dd>{hydration.need.lte(0) ? '—' : hydration.ratio.toFixed(2)}</dd>
         </div>
         <div className="tooltip__row">
-          <dt>Applied</dt>
+          <dt>{t('hydration.applied')}</dt>
           <dd className={clampedLow ? 'tooltip__short' : 'tooltip__gain'}>
             ×{hydration.value.toFixed(2)}
           </dd>
         </div>
       </dl>
 
-      <p className="tooltip__hint">Every leaf cluster wants {WATER_NEED_PER_LEAF} Water/s.</p>
+      <p className="tooltip__hint">
+        {t('hydration.needHint', { amount: WATER_NEED_PER_LEAF })}
+      </p>
 
       {clampedLow && (
-        <p className="tooltip__hint">
-          Floored at ×{HYDRATION_MIN}. Grow roots — the canopy is running dry.
-        </p>
+        <p className="tooltip__hint">{t('hydration.floored', { min: HYDRATION_MIN })}</p>
       )}
       {clampedHigh && (
-        <p className="tooltip__hint">
-          Capped at ×{HYDRATION_MAX}. The surplus Water is going spare — grow more canopy.
-        </p>
+        <p className="tooltip__hint">{t('hydration.capped', { max: HYDRATION_MAX })}</p>
       )}
       {hydration.need.lte(0) && (
-        <p className="tooltip__hint">Nothing is drinking yet. Grow a leaf cluster.</p>
+        <p className="tooltip__hint">{t('hydration.nothingDrinking')}</p>
       )}
     </>
   );
@@ -124,7 +123,10 @@ export function HydrationGauge() {
         className="hydration__drop"
         viewBox="0 0 24 32"
         role="img"
-        aria-label={`Hydration ${hydration.value.toFixed(2)} times canopy output — ${MOOD_LABEL[mood]}`}
+        aria-label={t('hydration.badge', {
+          value: hydration.value.toFixed(2),
+          mood: moodLabel(mood),
+        })}
       >
         <defs>
           <clipPath id={clipId}>

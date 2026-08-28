@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { HYBRIDS } from '../content/hybrids';
 import { SPECIES, type SpeciesTrait } from '../content/species';
 import { Help } from './Help';
+import { t } from './i18n';
 import { useGameStore } from './useGameStore';
 import './Journal.css';
 
@@ -32,22 +33,21 @@ function Trait({ trait }: { readonly trait: SpeciesTrait }) {
   return (
     <li className={`journal__trait${trait.dormant ? ' journal__trait--dormant' : ''}`}>
       {trait.label}
-      {trait.dormant && <span className="journal__soon"> — once the seasons turn</span>}
+      {trait.dormant && <span className="journal__soon">{t('journal.dormant')}</span>}
     </li>
   );
 }
 
-export function Journal() {
+function JournalPanel() {
   const species = useGameStore((s) => s.snapshot.species);
   const discovered = new Set(species.discovered);
   const counts = species.counts;
   const [tab, setTab] = useState<Tab>('catalogue');
 
   return (
-    <aside className="journal" aria-label="journal">
-      <h2 className="journal__title">Journal</h2>
+    <aside className="journal" aria-label={t('journal.title')}>
 
-      <div className="journal__tabs" role="tablist" aria-label="journal sections">
+      <div className="journal__tabs" role="tablist" aria-label={t('journal.sections')}>
         <button
           type="button"
           role="tab"
@@ -55,7 +55,7 @@ export function Journal() {
           aria-selected={tab === 'catalogue'}
           onClick={() => setTab('catalogue')}
         >
-          Catalogue
+          {t('journal.catalogue')}
         </button>
         <button
           type="button"
@@ -64,7 +64,7 @@ export function Journal() {
           aria-selected={tab === 'help'}
           onClick={() => setTab('help')}
         >
-          Help
+          {t('journal.help')}
         </button>
       </div>
 
@@ -74,7 +74,7 @@ export function Journal() {
         <>
           <section>
             <h3 className="journal__heading">
-              Species{' '}
+              {t('journal.species')}{' '}
               <span className="journal__count">
                 {species.unlocked.length}/{SPECIES.length}
               </span>
@@ -95,7 +95,9 @@ export function Journal() {
                   >
                     <p className="journal__name">
                       <span aria-hidden>{def.glyph}</span> {def.name}
-                      {owned > 0 && <span className="journal__owned">{owned} parts</span>}
+                      {owned > 0 && (
+                        <span className="journal__owned">{t('journal.parts', { count: owned })}</span>
+                      )}
                     </p>
                     <p className="journal__flavor">{def.flavor}</p>
                     <ul className="journal__traits">
@@ -119,7 +121,7 @@ export function Journal() {
 
           <section>
             <h3 className="journal__heading">
-              Hybrids{' '}
+              {t('journal.hybrids')}{' '}
               <span className="journal__count">
                 {discovered.size}/{HYBRIDS.length}
               </span>
@@ -140,8 +142,10 @@ export function Journal() {
                   >
                     <p className="journal__name">
                       <span aria-hidden>{found ? def.glyph : '◈'}</span>{' '}
-                      {found ? def.name : 'Undiscovered'}
-                      {owned > 0 && <span className="journal__owned">{owned} parts</span>}
+                      {found ? def.name : t('journal.undiscovered')}
+                      {owned > 0 && (
+                        <span className="journal__owned">{t('journal.parts', { count: owned })}</span>
+                      )}
                     </p>
                     <p className="journal__parents">
                       {def.parents[0]} × {def.parents[1]}
@@ -165,11 +169,21 @@ export function Journal() {
           </section>
 
           <p className="journal__footer">
-            Graft (G) two adjacent branches of different species — each carrying something of its
-            own — to make a hybrid. {species.grafts} graft{species.grafts === 1 ? '' : 's'} so far.
+            {species.grafts === 1
+              ? t('journal.footerOne')
+              : t('journal.footer', { count: species.grafts })}
           </p>
         </>
       )}
     </aside>
   );
 }
+
+/**
+ * Memoised because `App` re-renders far more often than the Journal's contents
+ * change — a pointer move over the canvas updates hover state sixty times a
+ * second, and this panel rebuilds the whole species and hybrid grid each time
+ * it renders. It takes no props at all, so the comparison always holds; its own
+ * store subscription still re-renders it when a discovery lands.
+ */
+export const Journal = memo(JournalPanel);

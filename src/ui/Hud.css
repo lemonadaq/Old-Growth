@@ -5,7 +5,9 @@
   padding: 12px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  /* Everything the HUD lays out now lives at the top; the dock owns the bottom
+     edge and the weather banner and hint place themselves. */
+  justify-content: flex-start;
   color: var(--hud-text);
 }
 
@@ -135,6 +137,12 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  /* Its own row under the header, so the chips wrap across the window rather
+     than stacking into a column beside the title. */
+  margin-top: 8px;
+  /* Never under an open panel: a chip hidden behind the Journal is a number the
+     player cannot read while spending it. */
+  padding-right: 364px;
 }
 
 .hud-resource {
@@ -177,4 +185,49 @@
 
 .hud-toggle--dim:hover {
   opacity: 1;
+}
+
+/*
+ * Phone: the chips shrink to a glyph and a number.
+ *
+ * Seven labelled chips stacked down the left edge is most of a 390px screen,
+ * and the screen is the tree. The word and the per-second rate are *clipped*
+ * rather than removed, so they are still read out — a screen reader still hears
+ * "Sap 35.7, 0 per second", which is the whole chip. What goes is only the part
+ * a sighted player can get from the colour and the glyph.
+ */
+@media (max-width: 620px) {
+  /* Four badges and a title do not fit across 390px, so the row is allowed to
+     become two rather than pushing the last gauge off the screen. */
+  .hud-header {
+    flex-wrap: wrap;
+  }
+
+  .hud-header__right {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .hud-resources {
+    gap: 5px;
+    /* The phone's panels are bottom sheets, so nothing is to the right of the
+       chips to leave room for. */
+    padding-right: 0;
+  }
+
+  .hud-resource {
+    position: relative;
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+
+  .hud-resource__label,
+  .hud-resource__rate {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
 }

@@ -1,6 +1,7 @@
 import { RESOURCE_BY_ID } from '../content/resources';
 import { formatNumber } from '../engine/format';
 import type { PricedGrowthOption } from '../engine/growth';
+import { t } from './i18n';
 
 /**
  * Tooltip body for one option in the radial grow menu: what the part is, what
@@ -24,7 +25,7 @@ export function GrowOptionTooltip({ priced }: GrowOptionTooltipProps) {
 
       <dl>
         <div className="tooltip__row">
-          <dt>Cost</dt>
+          <dt>{t('growOption.cost')}</dt>
           <dd>
             {formatNumber(priced.cost)} {currency.label}
           </dd>
@@ -32,16 +33,19 @@ export function GrowOptionTooltip({ priced }: GrowOptionTooltipProps) {
 
         {priced.production && produced && (
           <div className="tooltip__row">
-            <dt>Produces</dt>
+            <dt>{t('growOption.produces')}</dt>
             <dd className={priced.production.rate.lte(0) ? 'tooltip__short' : 'tooltip__gain'}>
-              +{formatNumber(priced.production.rate)} {produced.label}/s
+              {t('growOption.rate', {
+                amount: formatNumber(priced.production.rate),
+                resource: produced.label,
+              })}
             </dd>
           </div>
         )}
 
         {priced.production?.stratum && priced.production.depth !== null && (
           <div className="tooltip__row">
-            <dt>Depth</dt>
+            <dt>{t('growOption.depth')}</dt>
             <dd>
               {Math.round(priced.production.depth)}
               <span className="tooltip__note"> {priced.production.stratum.label}</span> ×
@@ -52,14 +56,14 @@ export function GrowOptionTooltip({ priced }: GrowOptionTooltipProps) {
 
         {priced.production?.vein && (
           <div className="tooltip__row">
-            <dt>Mineral vein</dt>
+            <dt>{t('growOption.vein')}</dt>
             <dd className="tooltip__gain">×{priced.production.vein.richness.toFixed(2)}</dd>
           </div>
         )}
 
         {priced.production?.exposure !== null && priced.production?.exposure !== undefined && (
           <div className="tooltip__row">
-            <dt>Sunlight here</dt>
+            <dt>{t('growOption.sunlight')}</dt>
             <dd className={priced.production.exposure < 1 ? 'tooltip__short' : 'tooltip__gain'}>
               {Math.round(priced.production.exposure * 100)}%
             </dd>
@@ -68,7 +72,7 @@ export function GrowOptionTooltip({ priced }: GrowOptionTooltipProps) {
 
         {!priced.affordable && (
           <div className="tooltip__row">
-            <dt>Short by</dt>
+            <dt>{t('growOption.shortBy')}</dt>
             <dd className="tooltip__short">
               {formatNumber(priced.missing)} {currency.label}
             </dd>
@@ -77,21 +81,17 @@ export function GrowOptionTooltip({ priced }: GrowOptionTooltipProps) {
       </dl>
 
       {priced.production?.missingVein && (
-        <p className="tooltip__hint">
-          No vein here — this tip would find no Minerals. Try another root.
-        </p>
+        <p className="tooltip__hint">{t('growOption.noVein')}</p>
       )}
 
       {priced.production?.exposure !== null &&
         priced.production?.exposure !== undefined &&
         priced.production.exposure < 1 && (
-          <p className="tooltip__hint">
-            Already shaded — the canopy above would take part of this leaf&apos;s light.
-          </p>
+          <p className="tooltip__hint">{t('growOption.shaded')}</p>
         )}
 
       {!priced.production && (
-        <p className="tooltip__hint">Structural — grow leaves or roots on it to produce.</p>
+        <p className="tooltip__hint">{t('growOption.structural')}</p>
       )}
     </>
   );

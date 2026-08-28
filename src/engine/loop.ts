@@ -63,8 +63,11 @@ export class GameLoop {
       ticks += 1;
     }
 
+    // The simulation always advances; the draw is skipped while the tab is
+    // hidden. There is nobody to show the frame to, and a phone in a pocket
+    // should not be shading a canopy.
     const alpha = this.accumulatorMs / MS_PER_TICK;
-    this.cb.render(alpha);
+    if (!this.hidden) this.cb.render(alpha);
 
     this.sampleStats(clamped, ticks);
     return ticks;
@@ -84,6 +87,21 @@ export class GameLoop {
       this.framesThisWindow = 0;
       this.windowMs = 0;
     }
+  }
+
+  /**
+   * Whether the tab is hidden, and so whether drawing is worth doing.
+   *
+   * A backgrounded tab already has its `requestAnimationFrame` throttled to a
+   * crawl by the browser, but "a crawl" is not "nothing", and on a phone the
+   * difference is battery. The *simulation* still advances — the tree does not
+   * stop growing because the player looked away — only the draw is skipped.
+   */
+  private hidden = false;
+
+  /** Tell the loop whether its canvas is currently visible. */
+  setHidden(hidden: boolean): void {
+    this.hidden = hidden;
   }
 
   /** Begin the requestAnimationFrame-driven loop. No-op if already running. */

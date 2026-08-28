@@ -15,6 +15,90 @@ Do not refactor unrelated code.
 
 ## Changelog
 
+### 2026-08-28 — STEP 18: Final UI, mobile and accessibility
+
+Seventeen steps of systems reached through a HUD that had grown one button per
+step and a canvas only a mouse could touch. This one gives the game a shape:
+one dock, one panel shell, one way in from the keyboard, and one text table
+behind every word it says.
+
+- `src/ui/Dock.tsx` / `Dock.css` — **new**. Every mode and every panel in one
+  row along the bottom, driven by a `DockItem[]` `App` builds. On a phone it
+  becomes a full-width tab bar with 46px targets. The Vault entry is the one
+  with a state: it wears a badge and says how grown the tree is, because Go to
+  Seed is the one thing in the game that becomes possible rather than being
+  bought.
+- `src/ui/Panel.tsx` / `Panel.css` — **new**. One shell, one open panel at a
+  time. It owns the close button, Escape, and — the reason it exists — *focus*:
+  opening moves focus in, closing gives it back to whatever opened it. Keyed by
+  which panel is open, because React would otherwise reuse the instance and the
+  mount effect would never re-run, leaving the keyboard outside the panel it
+  just opened.
+- **The tree is playable with the keyboard.** `src/engine/treeNav.ts` is the
+  model: `out`/`in` follow the limb, `left`/`right` step between siblings
+  *ordered by where they are on screen* rather than by when they were bought.
+  Siblings clamp instead of wrapping — wrapping teleports focus across the
+  canopy — and `focusOrTrunk` keeps focus on something that still exists after a
+  cut. `src/render/focus.ts` draws the ring: a wide translucent halo with a thin
+  bright line on top, in a colour used nowhere else. Enter taps the focused
+  limb through the same `sim.click` a pointer uses, with the same pop and the
+  same floating number; with a dial highlighted it buys. A reachability test
+  walks the four moves breadth-first and asserts it can reach every part.
+- `src/ui/Announcer.tsx` — a polite live region, because a `<canvas>` is one
+  opaque element and everything that happens on the tree happens in pixels. It
+  carries a sequence number folded in as zero-width spaces: two identical
+  sentences in a row are not a content change, and a live region that sees no
+  change says nothing.
+- `src/ui/GrowSheet.tsx` / `GrowSheet.css` — **new**. Below 620px the radial
+  grow menu becomes a bottom sheet. A ring needs room around the limb it hangs
+  off, and a phone held in one hand has neither the room nor the reach. Same
+  options, same order, same ghost preview; the renderer still owns which menu
+  is open, so one tap drives both presentations. `Renderer.setSheetMenu` also
+  makes `isMenuArmed` false, so invisible dials can never be pressed.
+- **Touch.** `treeInput.ts` gained a real two-finger pinch (the ctrl+wheel path
+  was trackpad-only) and a long press, which is a touchscreen's only way to ask
+  what something is — it raises the very tooltip a mouse gets from hovering, by
+  calling the same code with the same point.
+- **i18n.** `src/ui/i18n.ts` + `src/content/i18n/en.json`: a flat table of dotted
+  keys with `{placeholder}` interpolation. Every user-facing string in `/src/ui`
+  now goes through `t()`. Two tests hold the line — one fails on a key the code
+  asks for and the table lacks, the other on a key nothing uses — so the Polish
+  translation has a complete, dead-weight-free table to start from.
+- **Colour-blindness, verified rather than asserted.** `species.test.ts` runs
+  every pair of species palettes through protanopia, deuteranopia and tritanopia
+  matrices and through plain luminance. It found a real failure: birch and
+  willow foliage sat 1.5% apart in lightness, the one channel a red-green
+  deficiency leaves intact — two of the six species were the same tree. Willow's
+  leaf is now a pale silvered green. The second channel is `leafPattern`,
+  declared per species (a hash into four shapes collided) and drawn by the
+  patterns-on-leaves setting.
+- **Display settings**: text scale 90–130% driving a `--font-scale` on `:root`,
+  patterns on leaves, and hints that wait to be dismissed.
+- **Performance**: off-screen segments were already culled; the loop now skips
+  the *draw* while the tab is hidden (the simulation still advances — the tree
+  does not stop growing because you looked away), and every panel is `memo`'d,
+  which matters because `App` re-renders on every pointer move.
+- The chips moved from the bottom edge to their own row under the header, where
+  the dock is not; on a phone their label and rate are clipped to a pixel rather
+  than removed, so a screen reader still hears the whole chip.
+
+**Open TODOs**
+
+- [ ] Lighthouse has not been run — there is no Chrome-with-Lighthouse in this
+      environment. What was verified instead, in headless Chromium at 1280×800
+      and 390×844: zero controls without an accessible name, zero dock targets
+      under 44px, the whole opening loop played with the keyboard alone, and no
+      console errors. Run Lighthouse before release.
+- [ ] The mid-range Android criterion is likewise unverified: no device. The
+      work it asked for (culling, hidden-tab pause, memoised panels, a sheet
+      instead of a ring) is done and the desktop preview holds 60fps.
+- [ ] `en.json` is the only table. `t()` has no locale argument yet — adding one
+      is a change to `lookup`, not to the 400-odd call sites.
+- [ ] Species pattern marks are drawn on foliage only. Bark carries species
+      colour too, and a limb with no leaves yet has no second channel.
+- [ ] The debug producer toggle and the FPS/TPS counter are still in the header;
+      STEP 20 owns taking them out of a release build.
+
 ### 2026-08-28 — STEP 17: Onboarding and feature gating
 
 Sixteen steps of systems, all of them switched on at once for a player who has

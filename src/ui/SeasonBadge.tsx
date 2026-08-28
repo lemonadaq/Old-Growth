@@ -4,6 +4,7 @@ import { SEASONS, SEASON_BY_ID } from '../content/seasons';
 import { Tooltip } from './Tooltip';
 import { useGameStore } from './useGameStore';
 import './SeasonBadge.css';
+import { t } from './i18n';
 
 /**
  * Where the year is, as a HUD chip — and what the tree has to show for the years
@@ -67,12 +68,12 @@ export function SeasonBadge() {
       <span
         className="season__value"
         role="img"
-        aria-label={`${def.label}, day ${season.day} of ${season.days}`}
+        aria-label={t('season.badge', { season: def.label, day: season.day, days: season.days })}
       >
         {def.label} <b>{season.day}</b>/{season.days}
       </span>
       {rings > 0 && (
-        <span className="season__ringbadge" aria-label={`${rings} rings`}>
+        <span className="season__ringbadge" aria-label={t('season.ringBadge', { count: rings })}>
           <Rings rings={rings} />
           <span className="season__ringcount">{rings}</span>
         </span>
@@ -83,35 +84,38 @@ export function SeasonBadge() {
           cursor ? (
             <>
               <p className="tooltip__title">
-                {def.glyph} {def.label} — year {season.year + 1}
+                {def.glyph} {t('season.title', { season: def.label, year: season.year + 1 })}
               </p>
               <p className="tooltip__desc">{def.flavor}</p>
 
               <dl>
                 <div className="tooltip__row">
-                  <dt>This season</dt>
+                  <dt>{t('season.thisSeason')}</dt>
                   <dd className={season.id === 'winter' ? 'tooltip__short' : 'tooltip__gain'}>
                     {def.effectLabel}
                   </dd>
                 </div>
                 <div className="tooltip__row">
-                  <dt>{next.label} in</dt>
+                  <dt>{t('season.nextIn', { season: next.label })}</dt>
                   <dd>{clock(season.secondsRemaining)}</dd>
                 </div>
                 <div className="tooltip__row">
-                  <dt>Rings</dt>
+                  <dt>{t('season.rings')}</dt>
                   <dd className={rings > 0 ? 'tooltip__gain' : undefined}>
-                    {rings} (×{ringMultiplier.toFixed(2)} to all production)
+                    {t('season.ringValue', {
+                      count: rings,
+                      multiplier: ringMultiplier.toFixed(2),
+                    })}
                   </dd>
                 </div>
               </dl>
 
               <p className="tooltip__hint">
                 {season.id === 'winter'
-                  ? 'Come through to the far side of this and the trunk lays down a ring — a permanent ×' +
-                    (1 + RING_PRODUCTION_BONUS).toFixed(2) +
-                    ' on everything it makes.'
-                  : 'A ring is laid down for every winter the tree comes through. There is no other way to earn one.'}
+                  ? t('season.winterHint', {
+                      multiplier: (1 + RING_PRODUCTION_BONUS).toFixed(2),
+                    })
+                  : t('season.ringHint')}
               </p>
             </>
           ) : null

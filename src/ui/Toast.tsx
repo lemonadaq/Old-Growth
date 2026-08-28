@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import './Toast.css';
+import { t } from './i18n';
 
 /**
  * The discovery toast.
@@ -47,7 +48,7 @@ export function Toast({
         <b className="toast__title">{title}</b>
         <span className="toast__body">{body}</span>
       </span>
-      <button type="button" className="toast__close" onClick={onDismiss} aria-label="dismiss">
+      <button type="button" className="toast__close" onClick={onDismiss} aria-label={t('common.dismiss')}>
         ×
       </button>
     </div>

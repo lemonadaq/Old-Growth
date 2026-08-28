@@ -1,6 +1,7 @@
 import { WEATHER_BY_ID } from '../content/weather';
 import { useGameStore } from './useGameStore';
 import './WeatherBanner.css';
+import { t } from './i18n';
 
 /**
  * What the sky is doing, and what it is about to do.
@@ -30,7 +31,9 @@ export function WeatherBanner() {
           <span className="weather__name">{def.telegraph}</span>
           <span className="weather__effect">{def.effectLabel}</span>
         </span>
-        <span className="weather__time">{Math.ceil(pending.inSeconds)}s</span>
+        <span className="weather__time">
+          {t('weather.seconds', { seconds: Math.ceil(pending.inSeconds) })}
+        </span>
       </div>
     );
   }
@@ -54,7 +57,7 @@ export function WeatherBanner() {
         <span className="weather__name">
           {def.label}
           {storm && (
-            <span className="weather__call"> — hold the trunk! Tap the anchor at the base.</span>
+            <span className="weather__call">{t('weather.brace')}</span>
           )}
         </span>
 
@@ -67,8 +70,8 @@ export function WeatherBanner() {
               />
             </span>
             <span className="weather__effect">
-              Braced {storm.taps}/{storm.target}
-              {storm.brace >= 1 ? ' — held' : ''}
+              {t('weather.braced', { taps: storm.taps, target: storm.target })}
+              {storm.brace >= 1 && t('weather.held')}
             </span>
           </>
         ) : (
@@ -83,7 +86,9 @@ export function WeatherBanner() {
           </>
         )}
       </span>
-      <span className="weather__time">{Math.ceil(active.remainingSeconds)}s</span>
+      <span className="weather__time">
+        {t('weather.seconds', { seconds: Math.ceil(active.remainingSeconds) })}
+      </span>
     </div>
   );
 }

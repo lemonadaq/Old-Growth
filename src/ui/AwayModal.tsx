@@ -4,6 +4,7 @@ import { RESOURCE_BY_ID } from '../content/resources';
 import { formatNumber } from '../engine/format';
 import { formatDuration, type OfflineReport } from '../engine/offline';
 import './AwayModal.css';
+import { t } from './i18n';
 
 /**
  * "While you were away".
@@ -60,16 +61,14 @@ export function AwayModal({ report, onCollect }: AwayModalProps) {
   };
 
   return (
-    <div className="away" role="dialog" aria-modal="true" aria-label="while you were away">
+    <div className="away" role="dialog" aria-modal="true" aria-label={t('away.title')}>
       <div className="away__card">
-        <h2 className="away__title">While you were away</h2>
+        <h2 className="away__title">{t('away.title')}</h2>
         <p className="away__duration">
-          {formatDuration(report.plan.simulatedSeconds)} of growing
+          {t('away.duration', { duration: formatDuration(report.plan.simulatedSeconds) })}
           {report.plan.capped && (
             <span className="away__capped">
-              {' '}
-              — you were gone {formatDuration(report.plan.elapsedSeconds)}, and the tree can only
-              carry on for so long alone
+              {t('away.capped', { duration: formatDuration(report.plan.elapsedSeconds) })}
             </span>
           )}
         </p>
@@ -91,9 +90,7 @@ export function AwayModal({ report, onCollect }: AwayModalProps) {
             })}
           </ul>
         ) : (
-          <p className="away__quiet">
-            The tree held its ground. Grow some roots and they will keep working while you are gone.
-          </p>
+          <p className="away__quiet">{t('away.quiet')}</p>
         )}
 
         {report.notes.length > 0 && (
@@ -105,7 +102,7 @@ export function AwayModal({ report, onCollect }: AwayModalProps) {
         )}
 
         <button type="button" className="away__collect" onClick={collect} autoFocus>
-          {counting ? 'Skip' : 'Collect'}
+          {counting ? t('away.skip') : t('away.collect')}
         </button>
       </div>
     </div>

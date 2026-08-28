@@ -39,6 +39,7 @@ import {
 import { PICKER_MIN_SPECIES } from '../content/species';
 import { drawPruneConfirm, drawPruneMark, markedPoints, type PruneSelection } from './prune';
 import { drawGraftBadge, drawGraftMark, type GraftSelection } from './graft';
+import { drawFocusRing } from './focus';
 import {
   drawSpeciesPicker,
   hitTestSpeciesPicker,
@@ -178,6 +179,9 @@ export class Renderer {
    */
   private motion = true;
 
+  /** Whether leaf clusters carry a pattern as well as a colour. */
+  private leafPatterns = false;
+
   /** Wall-clock time the next wind-drifted leaf is due, in ms. */
   private nextDriftAt = 0;
 
@@ -249,6 +253,78 @@ export class Renderer {
    * quiet. What survives is everything that carries information — the floating
    * numbers, the ripples, the shade tint, the season's colour.
    */
+  /**
+   * Draw a pattern on each leaf cluster as well as colouring it.
+   *
+   * A second channel for species and season, for anyone whose eyes do not
+   * separate the hues the palette leans on. Off by default because it costs
+   * legibility for everyone who does not need it — a patterned canopy is busier
+   * than a plain one.
+   */
+  setLeafPatterns(enabled: boolean): void {
+    this.leafPatterns = enabled;
+  }
+
+  /**
+   * The part the keyboard is currently on, or `null` when nobody is navigating
+   * by keyboard.
+   *
+   * Held here rather than in React because it is drawn every frame and changed
+   * on a keystroke: a store round-trip per arrow press would put the ring a
+   * frame behind the key, which is exactly the lag that makes keyboard
+   * navigation feel broken.
+   */
+  private focused: string | null = null;
+
+  /** Put the keyboard's cursor on a part, or take it off with `null`. */
+  setFocusedPart(nodeId: string | null): void {
+    this.focused = nodeId;
+  }
+
+  /** The part the keyboard's cursor is on. */
+  get focusedPart(): string | null {
+    return this.focused;
+  }
+
+  /**
+   * Move the menu highlight by `delta` dials, wrapping at both ends.
+   *
+   * This is the keyboard's version of {@link hoverMenu}: it drives the same
+   * highlight and the same ghost preview, so a dial reached by arrow key looks
+   * exactly like one reached by pointer. Starting from nothing highlighted, a
+   * forward step lands on the first dial and a backward step on the last.
+   */
+  stepMenu(delta: number): PricedGrowthOption | null {
+    if (!this.menu || this.menu.items.length === 0) return null;
+    const count = this.menu.items.length;
+    const from = this.hoveredItem ?? (delta > 0 ? -1 : 0);
+    return this.highlightMenu(((from + delta) % count + count) % count);
+  }
+
+  /**
+   * Highlight a dial by index, or clear it with `null`.
+   *
+   * The bottom sheet's rows are the same options in the same order, so pointing
+   * at a row lights the same ghost preview a hovered dial would — the phone
+   * still gets to see where the part would go before paying for it.
+   */
+  highlightMenu(index: number | null): PricedGrowthOption | null {
+    if (!this.menu || index === null || !this.menu.items[index]) {
+      this.hoveredItem = null;
+      this.ghost = null;
+      return null;
+    }
+    this.hoveredItem = index;
+    this.ghost = this.menu.items[index].priced;
+    return this.ghost;
+  }
+
+  /** The dial the highlight is on, whether it got there by pointer or by key. */
+  get highlightedOption(): PricedGrowthOption | null {
+    if (!this.menu || this.hoveredItem === null) return null;
+    return this.menu.items[this.hoveredItem]?.priced ?? null;
+  }
+
   setReducedMotion(reduced: boolean): void {
     this.motion = !reduced;
     this.effects.setMotion(!reduced);
@@ -431,9 +507,37 @@ export class Renderer {
     return this.ghost;
   }
 
-  /** Whether the menu's dials are live yet (see `MENU_ARM_MS`). */
+  /**
+   * Whether the menu's dials are live yet (see `MENU_ARM_MS`).
+   *
+   * Always `false` in sheet mode: the dials are not on screen there, and dials
+   * that cannot be seen must not be pressable — a tap in the middle of the
+   * canvas would otherwise buy whatever invisible option happened to be under
+   * the player's thumb.
+   */
   isMenuArmed(now: number): boolean {
-    return this.menu !== null && isMenuArmed(this.menu, now);
+    return !this.sheet && this.menu !== null && isMenuArmed(this.menu, now);
+  }
+
+  /**
+   * Show the grow menu as a bottom sheet instead of a ring of dials.
+   *
+   * A radial menu needs room around the limb it hangs off, and a 390px-wide
+   * phone held in one hand has neither the room nor the reach — the dials at
+   * the top of the ring end up under the player's own hand. The options do not
+   * change; where they are drawn does. The renderer still owns *which* menu is
+   * open, so both presentations stay in step with one tap on the tree.
+   */
+  private sheet = false;
+
+  setSheetMenu(on: boolean): void {
+    this.sheet = on;
+    if (on) this.highlightMenu(null);
+  }
+
+  /** Whether the open menu (if any) is being shown as a sheet. */
+  get isSheetMenu(): boolean {
+    return this.sheet;
   }
 
   /**
@@ -614,6 +718,14 @@ export class Renderer {
     return this.camera.zoom;
   }
 
+  /**
+   * Where on screen a part is, for anything that has to happen *at* it without
+   * a pointer having pointed there — a keyboard tap's floating number, say.
+   */
+  partAnchor(nodeId: string): Vec2 | null {
+    return this.nodeAnchor(nodeId);
+  }
+
   /** Screen-space point the grow menu hangs off for a node: its far end. */
   private nodeAnchor(nodeId: string): Vec2 | null {
     const segment = this.screenTree.find((s) => s.id === nodeId);
@@ -764,6 +876,7 @@ export class Renderer {
       snapshot.leafLight,
       seasonLeafCast(snapshot.season.id),
       this.motion,
+      this.leafPatterns,
     );
 
     // A leaf on the wind, if one is due. Emitted after the tree is drawn so it
@@ -779,6 +892,11 @@ export class Renderer {
       this.scene,
       snapshot.elapsedSeconds,
     );
+
+    // The keyboard's cursor on the tree, over the wood and under the mode
+    // overlays — a marked cut or a chosen graft limb is a stronger statement
+    // about the same part and must win where they land together.
+    drawFocusRing(ctx, this.screenTree, this.focused);
 
     if (this.pruning && this.pruneSelection) {
       drawPruneMark(ctx, this.screenTree, this.pruneSelection, now);
@@ -810,7 +928,10 @@ export class Renderer {
     const ghost = this.ghostSegment();
     if (ghost) drawGhostPart(ctx, ghost);
 
-    if (this.menu) {
+    // In sheet mode the menu is DOM, not canvas: the ghost preview above still
+    // draws, because seeing where the part would land is the whole reason to
+    // preview it, but the dials and chips are the sheet's job.
+    if (this.menu && !this.sheet) {
       drawRadialMenu(ctx, this.menu, this.hoveredItem, now);
       drawSpeciesPicker(
         ctx,

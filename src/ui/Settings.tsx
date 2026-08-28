@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { HARD_RESET_PHRASE } from '../content/save';
 import { MUTE_HOTKEY } from '../content/audio';
+import { FONT_SCALE_MAX, FONT_SCALE_MIN, FONT_SCALE_STEP } from '../content/settings';
+import { t } from './i18n';
 import type { AudioVolumes } from './audio';
 import './Settings.css';
 
@@ -25,6 +27,18 @@ export interface SettingsProps {
   readonly onSetVolume: (channel: 'master' | 'music' | 'sfx', value: number) => void;
   /** Whether the system has asked for reduced motion. Reported, not settable. */
   readonly reducedMotion: boolean;
+  /** Display preferences, as the game is currently drawing them. */
+  readonly display: {
+    readonly fontScale: number;
+    readonly leafPatterns: boolean;
+    readonly hintsStay: boolean;
+  };
+  /** Change one or more display preferences. */
+  readonly onSetDisplay: (next: {
+    fontScale?: number;
+    leafPatterns?: boolean;
+    hintsStay?: boolean;
+  }) => void;
   /** Forget every contextual hint, so the game explains itself again. */
   readonly onResetHints: () => void;
   /** Produce the export text. Async: it compresses. */
@@ -40,11 +54,11 @@ export interface SettingsProps {
 
 /** "just now", "2m ago" — enough to answer "did it save?" and nothing more. */
 function ago(timestamp: number | null): string {
-  if (timestamp === null) return 'not yet';
+  if (timestamp === null) return t('time.notYet');
   const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
-  if (seconds < 10) return 'just now';
-  if (seconds < 60) return `${seconds}s ago`;
-  return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 10) return t('time.justNow');
+  if (seconds < 60) return t('time.secondsAgo', { seconds });
+  return t('time.minutesAgo', { minutes: Math.floor(seconds / 60) });
 }
 
 /** One labelled volume slider, shown as a percentage. */
@@ -71,7 +85,7 @@ function VolumeSlider({
         step={1}
         value={Math.round(value * 100)}
         disabled={disabled}
-        aria-label={`${label} volume`}
+        aria-label={t('settings.volumeOf', { channel: label })}
         onChange={(event) => onChange(Number(event.target.value) / 100)}
       />
       <span className="settings__slider-value">{Math.round(value * 100)}%</span>
@@ -79,11 +93,13 @@ function VolumeSlider({
   );
 }
 
-export function Settings({
+function SettingsPanel({
   volumes,
   onToggleMute,
   onSetVolume,
   reducedMotion,
+  display,
+  onSetDisplay,
   onResetHints,
   onExport,
   onImport,
@@ -117,14 +133,13 @@ export function Settings({
   };
 
   return (
-    <aside className="settings" aria-label="settings">
-      <h2 className="settings__title">Settings</h2>
+    <aside className="settings" aria-label={t('settings.title')}>
 
       <section className="settings__block">
-        <h3 className="settings__heading">Sound</h3>
+        <h3 className="settings__heading">{t('settings.sound')}</h3>
         <label className="settings__toggle">
           <input type="checkbox" checked={volumes.muted} onChange={onToggleMute} />
-          Mute everything <kbd className="settings__key">{MUTE_HOTKEY.toUpperCase()}</kbd>
+          {t('settings.mute')} <kbd className="settings__key">{MUTE_HOTKEY.toUpperCase()}</kbd>
         </label>
         {/*
           The sliders stay visible while muted rather than disappearing, and are
@@ -132,27 +147,77 @@ export function Settings({
           player who unmutes should get back the mix they had.
         */}
         <VolumeSlider
-          label="Master"
+          label={t('settings.master')}
           value={volumes.master}
           disabled={volumes.muted}
           onChange={(value) => onSetVolume('master', value)}
         />
         <VolumeSlider
-          label="Music"
+          label={t('settings.music')}
           value={volumes.music}
           disabled={volumes.muted}
           onChange={(value) => onSetVolume('music', value)}
         />
         <VolumeSlider
-          label="Effects"
+          label={t('settings.effects')}
           value={volumes.sfx}
           disabled={volumes.muted}
           onChange={(value) => onSetVolume('sfx', value)}
         />
-        <p className="settings__note">
-          Every sound in the game is currently synthesised rather than recorded — placeholders until
-          the real ones are made.
-        </p>
+        <p className="settings__note">{t('settings.soundNote')}</p>
+      </section>
+
+      {/*
+        Display sits above Motion and Hints because it is the section a player
+        goes looking for: text they cannot read is the thing that sends someone
+        to Settings in the first place.
+      */}
+      <section className="settings__block">
+        <h3 className="settings__heading">{t('settings.display')}</h3>
+        <label className="settings__slider">
+          <span className="settings__slider-label">{t('settings.fontScale')}</span>
+          <input
+            type="range"
+            min={FONT_SCALE_MIN * 100}
+            max={FONT_SCALE_MAX * 100}
+            step={FONT_SCALE_STEP * 100}
+            value={Math.round(display.fontScale * 100)}
+            aria-label={t('settings.fontScale')}
+            onChange={(event) => onSetDisplay({ fontScale: Number(event.target.value) / 100 })}
+          />
+          <span className="settings__slider-value">{Math.round(display.fontScale * 100)}%</span>
+        </label>
+        <p className="settings__note">{t('settings.fontScaleNote')}</p>
+
+        <label className="settings__toggle">
+          <input
+            type="checkbox"
+            checked={display.leafPatterns}
+            onChange={(event) => onSetDisplay({ leafPatterns: event.target.checked })}
+          />
+          {t('settings.leafPatterns')}
+        </label>
+        <p className="settings__note">{t('settings.leafPatternsNote')}</p>
+
+        <label className="settings__toggle">
+          <input
+            type="checkbox"
+            checked={display.hintsStay}
+            onChange={(event) => onSetDisplay({ hintsStay: event.target.checked })}
+          />
+          {t('settings.hintsStay')}
+        </label>
+        <p className="settings__note">{t('settings.hintsStayNote')}</p>
+      </section>
+
+      {/*
+        The keyboard section is a reference, not a control: everything it
+        describes already works, and a player who cannot use a pointer has no
+        way to discover any of it from the canvas itself.
+      */}
+      <section className="settings__block">
+        <h3 className="settings__heading">{t('settings.keyboard')}</h3>
+        <p className="settings__note">{t('settings.keyboardNote')}</p>
       </section>
 
       {/*
@@ -162,11 +227,8 @@ export function Settings({
       */}
       {reducedMotion && (
         <section className="settings__block">
-          <h3 className="settings__heading">Motion</h3>
-          <p className="settings__note">
-            Your system asks for reduced motion, so the canopy is holding still and the drifting
-            leaves are off. Numbers, colours and sound are unaffected.
-          </p>
+          <h3 className="settings__heading">{t('settings.motion')}</h3>
+          <p className="settings__note">{t('settings.motionNote')}</p>
         </section>
       )}
 
@@ -177,11 +239,8 @@ export function Settings({
         the trunk, and there has to be a way back that is not "start a new save".
       */}
       <section className="settings__block">
-        <h3 className="settings__heading">Hints</h3>
-        <p className="settings__note">
-          Contextual bubbles appear once each, when the thing they are about first becomes possible.
-          The Journal’s Help tab has all of it in one place, whenever you want it.
-        </p>
+        <h3 className="settings__heading">{t('settings.hints')}</h3>
+        <p className="settings__note">{t('settings.hintsNote')}</p>
         <button
           type="button"
           className="settings__button"
@@ -190,26 +249,26 @@ export function Settings({
             setHintsReset(true);
           }}
         >
-          Show hints again
+          {t('settings.showHints')}
         </button>
-        {hintsReset && <p className="settings__note">Cleared — the game will explain itself.</p>}
+        {hintsReset && <p className="settings__note">{t('settings.hintsCleared')}</p>}
       </section>
 
       <section className="settings__block">
-        <h3 className="settings__heading">Save</h3>
+        <h3 className="settings__heading">{t('settings.save')}</h3>
         <p className={`settings__status${saveHealthy ? '' : ' settings__status--bad'}`}>
           {saveHealthy
-            ? `Autosaved ${ago(lastSavedAt)}.`
-            : 'This browser is refusing to store the save — export a copy to keep it.'}
+            ? t('settings.autosaved', { when: ago(lastSavedAt) })
+            : t('settings.saveRefused')}
         </p>
 
         <button type="button" className="settings__button" onClick={handleExport}>
-          Export save
+          {t('settings.export')}
         </button>
         {exported && (
           <>
             <p className="settings__note">
-              {copied ? 'Copied to the clipboard.' : 'Select and copy this:'}
+              {copied ? t('settings.copied') : t('settings.selectCopy')}
             </p>
             <textarea className="settings__text" readOnly value={exported} rows={3} />
           </>
@@ -217,12 +276,12 @@ export function Settings({
       </section>
 
       <section className="settings__block">
-        <h3 className="settings__heading">Import</h3>
+        <h3 className="settings__heading">{t('settings.import')}</h3>
         <textarea
           className="settings__text"
           value={importText}
           rows={3}
-          placeholder="Paste an exported save"
+          placeholder={t('settings.importPaste')}
           onChange={(event) => {
             setImportText(event.target.value);
             setImportError(null);
@@ -234,22 +293,19 @@ export function Settings({
           disabled={importText.trim() === ''}
           onClick={handleImport}
         >
-          Import save
+          {t('settings.importButton')}
         </button>
         {importError && <p className="settings__error">{importError}</p>}
       </section>
 
       <section className="settings__block settings__block--danger">
-        <h3 className="settings__heading">Hard reset</h3>
-        <p className="settings__note">
-          Everything goes: the tree, the Seeds, the Vault, the Journal, the forest. There is no
-          undo.
-        </p>
+        <h3 className="settings__heading">{t('settings.hardReset')}</h3>
+        <p className="settings__note">{t('settings.hardResetNote')}</p>
         <input
           className="settings__input"
           value={resetPhrase}
-          placeholder={`Type ${HARD_RESET_PHRASE}`}
-          aria-label={`type ${HARD_RESET_PHRASE} to confirm`}
+          placeholder={t('settings.hardResetPlaceholder', { phrase: HARD_RESET_PHRASE })}
+          aria-label={t('settings.hardResetConfirm', { phrase: HARD_RESET_PHRASE })}
           onChange={(event) => setResetPhrase(event.target.value)}
         />
         <button
@@ -261,9 +317,16 @@ export function Settings({
             setResetPhrase('');
           }}
         >
-          Uproot everything
+          {t('settings.uproot')}
         </button>
       </section>
     </aside>
   );
 }
+
+/**
+ * Memoised because `App` re-renders far more often than any of these settings
+ * change. Its props are all `useCallback`s and plain values from `App`, so the
+ * comparison holds.
+ */
+export const Settings = memo(SettingsPanel);

@@ -1,5 +1,5 @@
 import { GROWTH_RULE_BY_TYPE, type TreeNodeType } from '../content/growth';
-import { STARTER_SPECIES_ID } from '../content/species';
+import { SPECIES_BY_ID, STARTER_SPECIES_ID } from '../content/species';
 import type { Viewport } from '../engine/camera';
 import { speciesPalette } from '../engine/species';
 import type { ScreenSegment, TreeBounds, TreeLayout } from '../engine/tree';
@@ -269,6 +269,7 @@ function drawLeafCluster(
   sway: { dx: number; dy: number } = STILL,
   tint = 0,
   season?: ColorCast,
+  patterns = false,
 ): void {
   const radius = Math.max(3, segment.width) * t;
   const blobs = blobOffsets(segment.id, 4);
@@ -293,6 +294,85 @@ function drawLeafCluster(
     );
     ctx.fill();
   }
+
+  // The second channel: a species-stable mark over the cluster, for anyone whose
+  // eyes do not separate the hues the palette leans on. Derived from the species
+  // id rather than chosen per cluster, so every oak carries the same mark and the
+  // pattern *means* something.
+  if (patterns) drawLeafPattern(ctx, segment, radius, sway, leaves.leafShade);
+
+  ctx.restore();
+}
+
+/**
+ * A small mark over a leaf cluster, keyed by its species.
+ *
+ * Which mark belongs to which species is declared in the species catalogue
+ * rather than hashed from its id: a hash into a fixed set of shapes collides,
+ * and two species sharing a mark defeats the only reason the marks exist. The
+ * catalogue guarantees they are distinct; this only has to draw them.
+ */
+function drawLeafPattern(
+  ctx: CanvasRenderingContext2D,
+  segment: ScreenSegment,
+  radius: number,
+  sway: { dx: number; dy: number },
+  color: string,
+): void {
+  const cx = segment.b.x + sway.dx;
+  const cy = segment.b.y + sway.dy;
+  const r = radius * 0.34;
+  if (r < 1) return;
+
+  const species = SPECIES_BY_ID[segment.speciesId ?? STARTER_SPECIES_ID];
+
+  ctx.save();
+  ctx.globalAlpha = 0.75;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = Math.max(1, r * 0.42);
+  ctx.lineCap = 'round';
+
+  switch (species?.leafPattern ?? 'dot') {
+    case 'ring':
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * 0.75, 0, Math.PI * 2);
+      ctx.stroke();
+      break;
+    case 'bar': // Lying down.
+      ctx.beginPath();
+      ctx.moveTo(cx - r, cy);
+      ctx.lineTo(cx + r, cy);
+      ctx.stroke();
+      break;
+    case 'stripe': // Standing up — the same line, and unmistakably not the same mark.
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - r);
+      ctx.lineTo(cx, cy + r);
+      ctx.stroke();
+      break;
+    case 'cross':
+      ctx.beginPath();
+      ctx.moveTo(cx - r, cy - r);
+      ctx.lineTo(cx + r, cy + r);
+      ctx.moveTo(cx + r, cy - r);
+      ctx.lineTo(cx - r, cy + r);
+      ctx.stroke();
+      break;
+    case 'chevron':
+      ctx.beginPath();
+      ctx.moveTo(cx - r, cy - r * 0.5);
+      ctx.lineTo(cx, cy + r * 0.6);
+      ctx.lineTo(cx + r, cy - r * 0.5);
+      ctx.stroke();
+      break;
+    default: // A dot.
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+  }
+
   ctx.restore();
 }
 
@@ -392,6 +472,7 @@ export function drawTree(
   exposures?: LeafExposures,
   season?: ColorCast,
   motion = true,
+  patterns = false,
 ): void {
   const segments = viewport ? cullSegments(allSegments, viewport) : allSegments;
   if (segments.length === 0) return;
@@ -450,6 +531,7 @@ export function drawTree(
         sway,
         shadeTint(exposures?.get(segment.id)?.exposure),
         season,
+        patterns,
       );
     } else {
       drawBlossom(ctx, segment, t, 1, sway);

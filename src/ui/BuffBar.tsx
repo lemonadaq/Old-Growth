@@ -1,6 +1,7 @@
 import { BUFF_BY_ID } from '../content/buffs';
 import { useGameStore } from './useGameStore';
 import './BuffBar.css';
+import { t } from './i18n';
 
 /**
  * Running buffs, with the time left on each.
@@ -18,7 +19,7 @@ export function BuffBar() {
   if (buffs.length === 0) return null;
 
   return (
-    <ul className="buffs" aria-label="active effects">
+    <ul className="buffs" aria-label={t('hud.effects')}>
       {buffs.map((buff) => {
         const def = BUFF_BY_ID[buff.id];
         if (!def) return null;

@@ -105,11 +105,27 @@ export interface SpeciesPalette {
   readonly rootTip: string;
 }
 
+/**
+ * The mark drawn over a species' foliage when patterns are turned on.
+ *
+ * A second channel for identity, for anyone whose eyes do not separate the
+ * greens this palette leans on — six species and four of them green is a
+ * deliberate look, and it is exactly the look that fails under deuteranopia.
+ *
+ * Shapes rather than textures: a texture on a cluster ten pixels across is
+ * noise. These six stay legible at that size and stay distinct from each other
+ * in outline alone, which is the whole point — a player who cannot tell the
+ * greens apart must be able to tell the marks apart.
+ */
+export type LeafPattern = 'dot' | 'ring' | 'bar' | 'stripe' | 'cross' | 'chevron';
+
 export interface SpeciesDef {
   readonly id: string;
   readonly name: string;
   /** One glyph for the Journal card and the picker chip. */
   readonly glyph: string;
+  /** Its mark under the patterns-on-leaves setting. Unique across species. */
+  readonly leafPattern: LeafPattern;
   /** One line of flavour. */
   readonly flavor: string;
   readonly palette: SpeciesPalette;
@@ -170,6 +186,7 @@ export const SPECIES: readonly SpeciesDef[] = [
     id: 'oak',
     name: 'Oak',
     glyph: '🌳',
+    leafPattern: 'dot',
     flavor: 'Slow, broad and patient. Whole ecosystems have waited under one.',
     palette: {
       bark: '#6a4726',
@@ -212,6 +229,7 @@ export const SPECIES: readonly SpeciesDef[] = [
     id: 'birch',
     name: 'Birch',
     glyph: '🪵',
+    leafPattern: 'stripe',
     flavor: 'Paper bark and a short life. Birch grows first and grows fast.',
     palette: {
       bark: '#d8d2c4',
@@ -247,15 +265,20 @@ export const SPECIES: readonly SpeciesDef[] = [
     id: 'willow',
     name: 'Willow',
     glyph: '🌾',
+    leafPattern: 'bar',
     flavor: 'It finds water the way a rumour finds a village.',
     palette: {
       bark: '#7d6b4a',
       barkHighlight: '#9d8a63',
       branch: '#8b7a56',
       twig: '#9b8c66',
-      leaf: '#a8c274',
-      leafShade: '#7f9a52',
-      leafHighlight: '#c6db98',
+      // Pale and silvered rather than the yellow-green it started as: at that
+      // value it sat within a couple of percent of birch's foliage in
+      // lightness, which is the one channel a red-green deficiency leaves
+      // intact — two of the six species were the same tree to those players.
+      leaf: '#c3d9a0',
+      leafShade: '#9dba76',
+      leafHighlight: '#e0edc6',
       blossom: '#e8e2a8',
       blossomCore: '#fdf8d8',
       root: '#b09872',
@@ -283,6 +306,7 @@ export const SPECIES: readonly SpeciesDef[] = [
     id: 'maple',
     name: 'Maple',
     glyph: '🍁',
+    leafPattern: 'cross',
     flavor: 'Burns red for a fortnight each autumn, then gives the whole lot back to the soil.',
     palette: {
       bark: '#5f4632',
@@ -319,6 +343,7 @@ export const SPECIES: readonly SpeciesDef[] = [
     id: 'pine',
     name: 'Pine',
     glyph: '🌲',
+    leafPattern: 'chevron',
     flavor: 'Keeps its needles through the cold, and keeps working through it too.',
     palette: {
       bark: '#57402c',
@@ -355,6 +380,7 @@ export const SPECIES: readonly SpeciesDef[] = [
     id: 'cherry',
     name: 'Cherry',
     glyph: '🌸',
+    leafPattern: 'ring',
     flavor: 'Spends everything it has on two weeks of flower, and is right to.',
     palette: {
       bark: '#6b4048',

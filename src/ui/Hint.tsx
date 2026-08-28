@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { HINT_DURATION_MS } from '../content/progression';
 import type { HintSnapshot } from '../engine/types';
 import './Hint.css';
+import { t } from './i18n';
 
 /**
  * A contextual hint: one bubble, once ever, with a ✕ on it.
@@ -44,7 +45,7 @@ export function Hint({ hint, onDismiss, durationMs = HINT_DURATION_MS }: HintPro
       <button
         type="button"
         className="hint__close"
-        aria-label="dismiss hint"
+        aria-label={t('common.dismissHint')}
         onClick={() => onDismiss(hint.id)}
       >
         ×

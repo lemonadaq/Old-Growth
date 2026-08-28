@@ -1,7 +1,9 @@
+import { memo } from 'react';
 import { MAX_TOTEMS, TOTEMS, TOTEM_BY_ID } from '../content/totems';
 import { RESOURCE_BY_ID } from '../content/resources';
 import { formatNumber } from '../engine/format';
 import { totemCost } from '../engine/totems';
+import { t } from './i18n';
 import { useGameStore } from './useGameStore';
 import './Workshop.css';
 
@@ -20,21 +22,21 @@ export interface WorkshopProps {
   readonly onCraft: (totemId: string) => void;
 }
 
-export function Workshop({ onCraft }: WorkshopProps) {
+function WorkshopPanel({ onCraft }: WorkshopProps) {
   const totems = useGameStore((s) => s.snapshot.totems);
   const deadwood = useGameStore((s) => s.snapshot.resources.deadwood);
   const full = totems.length >= MAX_TOTEMS;
 
   return (
-    <aside className="workshop" aria-label="workshop">
-      <h2 className="workshop__title">Workshop</h2>
+    <aside className="workshop" aria-label={t('workshop.title')}>
+      <h3 className="workshop__title">{t('workshop.title')}</h3>
 
       <p className="workshop__stock">
         <span aria-hidden>{RESOURCE_BY_ID.deadwood.glyph}</span>
-        <b>{formatNumber(deadwood)}</b> Deadwood
+        {t('workshop.stock', { amount: formatNumber(deadwood) })}
       </p>
 
-      <ol className="workshop__slots" aria-label={`totem slots, ${totems.length} of ${MAX_TOTEMS}`}>
+      <ol className="workshop__slots" aria-label={t('workshop.slots', { filled: totems.length, total: MAX_TOTEMS })}>
         {Array.from({ length: MAX_TOTEMS }, (_, slot) => {
           const planted = totems[slot];
           const def = planted ? TOTEM_BY_ID[planted] : undefined;
@@ -42,7 +44,7 @@ export function Workshop({ onCraft }: WorkshopProps) {
             <li
               className={`workshop__slot${def ? ' workshop__slot--filled' : ''}`}
               key={slot}
-              title={def ? def.name : 'Empty — carve a totem to plant one here'}
+              title={def ? def.name : t('workshop.emptySlot')}
               style={def ? { borderColor: def.color } : undefined}
             >
               <span aria-hidden>{def ? def.glyph : '·'}</span>
@@ -71,7 +73,9 @@ export function Workshop({ onCraft }: WorkshopProps) {
                 </span>
                 <span className="totem__desc">{def.description}</span>
                 <span className="totem__cost">
-                  {full ? 'No room at the base' : `${formatNumber(totemCost(def))} Deadwood`}
+                  {full
+                    ? t('workshop.full')
+                    : t('workshop.cost', { amount: formatNumber(totemCost(def)) })}
                 </span>
               </button>
             </li>
@@ -79,9 +83,14 @@ export function Workshop({ onCraft }: WorkshopProps) {
         })}
       </ul>
 
-      <p className="workshop__hint">
-        Carved totems are permanent. Prune a limb (P) to make Deadwood.
-      </p>
+      <p className="workshop__hint">{t('workshop.hint')}</p>
     </aside>
   );
 }
+
+/**
+ * Memoised because `App` re-renders far more often than the totem list changes.
+ * Its one prop is a `useCallback` from `App`, so the comparison holds; the
+ * store subscription still re-renders it when Deadwood or a slot moves.
+ */
+export const Workshop = memo(WorkshopPanel);

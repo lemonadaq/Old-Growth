@@ -19,8 +19,12 @@ import { SYMBIONT_BY_ID } from '../content/symbionts';
 import { WEATHER_BY_ID } from '../content/weather';
 import type { SeasonEvent } from '../engine/seasons';
 import { enableTestProducers, disableTestProducers } from '../engine/debugProducers';
+import { focusOrTrunk, navigate, type NavDirection } from '../engine/treeNav';
+import { GROWTH_RULE_BY_TYPE } from '../content/growth';
 import { Renderer } from '../render/canvas';
+import { Announcer } from './Announcer';
 import { GraftTooltip } from './GraftTooltip';
+import { GrowSheet } from './GrowSheet';
 import { GrowOptionTooltip } from './GrowOptionTooltip';
 import { Hud } from './Hud';
 import { Journal } from './Journal';
@@ -29,6 +33,9 @@ import { PruneTooltip } from './PruneTooltip';
 import { SeedVault } from './SeedVault';
 import { Symbionts } from './Symbionts';
 import { AwayModal } from './AwayModal';
+import { Dock, type DockItem } from './Dock';
+import { Panel } from './Panel';
+import { t } from './i18n';
 import { Toast } from './Toast';
 import { Tooltip } from './Tooltip';
 import { UpgradePanel } from './UpgradePanel';
@@ -38,7 +45,9 @@ import { MUTE_HOTKEY, WEATHER_CUE } from '../content/audio';
 import { ROOT_REVEAL_BODY, ROOT_REVEAL_TITLE } from '../content/progression';
 import { DEFAULT_SETTINGS } from '../content/settings';
 import { watchReducedMotion } from './motion';
+import { mediaQuery, watchMedia, PHONE_QUERY } from './media';
 import { attachTreeInput } from './treeInput';
+import { useGameStore } from './useGameStore';
 import './App.css';
 
 /**
@@ -76,11 +85,71 @@ interface DiscoveryToast {
   readonly key: number;
 }
 
+/** The panels the dock can open. Exactly one is ever open. */
+type PanelId = 'grow' | 'journal' | 'symbionts' | 'vault' | 'settings';
+
+/** Each panel's title, which is also its accessible name in the shell. */
+const PANEL_TITLES: Readonly<Record<PanelId, string>> = {
+  grow: 'upgrades.title',
+  journal: 'journal.title',
+  symbionts: 'symbionts.title',
+  vault: 'vault.title',
+  settings: 'settings.title',
+};
+
 /** How far above the tap the Dew number is spawned, so it clears the "+N". */
 const DEW_LABEL_OFFSET_PX = 26;
 
 /** Vertical spacing between the payout numbers a cut throws up. */
 const PRUNE_LABEL_SPACING_PX = 24;
+
+/**
+ * What each arrow key means on the tree.
+ *
+ * Up and down are the limb's own axis — out toward the tips, in toward the
+ * trunk — rather than screen directions, because half the tree grows downward
+ * and "up" underground would have to mean the opposite of "up" in the canopy.
+ * Left and right stay literal: they step along the siblings in the order they
+ * are drawn.
+ */
+const ARROW_DIRECTION: Readonly<Record<string, NavDirection | undefined>> = {
+  ArrowUp: 'out',
+  ArrowDown: 'in',
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
+};
+
+/**
+ * Everything the phone's grow sheet draws, snapshotted out of the renderer and
+ * the simulation once per frame.
+ *
+ * `key` is what makes that affordable: it folds the part, its options, their
+ * prices, their affordability and the species choice into one string, so the
+ * frame loop can tell in a comparison whether React has anything new to draw.
+ * Without it the sheet would re-render sixty times a second on a device that
+ * can least afford it.
+ */
+interface GrowSheetState {
+  readonly key: string;
+  readonly nodeId: string;
+  readonly partLabel: string;
+  readonly options: readonly PricedGrowthOption[];
+  readonly species: { readonly unlocked: readonly string[]; readonly planting: string };
+}
+
+/** The four things the phone's grow sheet can ask the game to do. */
+interface GrowSheetActions {
+  grow(option: PricedGrowthOption): void;
+  /** Preview the option at `index` on the tree; `null` clears the preview. */
+  preview(index: number | null): void;
+  chooseSpecies(speciesId: string): void;
+  close(): void;
+}
+
+/** "12 Sap" — an option's price, said the way the dial shows it. */
+function describeCost(option: PricedGrowthOption): string {
+  return `${formatNumber(option.cost)} ${RESOURCE_BY_ID[option.costResource].label}`;
+}
 
 export function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -89,15 +158,29 @@ export function App() {
   const [testProducers, setTestProducers] = useState(false);
   const [pruneMode, setPruneMode] = useState(false);
   const [graftMode, setGraftMode] = useState(false);
-  const [journalOpen, setJournalOpen] = useState(false);
-  const [symbiontsOpen, setSymbiontsOpen] = useState(false);
-  const [vaultOpen, setVaultOpen] = useState(false);
+  // One panel at a time, as one value. Four independent booleans could
+  // represent two panels open at once — a state the UI has no way to draw — and
+  // every toggle had to remember to close the other three.
+  const [openPanel, setOpenPanel] = useState<PanelId | null>('grow');
   const [toast, setToast] = useState<DiscoveryToast | null>(null);
   const [away, setAway] = useState<OfflineReport | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [saveHealthy, setSaveHealthy] = useState(true);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [hover, setHover] = useState<HoverState | null>(null);
+  // What the live region is saying. The sequence number is carried alongside
+  // the text because a live region announces *changes*: moving between two
+  // limbs of the same kind produces the same sentence twice, and without
+  // something to distinguish them the second one is silence.
+  const [announcement, setAnnouncement] = useState({ text: '', seq: 0 });
+  /** How close the tree is to being worth giving up, for the Vault's dock badge. */
+  const maturity = useGameStore((s) => s.snapshot.prestige.progress);
+  /**
+   * The grow menu as the phone shows it — `null` on a wide screen, where the
+   * dials on the canvas are the menu. Mirrored out of the renderer rather than
+   * owned here: the renderer still decides which limb's menu is open, so one
+   * tap on the tree drives both presentations.
+   */
+  const [sheet, setSheet] = useState<GrowSheetState | null>(null);
 
   // The input handlers are wired once, on mount, and must read the *current*
   // mode rather than the one that was in force when they were created.
@@ -105,6 +188,12 @@ export function App() {
   const graftModeRef = useRef(false);
   /** The autosave, exposed so Settings can force one after import or reset. */
   const saveRef = useRef<(() => boolean) | null>(null);
+  /**
+   * What the phone's grow sheet does when pressed. The work lives inside the
+   * mount effect, where the simulation and renderer are, so the buttons call
+   * through this rather than closing over instances that do not exist yet.
+   */
+  const sheetActionsRef = useRef<GrowSheetActions | null>(null);
 
   // The two canvas modes are mutually exclusive: they are different intentions
   // aimed at the same limb, and both live at once would make every click a guess.
@@ -124,54 +213,18 @@ export function App() {
       }),
     [],
   );
-  // The right-hand slot holds one panel at a time; opening either closes the
-  // other rather than stacking two sheets of glass over the tree.
-  const toggleJournal = useCallback(
-    () =>
-      setJournalOpen((open) => {
-        if (!open) {
-          setSymbiontsOpen(false);
-          setVaultOpen(false);
-        }
-        return !open;
-      }),
+  /** Open a panel, or close it if it is the one already open. */
+  const togglePanel = useCallback(
+    (id: PanelId) => setOpenPanel((current) => (current === id ? null : id)),
     [],
   );
-  const toggleSymbionts = useCallback(
-    () =>
-      setSymbiontsOpen((open) => {
-        if (!open) {
-          setJournalOpen(false);
-          setVaultOpen(false);
-        }
-        return !open;
-      }),
-    [],
-  );
-  const toggleVault = useCallback(
-    () =>
-      setVaultOpen((open) => {
-        if (!open) {
-          setJournalOpen(false);
-          setSymbiontsOpen(false);
-          setSettingsOpen(false);
-        }
-        return !open;
-      }),
-    [],
-  );
-  const toggleSettings = useCallback(
-    () =>
-      setSettingsOpen((open) => {
-        if (!open) {
-          setJournalOpen(false);
-          setSymbiontsOpen(false);
-          setVaultOpen(false);
-        }
-        return !open;
-      }),
-    [],
-  );
+  const closePanel = useCallback(() => setOpenPanel(null), []);
+
+  const toggleJournal = useCallback(() => togglePanel('journal'), [togglePanel]);
+  const toggleSymbionts = useCallback(() => togglePanel('symbionts'), [togglePanel]);
+  const toggleVault = useCallback(() => togglePanel('vault'), [togglePanel]);
+  const toggleSettings = useCallback(() => togglePanel('settings'), [togglePanel]);
+  const toggleGrow = useCallback(() => togglePanel('grow'), [togglePanel]);
 
   /** Hand the current save to the clipboard, compressed. */
   const handleExport = useCallback(async () => {
@@ -186,10 +239,10 @@ export function App() {
    */
   const handleImport = useCallback(async (text: string) => {
     const sim = simRef.current;
-    if (!sim) return 'The game is not running.';
+    if (!sim) return t('save.notRunning');
 
     const json = await decodeSave(text);
-    if (json === null) return 'That does not look like an Old Growth save.';
+    if (json === null) return t('save.notOurs');
 
     const parsed = parseSaveText(json);
     if (!parsed.ok) return parsed.reason;
@@ -197,7 +250,7 @@ export function App() {
     const migrated = migrateSave(parsed.envelope);
     if (!migrated.ok) return migrated.reason;
 
-    if (!sim.load(migrated.envelope)) return 'The save could not be rebuilt into a tree.';
+    if (!sim.load(migrated.envelope)) return t('save.unrebuildable');
 
     saveRef.current?.();
     return null;
@@ -293,8 +346,8 @@ export function App() {
     if (outcome.kind === 'loaded' || outcome.kind === 'recovered') {
       if (!sim.load(outcome.envelope)) {
         setToast({
-          title: 'Save could not be opened',
-          body: 'The tree it described could not be rebuilt, so this run starts fresh.',
+          title: t('save.brokenTitle'),
+          body: t('save.brokenBody'),
           glyph: '🌱',
           color: '#ff8a72',
           key: Date.now(),
@@ -303,8 +356,8 @@ export function App() {
         // Calm on purpose: the player lost at most one autosave interval, and
         // the backup did exactly what it is there for.
         setToast({
-          title: 'Recovered from a backup',
-          body: 'The last save was damaged, so the one before it was opened instead.',
+          title: t('save.recoveredTitle'),
+          body: t('save.recoveredBody'),
           glyph: '🛟',
           color: '#6fb7e0',
           key: Date.now(),
@@ -312,7 +365,7 @@ export function App() {
       }
     } else if (outcome.kind === 'failed') {
       setToast({
-        title: 'Save could not be read',
+        title: t('save.unreadableTitle'),
         body: outcome.reason,
         glyph: '🌱',
         color: '#ff8a72',
@@ -345,6 +398,13 @@ export function App() {
       setReducedMotion(reduced);
     });
 
+    // Below the phone breakpoint the grow menu is a bottom sheet rather than a
+    // ring of dials. Watched rather than read once, because a desktop window
+    // can be dragged narrow and a phone can be turned on its side.
+    const detachPhone = watchMedia((isPhone) => {
+      renderer.setSheetMenu(isPhone);
+    }, mediaQuery(PHONE_QUERY));
+
     // The renderer caches the projected tree; re-push it only when the graph's
     // structure actually changed, never per frame.
     let treeRevision = -1;
@@ -368,6 +428,46 @@ export function App() {
       renderer.setPlantableSpecies(snapshot.species.unlocked, snapshot.species.planting);
     };
 
+    /**
+     * Keep the phone's grow sheet in step with the renderer's open menu.
+     *
+     * Called every frame, because prices and affordability move every frame —
+     * but it only touches React state when the string summary actually changes,
+     * which is on a purchase, a species swap, or the moment Sap crosses a price.
+     */
+    let sheetKey = '';
+    const syncSheet = (snapshot: {
+      species: { unlocked: readonly string[]; planting: string };
+    }) => {
+      const menu = renderer.isSheetMenu ? renderer.openMenuState : null;
+      if (!menu) {
+        if (sheetKey !== '') {
+          sheetKey = '';
+          setSheet(null);
+        }
+        return;
+      }
+
+      const node = sim.state.tree.node(menu.nodeId);
+      const options = sim.growthOptions(menu.nodeId);
+      const key = [
+        menu.nodeId,
+        snapshot.species.planting,
+        snapshot.species.unlocked.join(','),
+        ...options.map((o) => `${o.option.type}:${o.cost.toString()}:${o.affordable ? 1 : 0}`),
+      ].join('|');
+      if (key === sheetKey) return;
+
+      sheetKey = key;
+      setSheet({
+        key,
+        nodeId: menu.nodeId,
+        partLabel: node ? GROWTH_RULE_BY_TYPE[node.type].label : '',
+        options,
+        species: snapshot.species,
+      });
+    };
+
     /** Canvas-local point → viewport point, for positioning the DOM tooltip. */
     const toClient = (point: { x: number; y: number }) => {
       const rect = canvas.getBoundingClientRect();
@@ -381,6 +481,110 @@ export function App() {
     const closeMenu = () => {
       renderer.closeMenu();
       setHover(null);
+    };
+
+    // The sheet's buttons, wired to the same calls a dial press makes. Growing
+    // re-opens the menu on the same limb exactly as the radial menu does, so a
+    // phone player can keep building without tapping the tree again.
+    sheetActionsRef.current = {
+      grow: (option) => {
+        if (!option.affordable) return;
+        const now = Date.now();
+        if (!sim.growPart(option.option.parentId, option.option.type)) return;
+        audio.play('grow');
+        syncTree(now);
+        openMenuFor(option.option.parentId, now);
+      },
+      preview: (index) => {
+        renderer.highlightMenu(index);
+      },
+      chooseSpecies: (speciesId) => {
+        if (!sim.setPlantingSpecies(speciesId)) return;
+        const open = renderer.openMenuState;
+        // Prices and ghosts move with the species, so the menu is re-priced
+        // rather than merely re-tinted — the same thing a chip tap does.
+        if (open) openMenuFor(open.nodeId, Date.now());
+      },
+      close: () => {
+        renderer.closeMenu();
+      },
+    };
+
+    /** Say something in the live region. Empty strings are ignored. */
+    const announce = (text: string) => {
+      if (!text) return;
+      setAnnouncement((previous) => ({ text, seq: previous.seq + 1 }));
+    };
+
+    /** "Branch, 1 step from the trunk" — what the keyboard is standing on. */
+    const describeFocus = (nodeId: string): string => {
+      const node = sim.state.tree.node(nodeId);
+      if (!node) return '';
+      // The trunk is where the keyboard enters the tree, so it carries the one
+      // sentence that says what the arrow keys are for. Nowhere else is a
+      // reliable first stop, and repeating it on every limb would be noise.
+      if (node.level === 0) {
+        return t('a11y.focusedTrunk', { part: GROWTH_RULE_BY_TYPE[node.type].label });
+      }
+      return t('a11y.focusedPart', {
+        part: GROWTH_RULE_BY_TYPE[node.type].label,
+        depth: node.level === 1 ? t('a11y.oneStep') : t('a11y.steps', { count: node.level }),
+      });
+    };
+
+    /**
+     * Move the keyboard's cursor to a part: ring on the canvas, sentence in the
+     * live region. Any open menu belonged to the limb we just left, so it goes.
+     */
+    const focusPart = (nodeId: string) => {
+      renderer.setFocusedPart(nodeId);
+      if (renderer.openMenuState && renderer.openMenuState.nodeId !== nodeId) closeMenu();
+      announce(describeFocus(nodeId));
+    };
+
+    /**
+     * Enter on a focused part: the same tap a click makes, from the keyboard.
+     *
+     * It routes through the same simulation call and spawns the same feedback
+     * at the part's own screen position, so a keyboard player gets the pop, the
+     * floating number and the ring of buds — not a reduced version of the game
+     * that merely adds Sap.
+     */
+    const keyboardTap = (nodeId: string) => {
+      const now = Date.now();
+      audio.unlock();
+
+      const at = renderer.partAnchor(nodeId);
+      const result = sim.click(now, Math.random, nodeId);
+      audio.play(result.crit ? 'crit' : 'click');
+
+      if (at) {
+        renderer.effects.spawnHit(at.x, at.y, t('canvas.gain', { amount: formatNumber(result.gain) }), result.crit, now);
+        if (result.dew) {
+          renderer.effects.spawnHit(
+            at.x,
+            at.y - DEW_LABEL_OFFSET_PX,
+            t('canvas.dew', { amount: formatNumber(result.dew) }),
+            true,
+            now,
+          );
+        }
+      }
+
+      openMenuFor(nodeId, now);
+      const menu = renderer.openMenuState;
+      const tapped = t('a11y.tapped', { amount: formatNumber(result.gain) });
+      const count = menu ? sim.growthOptions(nodeId).length : 0;
+      announce(
+        // Said in words rather than as a count when there is only one, because
+        // "1 things can grow here" is a sentence a screen reader will read out
+        // exactly as written.
+        count === 0
+          ? `${tapped} ${t('a11y.nothingHere')}`
+          : count === 1
+            ? `${tapped} ${t('a11y.menuOpenOne')}`
+            : `${tapped} ${t('a11y.menuOpen', { count })}`,
+      );
     };
 
     /** Drop the prune mark and its tooltip. */
@@ -483,7 +687,10 @@ export function App() {
         renderer.effects.spawnFloatingNumber(
           at.x,
           at.y - row * PRUNE_LABEL_SPACING_PX,
-          `+${formatNumber(refund.amount)} ${RESOURCE_BY_ID[refund.resource].label}`,
+          t('canvas.gainOf', {
+            amount: formatNumber(refund.amount),
+            resource: RESOURCE_BY_ID[refund.resource].label,
+          }),
           false,
           now,
         );
@@ -492,7 +699,10 @@ export function App() {
       renderer.effects.spawnFloatingNumber(
         at.x,
         at.y - row * PRUNE_LABEL_SPACING_PX,
-        `+${formatNumber(result.quote.deadwood)} Deadwood`,
+        t('canvas.gainOf', {
+          amount: formatNumber(result.quote.deadwood),
+          resource: RESOURCE_BY_ID.deadwood.label,
+        }),
         false,
         now,
       );
@@ -500,11 +710,70 @@ export function App() {
         renderer.effects.spawnHit(
           at.x,
           at.y - (row + 1) * PRUNE_LABEL_SPACING_PX,
-          'Lateral Surge!',
+          t('canvas.lateralSurge'),
           true,
           now,
         );
       }
+    };
+
+    /**
+     * Say what is under a point: the tooltip, the prune quote, the graft
+     * verdict — whichever of them applies to the mode that is running.
+     *
+     * Named rather than inlined into `onPointerMove` because a phone has no
+     * pointer to move. A long press has to reach exactly this, or half the
+     * game's explanations would exist only for people with a mouse.
+     */
+    const describeAt = (point: { x: number; y: number }) => {
+      const client = toClient(point);
+
+      if (graftModeRef.current) {
+        const segment = renderer.hitTest(point);
+        const assessment = markGraft(segment?.id ?? null);
+        if (assessment) {
+          setHover({ kind: 'graft', assessment, x: client.x, y: client.y });
+        } else {
+          setHover(null);
+        }
+        return;
+      }
+
+      if (pruneModeRef.current) {
+        const segment = renderer.hitTest(point);
+        const nodeId = segment?.id ?? null;
+        if (!nodeId || nodeId === sim.state.tree.rootId) {
+          clearPruneMark();
+          return;
+        }
+
+        const mark = renderer.pruneMark;
+        // Already on this limb: keep the confirm the player has armed rather
+        // than disarming it under a stray pixel of mouse movement.
+        if (mark?.nodeId === nodeId) {
+          setHover({ kind: 'prune', quote: mark.quote, x: client.x, y: client.y });
+          return;
+        }
+
+        const quote = markPrune(nodeId, false);
+        if (quote) setHover({ kind: 'prune', quote, x: client.x, y: client.y });
+        return;
+      }
+
+      const priced = renderer.hoverMenu(point);
+      renderer.hoverPicker(point);
+      if (priced) {
+        setHover({ kind: 'option', priced, x: client.x, y: client.y });
+        return;
+      }
+
+      // Nothing in the menu under the cursor — is there a leaf under it?
+      const segment = renderer.hitTest(point);
+      if (segment?.kind === 'leafCluster') {
+        setHover({ kind: 'leaf', nodeId: segment.id, x: client.x, y: client.y });
+        return;
+      }
+      setHover(null);
     };
 
     // Taps resolve here, straight off pointerdown — outside the frame loop and
@@ -654,7 +923,7 @@ export function App() {
         renderer.effects.spawnHit(
           point.x,
           point.y,
-          `+${formatNumber(result.gain)}`,
+          t('canvas.gain', { amount: formatNumber(result.gain) }),
           result.crit,
           now,
         );
@@ -666,7 +935,7 @@ export function App() {
           renderer.effects.spawnHit(
             point.x,
             point.y - DEW_LABEL_OFFSET_PX,
-            `Dew +${formatNumber(result.dew)}`,
+            t('canvas.dew', { amount: formatNumber(result.dew) }),
             true,
             now,
           );
@@ -674,60 +943,27 @@ export function App() {
 
         // Every part of the tree is also its own upgrade button.
         if (struck) openMenuFor(struck.id, now);
+
+        // Keep the keyboard's cursor under the pointer — but only for someone
+        // already using it. A focus ring that appears the first time anybody
+        // clicks a branch is noise for every player who never touches an arrow
+        // key; for one who does, switching hands mid-game should not lose their
+        // place.
+        if (struck && renderer.focusedPart !== null) renderer.setFocusedPart(struck.id);
       },
 
       onMiss: closeMenu,
 
+      // A finger held still is a touchscreen's only way to ask what something
+      // is: it puts up the very tooltip the mouse would have got from hovering,
+      // by running the same code with the same point.
+      onLongPress: (point) => {
+        describeAt(point);
+      },
+
       onPointerMove: (point) => {
         renderer.setPointer(point);
-        const client = toClient(point);
-
-        if (graftModeRef.current) {
-          const segment = renderer.hitTest(point);
-          const assessment = markGraft(segment?.id ?? null);
-          if (assessment) {
-            setHover({ kind: 'graft', assessment, x: client.x, y: client.y });
-          } else {
-            setHover(null);
-          }
-          return;
-        }
-
-        if (pruneModeRef.current) {
-          const segment = renderer.hitTest(point);
-          const nodeId = segment?.id ?? null;
-          if (!nodeId || nodeId === sim.state.tree.rootId) {
-            clearPruneMark();
-            return;
-          }
-
-          const mark = renderer.pruneMark;
-          // Already on this limb: keep the confirm the player has armed rather
-          // than disarming it under a stray pixel of mouse movement.
-          if (mark?.nodeId === nodeId) {
-            setHover({ kind: 'prune', quote: mark.quote, x: client.x, y: client.y });
-            return;
-          }
-
-          const quote = markPrune(nodeId, false);
-          if (quote) setHover({ kind: 'prune', quote, x: client.x, y: client.y });
-          return;
-        }
-
-        const priced = renderer.hoverMenu(point);
-        renderer.hoverPicker(point);
-        if (priced) {
-          setHover({ kind: 'option', priced, x: client.x, y: client.y });
-          return;
-        }
-
-        // Nothing in the menu under the cursor — is there a leaf under it?
-        const segment = renderer.hitTest(point);
-        if (segment?.kind === 'leafCluster') {
-          setHover({ kind: 'leaf', nodeId: segment.id, x: client.x, y: client.y });
-          return;
-        }
-        setHover(null);
+        describeAt(point);
       },
 
       onPointerLeave: () => {
@@ -788,7 +1024,18 @@ export function App() {
           }
           return;
         }
+        // Then the grow menu on the canvas, and only once that is gone, the
+        // open panel. A player with the menu up and the Journal open expects one
+        // Escape to close the thing they are looking at, not both.
+        if (renderer.openMenuState) {
+          closeMenu();
+          // Only for a keyboard player: the ring of buds shutting is visible to
+          // everyone else, and a live region that narrates the mouse is noise.
+          if (renderer.focusedPart !== null) announce(t('a11y.menuClosed'));
+          return;
+        }
         closeMenu();
+        setOpenPanel(null);
         return;
       }
       if (event.key.toLowerCase() === MUTE_HOTKEY) {
@@ -804,6 +1051,10 @@ export function App() {
       }
       if (event.key === 'g' || event.key === 'G') {
         if (sim.hasFeature('grafting')) toggleGraft();
+        return;
+      }
+      if (event.key === 'b' || event.key === 'B') {
+        toggleGrow();
         return;
       }
       if (event.key === 'j' || event.key === 'J') {
@@ -822,6 +1073,80 @@ export function App() {
         if (sim.hasFeature('prestige')) toggleVault();
         return;
       }
+      // --- The tree, by keyboard -------------------------------------------
+      //
+      // Everything below is the pointer-free path through the game: arrows to
+      // move around the graph, Enter to press the part you are on. It comes
+      // after the panel hotkeys so that a letter never gets swallowed, and
+      // before the camera keys because arrows are navigation first.
+      //
+      // But only when nothing else has the keyboard. Someone tabbed onto a dock
+      // button is pressing Enter *on that button*, and someone reading a long
+      // Journal is scrolling it — taking either keystroke for the tree would
+      // break the DOM controls to make the canvas work, which is not a trade
+      // accessibility work is allowed to make.
+      if (typeof target?.closest === 'function' && target.closest('.panel, .dock, .hud, .grow-sheet')) return;
+
+      const direction = ARROW_DIRECTION[event.key];
+
+      // With the ring of buds open the arrows belong to it: the dials are the
+      // only thing the player can act on until it closes, and moving focus off
+      // the limb underneath would shut the menu they just opened.
+      if (direction && renderer.openMenuState && !renderer.isSheetMenu) {
+        event.preventDefault();
+        const step = direction === 'out' || direction === 'right' ? 1 : -1;
+        const option = renderer.stepMenu(step);
+        if (option) {
+          announce(
+            t(option.affordable ? 'grow.optionLabel' : 'grow.optionLocked', {
+              name: option.rule.label,
+              cost: describeCost(option),
+            }),
+          );
+        }
+        return;
+      }
+
+      if (direction) {
+        event.preventDefault();
+        const from = focusOrTrunk(sim.state.tree, renderer.focusedPart);
+        // Entering the tree is itself a move: with nothing focused, the first
+        // arrow press lands on the trunk rather than stepping off it.
+        const next =
+          renderer.focusedPart === null ? from : navigate(sim.state.tree, from, direction);
+        focusPart(next);
+        return;
+      }
+
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+
+        // A dial is highlighted: Enter is the purchase.
+        const highlighted = renderer.highlightedOption;
+        if (highlighted) {
+          if (!highlighted.affordable) {
+            announce(t('grow.cannotAfford'));
+            return;
+          }
+          const now = Date.now();
+          const grown = sim.growPart(highlighted.option.parentId, highlighted.option.type);
+          if (grown) {
+            audio.play('grow');
+            syncTree(now);
+            announce(t('a11y.grew', { part: highlighted.rule.label }));
+            // Re-priced on the same limb, exactly as a click would leave it, so
+            // the player can keep building without re-entering the menu.
+            openMenuFor(highlighted.option.parentId, now);
+          }
+          return;
+        }
+
+        const nodeId = focusOrTrunk(sim.state.tree, renderer.focusedPart);
+        renderer.setFocusedPart(nodeId);
+        keyboardTap(nodeId);
+        return;
+      }
+
       // Zoom from the keyboard, for mice with no pinch gesture to offer.
       if (event.key === '+' || event.key === '=') {
         renderer.zoomBy(ZOOM_STEP);
@@ -832,6 +1157,27 @@ export function App() {
       }
     };
     window.addEventListener('keydown', handleKeyDown);
+
+    /**
+     * Tabbing onto the tree puts the keyboard's cursor on it.
+     *
+     * Only for a keyboard arrival: a canvas with a tab index also takes focus
+     * from a mouse press, and a ring appearing under every click would be noise
+     * for players who never press an arrow key. `:focus-visible` is the
+     * browser's own answer to that question, so it is the one asked here.
+     */
+    const handleCanvasFocus = () => {
+      let byKeyboard = true;
+      try {
+        byKeyboard = canvas.matches(':focus-visible');
+      } catch {
+        // Older engines have no `:focus-visible`; announcing too often is a far
+        // smaller failure than a tree that never announces at all.
+      }
+      if (!byKeyboard) return;
+      focusPart(focusOrTrunk(sim.state.tree, renderer.focusedPart));
+    };
+    canvas.addEventListener('focus', handleCanvasFocus);
 
     const loop = new GameLoop({
       // Fixed-timestep simulation: advance state only, no store writes here.
@@ -850,6 +1196,7 @@ export function App() {
         // because the window can shut inside a single tap.
         renderer.setBeat(snapshot.progression.beat);
         gameStore.getState().setSnapshot(snapshot);
+        syncSheet(snapshot);
         renderer.draw(snapshot, alpha, now);
 
         // A gate opening is the game getting larger, and exactly one of them is
@@ -957,21 +1304,19 @@ export function App() {
           const def = WEATHER_BY_ID[event.id];
           if (report.snapped.length > 0) {
             setToast({
-              title: `${def.glyph} The wind took ${report.snapped.length} limb${
-                report.snapped.length === 1 ? '' : 's'
-              }`,
-              body: `What came down is yours: +${formatNumber(report.deadwood)} Deadwood.`,
+              title:
+                report.snapped.length === 1
+                  ? t('storm.tookOneLimb', { glyph: def.glyph })
+                  : t('storm.tookLimbs', { glyph: def.glyph, count: report.snapped.length }),
+              body: t('storm.tookBody', { amount: formatNumber(report.deadwood) }),
               glyph: '⚡',
               color: def.color,
               key: now + 2,
             });
           } else if (report.exposed > 0) {
             setToast({
-              title: `${def.glyph} Every limb held`,
-              body:
-                report.brace >= 1
-                  ? 'Braced to the last. The storm went through the canopy and took nothing.'
-                  : 'The wind found nothing to lever. It will not always be so generous.',
+              title: t('storm.heldTitle', { glyph: def.glyph }),
+              body: report.brace >= 1 ? t('storm.bracedBody') : t('storm.luckyBody'),
               glyph: '⚓',
               color: def.color,
               key: now + 3,
@@ -1011,7 +1356,9 @@ export function App() {
     // covers a desktop close. Saving twice costs one write; missing the last one
     // costs the session.
     const handleHide = () => {
-      if (document.visibilityState === 'hidden') persist();
+      const hidden = document.visibilityState === 'hidden';
+      loop.setHidden(hidden);
+      if (hidden) persist();
     };
     document.addEventListener('visibilitychange', handleHide);
     window.addEventListener('pagehide', persist);
@@ -1021,6 +1368,7 @@ export function App() {
     return () => {
       persist();
       detachMotion();
+      detachPhone();
       // The pad and the weather loop would otherwise keep running over a game
       // that no longer exists — in development, straight through a hot reload.
       audio.dispose();
@@ -1031,6 +1379,7 @@ export function App() {
       detachInput();
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('keydown', handleKeyDown);
+      canvas.removeEventListener('focus', handleCanvasFocus);
       saveRef.current = null;
       simRef.current = null;
       rendererRef.current = null;
@@ -1038,6 +1387,7 @@ export function App() {
   }, [
     togglePrune,
     toggleGraft,
+    toggleGrow,
     toggleJournal,
     toggleSymbionts,
     toggleVault,
@@ -1071,6 +1421,22 @@ export function App() {
     }
   }, [testProducers]);
 
+  // Stable identities so the memoised sheet is not re-rendered by every frame
+  // that re-renders App. Each is a one-line hop through the ref the effect set.
+  const handleSheetGrow = useCallback(
+    (option: PricedGrowthOption) => sheetActionsRef.current?.grow(option),
+    [],
+  );
+  const handleSheetPreview = useCallback(
+    (index: number | null) => sheetActionsRef.current?.preview(index),
+    [],
+  );
+  const handleSheetSpecies = useCallback(
+    (speciesId: string) => sheetActionsRef.current?.chooseSpecies(speciesId),
+    [],
+  );
+  const handleSheetClose = useCallback(() => sheetActionsRef.current?.close(), []);
+
   const handleBuy = useCallback((id: string) => {
     simRef.current?.buyUpgrade(id);
   }, []);
@@ -1095,13 +1461,128 @@ export function App() {
   // panel of buy buttons over a tree that is coming apart would be the wrong
   // thing to be looking at.
   const handleGoToSeed = useCallback(() => {
-    if (simRef.current?.goToSeed()) setVaultOpen(false);
+    if (simRef.current?.goToSeed()) setOpenPanel(null);
   }, []);
+
+  /** Display preferences live in the save, like the mixer does. */
+  const [display, setDisplay] = useState({
+    fontScale: DEFAULT_SETTINGS.fontScale,
+    leafPatterns: DEFAULT_SETTINGS.leafPatterns,
+    hintsStay: DEFAULT_SETTINGS.hintsStay,
+  });
+
+  const handleSetDisplay = useCallback((next: Partial<typeof display>) => {
+    const sim = simRef.current;
+    if (!sim) return;
+    sim.state.settings = { ...sim.state.settings, ...next };
+    setDisplay((current) => ({ ...current, ...next }));
+  }, []);
+
+  // Text scale is one number on the root element; every panel is sized in `rem`
+  // below it, so nothing has to be re-measured or re-laid-out by hand.
+  useEffect(() => {
+    document.documentElement.style.setProperty('--font-scale', String(display.fontScale));
+  }, [display.fontScale]);
+
+  useEffect(() => {
+    rendererRef.current?.setLeafPatterns(display.leafPatterns);
+  }, [display.leafPatterns]);
+
+  /** The dock's contents, in the order they are drawn. */
+  const dockItems: DockItem[] = [
+    {
+      id: 'grow',
+      glyph: '🌱',
+      label: t('dock.grow'),
+      title: t('dock.growTitle', { key: 'B' }),
+      hotkey: 'B',
+      active: openPanel === 'grow',
+      onSelect: toggleGrow,
+    },
+    {
+      id: 'prune',
+      glyph: '✂',
+      label: pruneMode ? t('dock.pruning') : t('dock.prune'),
+      title: t('dock.pruneTitle', { key: 'P' }),
+      hotkey: 'P',
+      active: pruneMode,
+      onSelect: togglePrune,
+    },
+    {
+      id: 'graft',
+      glyph: '🜋',
+      label: graftMode ? t('dock.grafting') : t('dock.graft'),
+      title: t('dock.graftTitle', { key: 'G' }),
+      hotkey: 'G',
+      active: graftMode,
+      onSelect: toggleGraft,
+    },
+    {
+      id: 'journal',
+      glyph: '📖',
+      label: t('dock.journal'),
+      title: t('dock.journalTitle', { key: 'J' }),
+      hotkey: 'J',
+      active: openPanel === 'journal',
+      onSelect: toggleJournal,
+    },
+    {
+      id: 'symbionts',
+      glyph: '🐝',
+      label: t('dock.symbionts'),
+      title: t('dock.symbiontsTitle', { key: 'S' }),
+      hotkey: 'S',
+      active: openPanel === 'symbionts',
+      onSelect: toggleSymbionts,
+    },
+    {
+      id: 'vault',
+      glyph: '🌰',
+      label: t('dock.vault'),
+      // The Vault is the one dock entry with a *state*: it is where Go to Seed
+      // lives, and Go to Seed only becomes possible at full maturity. Saying so
+      // on the button is the difference between a player finding prestige and
+      // waiting for it to announce itself.
+      title: maturity.ready
+        ? t('dock.vaultTitle', { key: 'V' })
+        : t('dock.vaultTitleGrowing', {
+            key: 'V',
+            percent: Math.round(
+              Math.min(maturity.heightFraction, maturity.lightFraction) * 100,
+            ),
+          }),
+      hotkey: 'V',
+      active: openPanel === 'vault',
+      badge: maturity.ready ? t('dock.vaultReady') : undefined,
+      highlight: maturity.ready,
+      onSelect: toggleVault,
+    },
+    {
+      id: 'settings',
+      glyph: '⚙',
+      label: t('dock.settings'),
+      title: t('dock.settingsTitle', { key: ',' }),
+      hotkey: ',',
+      active: openPanel === 'settings',
+      onSelect: toggleSettings,
+    },
+  ];
+
+  const panelTitle = openPanel ? t(PANEL_TITLES[openPanel]) : '';
 
   return (
     <div className="app">
+      {/*
+        The tree is a control, not an illustration, so it sits in the tab order
+        like one: `tabIndex` puts it there, the role and label say what it is,
+        and the keydown handler on the window does the rest.
+      */}
       <canvas
         ref={canvasRef}
+        tabIndex={0}
+        role="application"
+        aria-label={t('app.canvas')}
+        title={t('app.canvasHelp')}
         className={`app-canvas${pruneMode ? ' app-canvas--pruning' : ''}${
           graftMode ? ' app-canvas--grafting' : ''
         }`}
@@ -1110,47 +1591,79 @@ export function App() {
         reducedMotion={reducedMotion}
         testProducers={testProducers}
         onToggleTestProducers={() => setTestProducers((on) => !on)}
-        pruneMode={pruneMode}
-        onTogglePrune={togglePrune}
-        graftMode={graftMode}
-        onToggleGraft={toggleGraft}
-        journalOpen={journalOpen}
-        onToggleJournal={toggleJournal}
-        symbiontsOpen={symbiontsOpen}
-        onToggleSymbionts={toggleSymbionts}
-        vaultOpen={vaultOpen}
-        onToggleVault={toggleVault}
-        settingsOpen={settingsOpen}
-        onToggleSettings={toggleSettings}
         onDismissHint={handleDismissHint}
       />
-      <Workshop onCraft={handleCraft} />
-      {journalOpen ? (
-        <Journal />
-      ) : symbiontsOpen ? (
-        <Symbionts onUpgrade={handleSymbiontUpgrade} />
-      ) : vaultOpen ? (
-        <SeedVault
-          onBuyHeirloom={handleBuyHeirloom}
-          onChooseBond={handleChooseBond}
-          onGoToSeed={handleGoToSeed}
-        />
-      ) : settingsOpen ? (
-        <Settings
-          volumes={volumes}
-          onToggleMute={handleToggleMute}
-          onSetVolume={handleSetVolume}
-          reducedMotion={reducedMotion}
-          onResetHints={handleResetHints}
-          onExport={handleExport}
-          onImport={handleImport}
-          onHardReset={handleHardReset}
-          saveHealthy={saveHealthy}
-          lastSavedAt={lastSavedAt}
-        />
-      ) : (
-        <UpgradePanel onBuy={handleBuy} />
+      {/*
+        One panel at a time, each in the same shell: the shell owns the close
+        button, the Escape key and giving focus back to the dock, so no panel
+        has to remember to.
+      */}
+      {/*
+        Keyed by which panel is open, so switching from the Journal to the Vault
+        *remounts* the shell. Without the key React reuses the instance, the
+        mount effect never re-runs, and focus is left behind on the dock button
+        that was just pressed — the panel opens and the keyboard is still
+        outside it.
+      */}
+      {openPanel !== null && (
+        <Panel key={openPanel} title={panelTitle} onClose={closePanel}>
+          {openPanel === 'journal' && <Journal />}
+          {openPanel === 'symbionts' && <Symbionts onUpgrade={handleSymbiontUpgrade} />}
+          {openPanel === 'vault' && (
+            <SeedVault
+              onBuyHeirloom={handleBuyHeirloom}
+              onChooseBond={handleChooseBond}
+              onGoToSeed={handleGoToSeed}
+            />
+          )}
+          {openPanel === 'settings' && (
+            <Settings
+              volumes={volumes}
+              onToggleMute={handleToggleMute}
+              onSetVolume={handleSetVolume}
+              reducedMotion={reducedMotion}
+              display={display}
+              onSetDisplay={handleSetDisplay}
+              onResetHints={handleResetHints}
+              onExport={handleExport}
+              onImport={handleImport}
+              onHardReset={handleHardReset}
+              saveHealthy={saveHealthy}
+              lastSavedAt={lastSavedAt}
+            />
+          )}
+          {/*
+            Grow holds both ways of spending on the tree: Sap on upgrades and
+            Deadwood on totems. The Workshop used to float in its own corner,
+            which made it the one panel the dock did not govern and the one the
+            phone layout had no room for.
+          */}
+          {openPanel === 'grow' && (
+            <>
+              <UpgradePanel onBuy={handleBuy} />
+              <Workshop onCraft={handleCraft} />
+            </>
+          )}
+        </Panel>
       )}
+      {/*
+        The grow menu, when the screen is too narrow for a ring of dials. It is
+        outside the panel system on purpose: it belongs to the limb you just
+        tapped, not to the dock, and it has to be able to sit over a panel.
+      */}
+      {sheet && (
+        <GrowSheet
+          partLabel={sheet.partLabel}
+          options={sheet.options}
+          species={sheet.species}
+          onGrow={handleSheetGrow}
+          onPreview={handleSheetPreview}
+          onChooseSpecies={handleSheetSpecies}
+          onClose={handleSheetClose}
+        />
+      )}
+      <Dock items={dockItems} />
+      <Announcer message={announcement.text} seq={announcement.seq} />
       {away && <AwayModal report={away} onCollect={dismissAway} />}
       {toast && (
         <Toast

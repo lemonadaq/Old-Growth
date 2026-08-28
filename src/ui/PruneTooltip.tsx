@@ -4,6 +4,7 @@ import { PRUNE_REFUND_FRACTION } from '../content/prune';
 import { RESOURCE_BY_ID } from '../content/resources';
 import { formatNumber } from '../engine/format';
 import type { PruneQuote } from '../engine/prune';
+import { t } from './i18n';
 
 /**
  * What a cut would take and what it would give: the prune-mode tooltip.
@@ -31,15 +32,17 @@ function partsLine(byType: PruneTooltipProps['quote']['byType']): string {
 export function PruneTooltip({ quote }: PruneTooltipProps) {
   return (
     <>
-      <p className="tooltip__title">Cut this limb</p>
+      <p className="tooltip__title">{t('prune.title')}</p>
       <p className="tooltip__desc">{partsLine(quote.byType)}</p>
 
       <dl>
         {quote.refunds.map((refund) => (
           <div className="tooltip__row" key={refund.resource}>
             <dt>
-              Refund
-              <span className="tooltip__note"> {Math.round(PRUNE_REFUND_FRACTION * 100)}%</span>
+              {t('prune.refund')}
+              <span className="tooltip__note">
+                {t('prune.refundShare', { percent: Math.round(PRUNE_REFUND_FRACTION * 100) })}
+              </span>
             </dt>
             <dd className="tooltip__gain">
               +{formatNumber(refund.amount)} {RESOURCE_BY_ID[refund.resource].label}
@@ -48,27 +51,25 @@ export function PruneTooltip({ quote }: PruneTooltipProps) {
         ))}
 
         <div className="tooltip__row">
-          <dt>Deadwood</dt>
+          <dt>{t('prune.deadwood')}</dt>
           <dd className="tooltip__gain">+{formatNumber(quote.deadwood)}</dd>
         </div>
 
         <div className="tooltip__row">
-          <dt>Parts lost</dt>
+          <dt>{t('prune.partsLost')}</dt>
           <dd>{quote.nodeIds.length}</dd>
         </div>
       </dl>
 
       {quote.apical ? (
         <p className="tooltip__hint">
-          This is the tree&apos;s leader. Cutting it wakes every bud below —{' '}
-          <b>Lateral Surge</b> for {LATERAL_SURGE_DURATION_SECONDS}s: growth −
-          {Math.round(LATERAL_SURGE_GROWTH_DISCOUNT * 100)}% and Sap +
-          {Math.round(LATERAL_SURGE_GROWTH_DISCOUNT * 100)}%.
+          {t('prune.apical', {
+            seconds: LATERAL_SURGE_DURATION_SECONDS,
+            discount: Math.round(LATERAL_SURGE_GROWTH_DISCOUNT * 100),
+          })}
         </p>
       ) : (
-        <p className="tooltip__hint">
-          Cutting the highest point of the tree instead would trigger Lateral Surge.
-        </p>
+        <p className="tooltip__hint">{t('prune.notApical')}</p>
       )}
     </>
   );

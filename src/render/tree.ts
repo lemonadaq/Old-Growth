@@ -38,8 +38,16 @@ const HORIZONTAL_FIT = 0.66;
  */
 const REFERENCE_HEIGHT = 1;
 
-/** How long a newly grown part takes to scale in, in ms. */
-export const GROW_ANIM_MS = 120;
+/**
+ * How long a newly grown part takes to scale in, in ms.
+ *
+ * Longer than it needs to be to be *seen*, and that is the point: a purchase is
+ * the moment the player's decision becomes part of the tree, and a limb that
+ * unfurls over a third of a second has weight that one that appears in two
+ * frames does not. Short enough that a player buying six branches in a row is
+ * never waiting on the animation to know the last one landed.
+ */
+export const GROW_ANIM_MS = 380;
 
 /** Ease-out cubic: quick off the mark, settling into place. */
 function easeOut(t: number): number {
@@ -370,6 +378,10 @@ export type LeafExposures = ReadonlyMap<string, { readonly exposure: number }>;
  * Passing `exposures` darkens the clusters the canopy is shading, which is how
  * a crowded tree tells on itself. Passing `season` recolours the foliage for the
  * month — autumn's whole reason for existing.
+ *
+ * Passing `motion: false` — the player's `prefers-reduced-motion` — holds the
+ * canopy perfectly still and lands new parts at full size. The tree still says
+ * everything it says about shade, species and season; it simply stops moving.
  */
 export function drawTree(
   ctx: CanvasRenderingContext2D,
@@ -379,6 +391,7 @@ export function drawTree(
   viewport?: Viewport,
   exposures?: LeafExposures,
   season?: ColorCast,
+  motion = true,
 ): void {
   const segments = viewport ? cullSegments(allSegments, viewport) : allSegments;
   if (segments.length === 0) return;
@@ -389,7 +402,10 @@ export function drawTree(
 
   const progress = new Map<string, number>();
   for (const segment of segments) {
-    progress.set(segment.id, growProgress(now, spawns.get(segment.id)));
+    // With motion off, a new part is simply *there* on the frame it is bought.
+    // The scale-in is the one piece of juice that cannot be replaced by holding
+    // still — a part has to arrive somehow — so it is skipped, not slowed.
+    progress.set(segment.id, motion ? growProgress(now, spawns.get(segment.id)) : 1);
   }
 
   const at = (segment: ScreenSegment) => interpolated(segment, progress.get(segment.id) ?? 1);
@@ -424,7 +440,7 @@ export function drawTree(
   for (const segment of segments) {
     if (segment.kind !== 'leafCluster' && segment.kind !== 'blossom') continue;
     const t = progress.get(segment.id) ?? 1;
-    const sway = swayOffset(segment.id, now, Math.max(3, segment.width) * t);
+    const sway = motion ? swayOffset(segment.id, now, Math.max(3, segment.width) * t) : STILL;
     if (segment.kind === 'leafCluster') {
       drawLeafCluster(
         ctx,

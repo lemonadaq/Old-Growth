@@ -2,10 +2,11 @@ import type { Vec2 } from '../engine/geometry';
 import { PALETTE } from './palette';
 
 /**
- * Transient feedback: floating "+N" numbers, hit ripples, and the foliage a
- * prune shakes loose.
+ * Transient feedback: floating "+N" numbers, hit ripples, the foliage a prune
+ * shakes loose, discovery confetti, and the leaves the wind carries through the
+ * canopy.
  *
- * All three effect kinds are **object-pooled**. The pools are allocated once at
+ * All of the effect kinds are **object-pooled**. The pools are allocated once at
  * construction and every slot is reused forever, so a player hammering the tree
  * at ten taps a second never triggers allocation or GC pressure in the input
  * path. When every slot is busy the oldest one is recycled — dropping the
@@ -73,10 +74,39 @@ const CONFETTI_LAUNCH_PX = 340;
 /** Downward pull on confetti, in CSS px/s². */
 const CONFETTI_GRAVITY_PX = 620;
 
+/**
+ * How long a wind-drifted leaf stays on screen, in ms.
+ *
+ * Long, and slow: this is the game's idle animation. A leaf coming loose and
+ * riding the wind across the canopy is what keeps a tree that nobody is
+ * currently clicking from looking like a still image, and it only works if the
+ * leaf is on screen long enough to be noticed *without* being looked at.
+ */
+export const DRIFT_DURATION_MS = 5200;
+
+/** Baseline sideways travel of a drifting leaf, in CSS px per second. */
+const DRIFT_SPEED_PX = 26;
+
+/** How far a drifting leaf sinks over its life, in CSS px per second. */
+const DRIFT_SINK_PX = 15;
+
+/** How far a drifting leaf swings across its path, in CSS px. */
+const DRIFT_SWAY_PX = 16;
+
+/** Full swings per second as a leaf drifts. Slower than a fall: no gravity. */
+const DRIFT_SWAY_RATE = 0.42;
+
 const FLOAT_CAPACITY = 128;
 const RIPPLE_CAPACITY = 64;
 const LEAF_CAPACITY = 96;
 const CONFETTI_CAPACITY = 120;
+
+/**
+ * Drifting leaves are capped low on purpose. This is weather, not a particle
+ * demo: a dozen leaves in the air reads as a breeze, and fifty reads as a
+ * blizzard the player has no reason to expect.
+ */
+const DRIFT_CAPACITY = 24;
 
 interface FloatingNumber {
   active: boolean;
@@ -111,6 +141,22 @@ interface FallingLeaf {
   /** Phase offset into the sway, so neighbours swing out of step. */
   phase: number;
   /** Half-length of the leaf in px. */
+  size: number;
+  color: string;
+  spawnedAt: number;
+}
+
+/** One leaf riding the wind across the canopy. */
+interface DriftLeaf {
+  active: boolean;
+  x: number;
+  y: number;
+  /** Sideways travel in px/s, wind included. */
+  vx: number;
+  /** Downward travel in px/s. Gentle: a drifting leaf is not a falling one. */
+  vy: number;
+  spin: number;
+  phase: number;
   size: number;
   color: string;
   spawnedAt: number;
@@ -154,15 +200,44 @@ export class EffectPool {
   private readonly ripples: Ripple[] = [];
   private readonly leaves: FallingLeaf[] = [];
   private readonly confetti: Confetto[] = [];
+  private readonly drifting: DriftLeaf[] = [];
   /** Alternating sign so consecutive numbers drift to opposite sides. */
   private driftSign = 1;
+
+  /**
+   * Whether decorative motion is allowed. See `src/ui/motion.ts` for the rule:
+   * particles are decoration and go when the player has asked for less motion,
+   * while the floating number and its ripple stay, because they are the only
+   * confirmation that a tap did anything.
+   *
+   * Gated here rather than at each call site so there is one place to be right:
+   * bursts are spawned from the input handler, from the frame loop and from the
+   * renderer's own ambient emitter, and three copies of this check is three
+   * chances to forget one.
+   */
+  private motion = true;
 
   constructor(
     floatCapacity = FLOAT_CAPACITY,
     rippleCapacity = RIPPLE_CAPACITY,
     leafCapacity = LEAF_CAPACITY,
     confettiCapacity = CONFETTI_CAPACITY,
+    driftCapacity = DRIFT_CAPACITY,
   ) {
+    for (let i = 0; i < driftCapacity; i += 1) {
+      this.drifting.push({
+        active: false,
+        x: 0,
+        y: 0,
+        vx: 0,
+        vy: 0,
+        spin: 0,
+        phase: 0,
+        size: 0,
+        color: PALETTE.leafFall,
+        spawnedAt: 0,
+      });
+    }
     for (let i = 0; i < confettiCapacity; i += 1) {
       this.confetti.push({
         active: false,
@@ -206,6 +281,28 @@ export class EffectPool {
     }
   }
 
+  /**
+   * Allow or forbid decorative particles.
+   *
+   * Turning motion off also clears what is already in the air: a player who
+   * flips the OS setting mid-session is asking for the movement to stop now, not
+   * for it to peter out over the next five seconds.
+   */
+  setMotion(enabled: boolean): void {
+    if (this.motion === enabled) return;
+    this.motion = enabled;
+    if (!enabled) {
+      for (const slot of this.leaves) slot.active = false;
+      for (const slot of this.confetti) slot.active = false;
+      for (const slot of this.drifting) slot.active = false;
+    }
+  }
+
+  /** Whether decorative particles are currently allowed. */
+  get motionEnabled(): boolean {
+    return this.motion;
+  }
+
   /** Spawn the "+N" that rises from a hit. */
   spawnFloatingNumber(x: number, y: number, text: string, crit: boolean, now: number): void {
     const slot = acquire(this.floats);
@@ -235,8 +332,33 @@ export class EffectPool {
     this.spawnFloatingNumber(x, y, text, crit, now);
   }
 
+  /**
+   * Let one leaf loose into the wind from a point in the canopy.
+   *
+   * `wind` is a signed sideways push in px/s — the renderer feeds it from the
+   * weather, so a storm blows the canopy's leaves sideways and clear skies let
+   * them wander. The leaf fades in as well as out, because a leaf that appears
+   * at full opacity in open air reads as a glitch rather than as one that came
+   * loose behind the foliage.
+   */
+  spawnDriftLeaf(x: number, y: number, wind: number, now: number): void {
+    if (!this.motion) return;
+    const slot = acquire(this.drifting);
+    slot.active = true;
+    slot.x = x;
+    slot.y = y;
+    slot.vx = wind + (Math.random() * 2 - 1) * DRIFT_SPEED_PX;
+    slot.vy = DRIFT_SINK_PX * (0.5 + Math.random());
+    slot.spin = (Math.random() * 2 - 1) * 1.1;
+    slot.phase = Math.random() * Math.PI * 2;
+    slot.size = 3 + Math.random() * 2.5;
+    slot.color = Math.random() < 0.6 ? PALETTE.leafFall : PALETTE.leafFallDry;
+    slot.spawnedAt = now;
+  }
+
   /** Shake one scrap of foliage loose from a point. */
   spawnFallingLeaf(x: number, y: number, now: number): void {
+    if (!this.motion) return;
     const slot = acquire(this.leaves);
     slot.active = true;
     slot.x = x;
@@ -281,6 +403,7 @@ export class EffectPool {
    * good thing happening to the tree.
    */
   spawnConfetti(x: number, y: number, now: number, count = 44): void {
+    if (!this.motion) return;
     const colors = PALETTE.confetti;
     for (let i = 0; i < count; i += 1) {
       const slot = acquire(this.confetti);
@@ -312,6 +435,9 @@ export class EffectPool {
     for (const slot of this.leaves) {
       if (slot.active && now - slot.spawnedAt >= LEAF_FALL_DURATION_MS) slot.active = false;
     }
+    for (const slot of this.drifting) {
+      if (slot.active && now - slot.spawnedAt >= DRIFT_DURATION_MS) slot.active = false;
+    }
   }
 
   /** Live floating numbers — for tests and debugging. */
@@ -334,12 +460,18 @@ export class EffectPool {
     return this.confetti.reduce((n, slot) => n + (slot.active ? 1 : 0), 0);
   }
 
+  /** Live wind-drifted leaves — for tests and debugging. */
+  get activeDrift(): number {
+    return this.drifting.reduce((n, slot) => n + (slot.active ? 1 : 0), 0);
+  }
+
   /** Deactivate every slot. */
   clear(): void {
     for (const slot of this.floats) slot.active = false;
     for (const slot of this.ripples) slot.active = false;
     for (const slot of this.leaves) slot.active = false;
     for (const slot of this.confetti) slot.active = false;
+    for (const slot of this.drifting) slot.active = false;
   }
 
   /**
@@ -350,10 +482,47 @@ export class EffectPool {
    */
   draw(ctx: CanvasRenderingContext2D, now: number): void {
     this.prune(now);
+    this.drawDrift(ctx, now);
     this.drawFallingLeaves(ctx, now);
     this.drawConfetti(ctx, now);
     this.drawRipples(ctx, now);
     this.drawFloats(ctx, now);
+  }
+
+  /**
+   * Leaves on the wind: straight-line travel with a slow swing across it, fading
+   * in at the start and out at the end so they have no visible birth or death.
+   *
+   * Drawn first, and so behind everything else the pool holds: this is scenery,
+   * and scenery that crosses in front of a "+12 Sap" is scenery that has stopped
+   * being scenery.
+   */
+  private drawDrift(ctx: CanvasRenderingContext2D, now: number): void {
+    ctx.save();
+    for (const slot of this.drifting) {
+      if (!slot.active) continue;
+      const elapsed = (now - slot.spawnedAt) / 1000;
+      const t = (now - slot.spawnedAt) / DRIFT_DURATION_MS;
+
+      const x = slot.x + slot.vx * elapsed;
+      const y =
+        slot.y +
+        slot.vy * elapsed +
+        Math.sin(elapsed * DRIFT_SWAY_RATE * Math.PI * 2 + slot.phase) * DRIFT_SWAY_PX;
+
+      // A short fade in, a long hold, a fade out over the last quarter.
+      const fade = t < 0.12 ? t / 0.12 : t > 0.75 ? Math.max(0, 1 - (t - 0.75) / 0.25) : 1;
+      ctx.globalAlpha = fade * 0.85;
+      ctx.fillStyle = slot.color;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(slot.spin * elapsed);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, slot.size, slot.size * 0.45, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
   }
 
   /** Confetti: ballistic scraps that launch, tumble, and drift back down. */
@@ -393,7 +562,9 @@ export class EffectPool {
       const t = (now - slot.spawnedAt) / LEAF_FALL_DURATION_MS;
 
       const x =
-        slot.x + slot.drift * elapsed + Math.sin(elapsed * LEAF_SWAY_RATE * Math.PI + slot.phase) * LEAF_SWAY_PX;
+        slot.x +
+        slot.drift * elapsed +
+        Math.sin(elapsed * LEAF_SWAY_RATE * Math.PI + slot.phase) * LEAF_SWAY_PX;
       // Eased downward: a leaf leaves the limb slowly and picks up speed.
       const y = slot.y + slot.speed * elapsed * (0.45 + 0.55 * t);
 

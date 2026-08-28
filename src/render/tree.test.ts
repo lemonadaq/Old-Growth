@@ -5,6 +5,7 @@ import { HORIZON_RATIO } from './palette';
 import {
   computeTreeLayout,
   cullSegments,
+  drawTree,
   growProgress,
   isSegmentVisible,
   swayOffset,
@@ -276,5 +277,74 @@ describe('woodColor', () => {
   it('falls back to the starter for an unspecified or unknown species', () => {
     expect(woodColor('branch')).toBe(SPECIES_BY_ID.oak.palette.branch);
     expect(woodColor('branch', 'nonesuch')).toBe(SPECIES_BY_ID.oak.palette.branch);
+  });
+});
+
+/**
+ * A 2D context that records the shapes it is asked to draw.
+ *
+ * Enough of the surface for `drawTree`, and nothing more: the point is to
+ * compare two frames, so what matters is that every coordinate that reaches the
+ * canvas is written down.
+ */
+function recordingContext() {
+  const calls: string[] = [];
+  const round = (n: number) => Math.round(n * 1000) / 1000;
+  const ctx = {
+    calls,
+    save: () => calls.push('save'),
+    restore: () => calls.push('restore'),
+    beginPath: () => calls.push('beginPath'),
+    closePath: () => calls.push('closePath'),
+    fill: () => calls.push('fill'),
+    stroke: () => calls.push('stroke'),
+    setLineDash: () => calls.push('dash'),
+    moveTo: (x: number, y: number) => calls.push(`moveTo:${round(x)},${round(y)}`),
+    lineTo: (x: number, y: number) => calls.push(`lineTo:${round(x)},${round(y)}`),
+    arc: (x: number, y: number, r: number) => calls.push(`arc:${round(x)},${round(y)},${round(r)}`),
+    ellipse: (x: number, y: number) => calls.push(`ellipse:${round(x)},${round(y)}`),
+    fillRect: () => calls.push('fillRect'),
+    fillStyle: '',
+    strokeStyle: '',
+    lineWidth: 0,
+    lineCap: '',
+    lineJoin: '',
+    globalAlpha: 1,
+  };
+  return ctx as unknown as CanvasRenderingContext2D & { calls: string[] };
+}
+
+/** The demo tree, laid out on a canvas, ready to be drawn. */
+const SCREEN = projectTree(TREE, computeTreeLayout(800, 600, treeBounds(TREE)));
+
+/** What `drawTree` puts on the canvas for one frame, as a comparable string. */
+function frameAt(now: number, motion: boolean): string {
+  const ctx = recordingContext();
+  drawTree(ctx, SCREEN, now, new Map(), undefined, undefined, undefined, motion);
+  return (ctx as unknown as { calls: string[] }).calls.join('|');
+}
+
+describe('reduced motion', () => {
+  it('holds the canopy perfectly still across time', () => {
+    // The acceptance criterion, stated as an assertion: with motion off, two
+    // frames a second and a half apart are the *same drawing*. Nothing in the
+    // tree may depend on the clock.
+    expect(frameAt(0, false)).toBe(frameAt(1500, false));
+    expect(frameAt(1500, false)).toBe(frameAt(9000, false));
+  });
+
+  it('sways when motion is allowed, so the test above is measuring something', () => {
+    expect(frameAt(0, true)).not.toBe(frameAt(1500, true));
+  });
+
+  it('draws the same parts either way — it stops moving, it does not stop showing', () => {
+    const still = frameAt(0, false)
+      .split('|')
+      .filter((c) => c.startsWith('arc')).length;
+    const moving = frameAt(0, true)
+      .split('|')
+      .filter((c) => c.startsWith('arc')).length;
+    expect(still).toBe(moving);
+    expect(still).toBeGreaterThan(0);
   });
 });

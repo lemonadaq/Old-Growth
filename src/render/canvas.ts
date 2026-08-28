@@ -37,12 +37,7 @@ import {
   type RadialMenuState,
 } from './radialMenu';
 import { PICKER_MIN_SPECIES } from '../content/species';
-import {
-  drawPruneConfirm,
-  drawPruneMark,
-  markedPoints,
-  type PruneSelection,
-} from './prune';
+import { drawPruneConfirm, drawPruneMark, markedPoints, type PruneSelection } from './prune';
 import { drawGraftBadge, drawGraftMark, type GraftSelection } from './graft';
 import {
   drawSpeciesPicker,
@@ -150,6 +145,17 @@ export class Renderer {
   private piles: readonly LaidPile[] = [];
   private bracing = false;
 
+  /**
+   * Whether decorative motion is allowed — the inverse of the player's
+   * `prefers-reduced-motion`. Owned here rather than read from the media query
+   * per frame so the renderer stays free of browser lookups in its hot path, and
+   * so a test can drive it directly.
+   */
+  private motion = true;
+
+  /** Wall-clock time the next wind-drifted leaf is due, in ms. */
+  private nextDriftAt = 0;
+
   constructor(private readonly canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext('2d');
     if (!ctx) {
@@ -193,6 +199,19 @@ export class Renderer {
    */
   setSoil(soil: SoilMap): void {
     this.soil = soil;
+  }
+
+  /**
+   * Honour (or stop honouring) `prefers-reduced-motion`.
+   *
+   * One switch for the whole scene: the canopy stops swaying, new parts land at
+   * full size, the hills stop lagging the camera, and every particle system goes
+   * quiet. What survives is everything that carries information — the floating
+   * numbers, the ripples, the shade tint, the season's colour.
+   */
+  setReducedMotion(reduced: boolean): void {
+    this.motion = !reduced;
+    this.effects.setMotion(!reduced);
   }
 
   /** Track the pointer so the combo meter can follow it. `null` hides it. */
@@ -534,6 +553,56 @@ export class Renderer {
   }
 
   /**
+   * How often a leaf comes loose into the wind, in ms, and how hard the wind
+   * pushes it sideways in px/s.
+   *
+   * Both are driven by what the world is actually doing, which is the only
+   * reason an ambient particle earns its frame time: leaves come off an autumn
+   * tree far more than a spring one, and a storm strips them and throws what it
+   * takes across the screen. A constant drizzle of leaves in every weather would
+   * be a screensaver.
+   */
+  private driftEmission(snapshot: GameSnapshot): { intervalMs: number; wind: number } {
+    const weather = snapshot.weather.active?.id ?? null;
+    if (weather === 'storm') return { intervalMs: 240, wind: 150 };
+    if (weather === 'rain') return { intervalMs: 900, wind: 30 };
+    if (snapshot.season.id === 'autumn') return { intervalMs: 420, wind: 22 };
+    // A drought has nothing left to shed and no wind to shed it with.
+    if (weather === 'drought') return { intervalMs: 2600, wind: 10 };
+    if (snapshot.season.id === 'winter') return { intervalMs: 2200, wind: 26 };
+    return { intervalMs: 1100, wind: 18 };
+  }
+
+  /**
+   * Let a leaf loose from a random cluster, if one is due.
+   *
+   * Spawned from the *projected* canopy, so leaves come off the tree the player
+   * can see rather than from the top of the screen — and only from clusters,
+   * because a leaf drifting out of a root would be a bug that looks like a
+   * feature. Cheap by construction: at most one leaf per frame, and none at all
+   * when the tree has no foliage yet.
+   */
+  private emitDrift(snapshot: GameSnapshot, now: number): void {
+    if (!this.motion) return;
+
+    const { intervalMs, wind } = this.driftEmission(snapshot);
+    if (now < this.nextDriftAt) return;
+    // A first frame (or a tab returning after an hour) must not dump a backlog.
+    this.nextDriftAt = now + intervalMs * (0.6 + Math.random() * 0.8);
+
+    const clusters = this.screenTree.filter((segment) => segment.kind === 'leafCluster');
+    if (clusters.length === 0) return;
+
+    const source = clusters[Math.floor(Math.random() * clusters.length)];
+    this.effects.spawnDriftLeaf(
+      source.b.x + (Math.random() * 2 - 1) * source.width,
+      source.b.y + (Math.random() * 2 - 1) * source.width,
+      wind * (Math.random() < 0.5 ? -0.35 : 1),
+      now,
+    );
+  }
+
+  /**
    * Draw one frame.
    *
    * @param snapshot latest game snapshot.
@@ -551,7 +620,7 @@ export class Renderer {
     // Sky, the sun or moon crossing it, and the hills on the horizon — under
     // whatever the season and the weather are casting over them.
     const casts = skyCasts(snapshot.season.id, snapshot.weather);
-    drawBackdrop(ctx, viewport, this.layout, snapshot.day, casts);
+    drawBackdrop(ctx, viewport, this.layout, snapshot.day, casts, this.motion);
 
     // Every tree the player has already given up, standing on those hills. Drawn
     // straight after the ridgeline it stands on and before anything underground,
@@ -599,7 +668,13 @@ export class Renderer {
       viewport,
       snapshot.leafLight,
       seasonLeafCast(snapshot.season.id),
+      this.motion,
     );
+
+    // A leaf on the wind, if one is due. Emitted after the tree is drawn so it
+    // is spawned from this frame's projection, and drawn by the effect pool over
+    // the top of the canopy it came off.
+    this.emitDrift(snapshot, now);
 
     // The creatures go over the tree they live in, and under the mode overlays:
     // a bee must never obscure the limb the player is about to cut.

@@ -41,6 +41,13 @@
   backdrop-filter: blur(4px);
 }
 
+/* Lift under the pointer: the HUD sits over a busy canvas, and a control that
+   does not answer the mouse is hard to tell from a label. */
+.hud-toggle:hover {
+  border-color: var(--hud-accent);
+  background: rgba(46, 33, 20, 0.72);
+}
+
 .hud-toggle[aria-pressed='true'] {
   color: var(--hud-accent);
   border-color: var(--hud-accent);

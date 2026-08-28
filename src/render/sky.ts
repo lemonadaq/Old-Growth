@@ -182,10 +182,14 @@ function drawHillBand(
   layout: TreeLayout,
   band: number,
   color: string,
+  parallax: number,
 ): void {
   const amplitude = viewport.height * HILL_HEIGHT[band];
   // The band scrolls with a fraction of the camera's own horizontal travel.
-  const offset = (viewport.width / 2 - layout.originX) * HILL_PARALLAX[band];
+  // Depth is the whole illusion: the far band lags more than the near one, so
+  // panning across the world opens a gap between the two ridgelines and the
+  // distance behind the tree stops being a flat painted backdrop.
+  const offset = (viewport.width / 2 - layout.originX) * parallax;
 
   ctx.fillStyle = color;
   ctx.beginPath();
@@ -218,6 +222,7 @@ export function drawBackdrop(
   layout: TreeLayout,
   cycle: DayCycle,
   casts: readonly ColorCast[] = [],
+  motion = true,
 ): void {
   const { width: w, height: h } = viewport;
   const groundY = layout.originY;
@@ -252,6 +257,10 @@ export function drawBackdrop(
     ctx.clip();
     // The hills take the same casts the sky does — a winter that whitened the
     // sky and left the ridgeline green would read as two different days.
+    // With motion off the bands are pinned to the viewport instead of lagging
+    // it: the parallax is the one part of the backdrop that *only* exists as
+    // relative movement, so there is nothing to keep once movement is what the
+    // player has asked to be spared.
     drawHillBand(
       ctx,
       viewport,
@@ -259,6 +268,7 @@ export function drawBackdrop(
       layout,
       0,
       castColor(lerpColor(PALETTE.hillFar, PALETTE.hillFarNight, night), casts),
+      motion ? HILL_PARALLAX[0] : 0,
     );
     drawHillBand(
       ctx,
@@ -267,6 +277,7 @@ export function drawBackdrop(
       layout,
       1,
       castColor(lerpColor(PALETTE.hillNear, PALETTE.hillNearNight, night), casts),
+      motion ? HILL_PARALLAX[1] : 0,
     );
     ctx.restore();
   }

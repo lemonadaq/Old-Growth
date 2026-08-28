@@ -1,7 +1,7 @@
 import Decimal from 'break_infinity.js';
 import { describe, expect, it } from 'vitest';
 import { SAVE_BACKUP_KEY, SAVE_KEY, SAVE_VERSION } from '../content/save';
-import { DEFAULT_SETTINGS } from '../content/settings';
+import { DEFAULT_SETTINGS, normaliseSettings } from '../content/settings';
 import { SYMBIONT_BY_ID } from '../content/symbionts';
 import { isNewerThanCurrent, migrateSave, MIGRATIONS } from './migrations';
 import { parseSaveText, validateEnvelope, type SaveEnvelope } from './save';
@@ -62,7 +62,13 @@ function playedGame(): Simulation {
   // modifier would be comparing a loaded game against a broken one.
   sim.republishRings();
   sim.state.seedFragments = 40;
-  sim.state.settings = { ...DEFAULT_SETTINGS, muted: true };
+  sim.state.settings = {
+    ...DEFAULT_SETTINGS,
+    muted: true,
+    masterVolume: 0.4,
+    musicVolume: 0.25,
+    sfxVolume: 0.9,
+  };
 
   for (let i = 0; i < 20; i += 1) sim.click(i * 200, () => 1);
   for (let i = 0; i < 30; i += 1) sim.tick(0.1);
@@ -96,6 +102,11 @@ function fingerprint(sim: Simulation) {
     elapsed: sim.state.elapsedSeconds,
     playtime: sim.state.playtimeSeconds,
     muted: sim.state.settings.muted,
+    mixer: [
+      sim.state.settings.masterVolume,
+      sim.state.settings.musicVolume,
+      sim.state.settings.sfxVolume,
+    ].join(','),
   };
 }
 
@@ -206,6 +217,28 @@ describe('playtime', () => {
     const loaded = new Simulation();
     loaded.load(sim.save());
     expect(loaded.state.playtimeSeconds).toBeCloseTo(5, 6);
+  });
+});
+
+describe('settings', () => {
+  it('fills in a field a save was written before the game had', () => {
+    // Exactly what a STEP 15 save carries: a mute and nothing else. STEP 16's
+    // mixer must arrive at its defaults rather than at zero — a save loading
+    // into silence would look like a broken game rather than an old one.
+    const legacy = normaliseSettings({ muted: true });
+    expect(legacy).toEqual({ ...DEFAULT_SETTINGS, muted: true });
+  });
+
+  it('clamps a hand-edited volume instead of trusting it', () => {
+    const settings = normaliseSettings({ masterVolume: 40, musicVolume: -3, sfxVolume: 'loud' });
+    expect(settings.masterVolume).toBe(1);
+    expect(settings.musicVolume).toBe(0);
+    expect(settings.sfxVolume).toBe(DEFAULT_SETTINGS.sfxVolume);
+  });
+
+  it('survives a settings block that is not a block at all', () => {
+    expect(normaliseSettings(null)).toEqual(DEFAULT_SETTINGS);
+    expect(normaliseSettings('muted')).toEqual(DEFAULT_SETTINGS);
   });
 });
 

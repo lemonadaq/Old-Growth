@@ -55,6 +55,48 @@
   color: var(--hud-text);
 }
 
+/* The hotkey printed next to the mute box, so the shortcut is discoverable
+   somewhere other than a tooltip nobody hovers. */
+.settings__key {
+  padding: 1px 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: var(--hud-muted);
+  background: rgba(20, 14, 9, 0.55);
+  border: 1px solid var(--hud-border);
+  border-radius: 4px;
+}
+
+/* Three columns — name, slider, readout — so the percentages line up in a
+   column and the sliders all start and end at the same x. */
+.settings__slider {
+  display: grid;
+  grid-template-columns: 58px 1fr 38px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--hud-text);
+  cursor: pointer;
+}
+
+.settings__slider--off {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.settings__slider input[type='range'] {
+  width: 100%;
+  accent-color: var(--hud-accent);
+  cursor: inherit;
+}
+
+.settings__slider-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  text-align: right;
+  color: var(--hud-muted);
+}
+
 .settings__status {
   margin: 0;
   font-size: 11px;

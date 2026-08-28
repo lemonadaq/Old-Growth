@@ -5,7 +5,13 @@
   --hud-muted: #d9c4a3;
   --hud-accent: #ffd27a;
   font-family:
-    'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+    'Segoe UI',
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
   color-scheme: light dark;
 }
 
@@ -29,4 +35,68 @@ body {
 
 #root {
   position: relative;
+}
+
+/*
+ * Button micro-states, once, for every button in the game.
+ *
+ * Declared globally rather than per component on purpose: a hover that only
+ * some buttons have is worse than no hover at all, because the ones without it
+ * read as disabled. Individual panels still layer their own colours on top —
+ * this only guarantees that everything clickable lifts under the pointer and
+ * gives under the press.
+ *
+ * The press is a *scale*, not a colour: a control that physically yields is
+ * legible on a phone, where there is no hover state at all and the finger is
+ * covering the colour.
+ */
+button {
+  transition:
+    transform 90ms ease,
+    filter 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+button:not(:disabled):hover {
+  filter: brightness(1.09);
+}
+
+button:not(:disabled):active {
+  transform: scale(0.96);
+  filter: brightness(0.94);
+}
+
+/* Keyboard focus is a separate question from hover, and has to be visible
+   against both the sky and the soil — hence the accent rather than a shadow. */
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--hud-accent);
+  outline-offset: 2px;
+}
+
+/*
+ * Reduced motion, for the DOM half of the game. The canvas half is handled in
+ * `src/ui/motion.ts`, which drives the same setting into the renderer.
+ *
+ * Transitions are collapsed rather than removed so that state changes still
+ * *happen* — a button that never reaches its hover colour would be a bug — and
+ * the press scale is dropped entirely, since a control changing size is exactly
+ * the kind of movement the setting is asking us not to make.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  button:not(:disabled):active {
+    transform: none;
+  }
 }

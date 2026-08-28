@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CONFETTI_DURATION_MS,
+  DRIFT_DURATION_MS,
   EffectPool,
   FLOAT_DURATION_MS,
   LEAF_FALL_DURATION_MS,
@@ -95,5 +96,79 @@ describe('confetti', () => {
 
   it('outlives a prune burst, because a discovery should be the last thing left', () => {
     expect(CONFETTI_DURATION_MS).toBeGreaterThan(LEAF_FALL_DURATION_MS);
+  });
+});
+
+describe('wind-drifted leaves', () => {
+  it('spawns and retires on its own schedule', () => {
+    const pool = new EffectPool();
+    pool.spawnDriftLeaf(10, 10, 20, 1000);
+    expect(pool.activeDrift).toBe(1);
+
+    pool.prune(1000 + DRIFT_DURATION_MS - 1);
+    expect(pool.activeDrift).toBe(1);
+
+    pool.prune(1000 + DRIFT_DURATION_MS);
+    expect(pool.activeDrift).toBe(0);
+  });
+
+  it('stays on screen far longer than anything a click makes', () => {
+    // It is the idle animation: a leaf that is gone before it is noticed has
+    // done nothing for a tree nobody is currently clicking.
+    expect(DRIFT_DURATION_MS).toBeGreaterThan(LEAF_FALL_DURATION_MS);
+    expect(DRIFT_DURATION_MS).toBeGreaterThan(FLOAT_DURATION_MS);
+  });
+
+  it('is capped low: a breeze, not a blizzard', () => {
+    const pool = new EffectPool(8, 8, 8, 8, 3);
+    for (let i = 0; i < 50; i += 1) pool.spawnDriftLeaf(i, i, 10, i);
+    expect(pool.activeDrift).toBe(3);
+  });
+});
+
+describe('reduced motion', () => {
+  it('refuses every decorative particle', () => {
+    const pool = new EffectPool();
+    pool.setMotion(false);
+
+    pool.spawnDriftLeaf(0, 0, 10, 0);
+    pool.spawnFallingLeaf(0, 0, 0);
+    pool.spawnPruneBurst([{ x: 1, y: 1 }], 0);
+    pool.spawnConfetti(0, 0, 0);
+
+    expect(pool.activeDrift).toBe(0);
+    expect(pool.activeLeaves).toBe(0);
+    expect(pool.activeConfetti).toBe(0);
+  });
+
+  it('keeps the feedback that a tap actually happened', () => {
+    const pool = new EffectPool();
+    pool.setMotion(false);
+    pool.spawnHit(0, 0, '+1', false, 0);
+
+    expect(pool.activeFloats).toBe(1);
+    expect(pool.activeRipples).toBe(1);
+  });
+
+  it('clears what is already in the air, rather than letting it peter out', () => {
+    const pool = new EffectPool();
+    pool.spawnConfetti(0, 0, 0);
+    pool.spawnDriftLeaf(0, 0, 10, 0);
+    expect(pool.activeConfetti).toBeGreaterThan(0);
+
+    pool.setMotion(false);
+
+    expect(pool.activeConfetti).toBe(0);
+    expect(pool.activeDrift).toBe(0);
+  });
+
+  it('starts allowing motion again the moment it is switched back on', () => {
+    const pool = new EffectPool();
+    pool.setMotion(false);
+    pool.setMotion(true);
+    pool.spawnDriftLeaf(0, 0, 10, 0);
+
+    expect(pool.motionEnabled).toBe(true);
+    expect(pool.activeDrift).toBe(1);
   });
 });

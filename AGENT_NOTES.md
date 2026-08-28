@@ -15,6 +15,102 @@ Do not refactor unrelated code.
 
 ## Changelog
 
+### 2026-08-27 — STEP 16: Audio and game feel
+
+Fifteen steps of a game that was silent apart from one synthesised snip. This
+one gives it a voice and a bit of weight — and does both without adding a single
+byte of downloaded asset, because no licensed sound exists yet and inventing a
+dependency on files nobody has recorded would block the step on a purchase.
+
+- `src/content/audio.ts` — **new, and the whole bank is data.** Every cue is a
+  short list of _voices_ — a tone or a burst of filtered noise, each with an
+  offset, a length and an envelope — rendered by WebAudio at the moment it is
+  asked for. Nine cues: `click`, `crit`, `grow`, `prune`, `graft`, `prestige`,
+  and the three weather warnings. Synthesised rather than sampled on purpose:
+  weightless, tunable in a text editor between two taps, and **parametric** — the
+  click is pitched ±10% per tap from one spec, which is what stops ten taps a
+  second sounding like a machine gun.
+- `src/ui/audio/` — **new**: `synth.ts` (voices and envelopes), `music.ts` (the
+  seasonal pad), `ambience.ts` (rain and wind), `manager.ts` (the one thing that
+  owns sound), plus `fakeContext.ts` so all of it is testable with no audio
+  hardware.
+  - **Howler owns the master bus.** Everything synthesised is routed into
+    `Howler.masterGain`, and master volume and mute go through `Howler.volume()`
+    and `Howler.mute()` rather than a gain of our own. Not ceremony to justify
+    the dependency: it is what makes the eventual swap to real assets a
+    non-event — a `Howl` created for a recorded snip connects to that same bus by
+    construction, already at the right volume and already muted if the player is.
+  - **Every public method is a no-op with no context to play into.** Audio is
+    decoration; it must never break the interaction that triggered it.
+  - **The pad has no phrase and no loop point.** Notes are drawn from a
+    pentatonic scale at a slow jittered interval and left to ring two or three
+    times the gap between them. "Must never be annoying" is satisfied
+    _structurally_ rather than by being quiet: there is nothing to learn, so
+    there is nothing to get sick of, and no seam to notice on the fortieth pass.
+    Notes are queued **ahead of the clock**, because `setTimeout` in a
+    backgrounded tab is throttled and WebAudio's timeline is not.
+  - **Weather gusts are an LFO on filter cutoff, not on gain.** Wind that swells
+    in volume sounds like someone riding a fader; wind that moves in _timbre_
+    sounds like air changing direction, which is what it is.
+- `src/ui/sfx.ts` — **deleted**, exactly as STEP 9 said it should be: "Replace
+  wholesale in STEP 16. Delete the module, don't extend it."
+- `src/ui/tween.ts` — HUD totals slide toward their target instead of jumping.
+  Legibility rather than prettiness: a counter climbing at 40/s changes its last
+  digit every frame, and a digit that changes every frame cannot be read.
+- `src/ui/motion.ts` — `prefers-reduced-motion`, watched live rather than read
+  once, with the pre-Safari-14 listener API as a fallback. It reaches the
+  renderer as one flag: sway off, particles off _and cleared_, parallax off,
+  scale-in landing at full size. The tree still says everything it says about
+  shade, species and season; it simply stops moving.
+- `public/audio/ASSETS_TODO.md` — what should eventually replace the synth bank,
+  by name, length and mood.
+- Tests: **1098 pass** (up from 1016). The audio modules are covered against a
+  fake `AudioContext`; `motion.test.ts` covers the query and its fallbacks.
+- **A gap I found and closed:** nothing asserted the acceptance criterion
+  _"reduced-motion mode verified"_ for the canopy — `effects.test.ts` covered
+  particles, `motion.test.ts` covered the media query, and the still tree was
+  covered by nobody. `render/tree.test.ts` now records what `drawTree` puts on a
+  canvas and asserts two frames 1.5 s apart are **the same drawing** with motion
+  off, with a control test proving they differ with it on, and a third proving
+  the same _number of parts_ is drawn either way — it stops moving, it does not
+  stop showing.
+- Verified in a real browser (Chromium/Playwright, production build): the mixer
+  opens at **70/70/70**, **M** mutes and the mute survives a reload, and dragging
+  Music to 30% and Effects to 45% wrote `{"masterVolume":0.7,"musicVolume":0.3,
+"sfxVolume":0.45}` into the save, which came back after a reload. Under an
+  emulated `prefers-reduced-motion: reduce` the page runs clean with no errors.
+
+**Design decisions worth knowing**
+
+- **The mixer stays visible while muted, and disabled rather than reset.** Mute
+  is a pause, not a preference: a player who unmutes should get back the mix they
+  had.
+- **Reduced motion is reported in Settings, not offered there.** It is read from
+  the system setting the player already made once for everything they own;
+  showing it is so that a still canopy reads as _working as asked_ rather than as
+  broken.
+- **A pixel diff could not verify reduced motion.** Two canvas frames a second
+  apart differ even with motion off, because the sun still moves and the sky
+  still lerps — and both are _information_, not decoration. The check that
+  actually works is the drawing-level test described above. Worth remembering
+  before trusting a screenshot comparison on a scene with a clock in it.
+
+**Open TODOs**
+
+- [ ] **Every sound is a placeholder.** `ASSETS_TODO.md` is the list; the swap is
+      a `Howl` per cue on the same master bus, keyed by the same `SfxId`, and
+      nothing above `manager.ts` has to move.
+- [ ] The pad is one scale per season and no more. It does not yet respond to
+      weather, night, or a prestige ceremony — the ceremony in particular is six
+      seconds that currently plays over ordinary summer music.
+- [ ] Volume changes write to the save on the next autosave rather than
+      immediately, so a mixer tweak followed by a hard tab close inside 30 s is
+      lost. The same "no write on consequential actions" TODO as STEP 15's.
+- [ ] Reduced motion does not yet reach the prestige ceremony (STEP 13 flagged
+      this); it is still a six-second animation regardless of the setting.
+- [ ] No audio on the away modal's count-up, and none on a symbiont arriving —
+      two of the few moments that currently have visual feedback and no sound.
+
 ### 2026-08-27 — STEP 15: Save system and migrations
 
 Fourteen steps of state that lived exactly as long as a tab. This one writes it
@@ -37,21 +133,21 @@ browser that refuses storage, a file from a build that does not exist yet.
     would let a load double an aura that is also re-granted — and a save format
     that carries derived values is one that goes stale the moment a balance
     number moves.
-  - Cadence intervals come from the *catalogue*, not the file, so a change to how
+  - Cadence intervals come from the _catalogue_, not the file, so a change to how
     often the songbird sings reaches saves that already exist.
   - A buff whose time ran out while the tab was shut is dropped on load rather
     than restored-then-expired, which would flash its modifiers across one frame.
 - `src/engine/migrations.ts` — an ordered list of one-version steps, walked one
   at a time so a save three versions behind is migrated three times rather than
   jumped. **Empty at 1.0, and that is the point**: the machinery runs on every
-  load *before* the first breaking change rather than being written after it.
+  load _before_ the first breaking change rather than being written after it.
   Versions compare as numbers, so `1.10` is correctly newer than `1.9`, and a
   save from a newer build is refused with a sentence rather than guessed at.
 - `src/engine/storage.ts` — one rule: **a save is replaced, never edited.** The
   live key is rotated into the backup key before it is overwritten, and only if
   it still parses — promoting a corrupt file into the backup slot would destroy
   the very thing the slot is for. Every `localStorage` call is wrapped, including
-  the *reach* for it (a blocked-cookies setting throws on property access), so a
+  the _reach_ for it (a blocked-cookies setting throws on property access), so a
   browser that refuses storage gets a playable game and a warning rather than a
   blank screen.
   - Export is deflate-then-base64 behind an `OG1:` marker, with an `OG0:` plain
@@ -61,13 +157,13 @@ browser that refuses storage, a file from a build that does not exist yet.
     long lines and a paste that fails on a newline is a support request.
 - `src/engine/simulation.ts` — `save()`, `load()`, `hardReset()`, and
   `playtimeSeconds` advancing only on ticks a person sat through (an offline
-  catch-up moves the *tree's* clock, and calling that "time played" would make
+  catch-up moves the _tree's_ clock, and calling that "time played" would make
   the stat a measure of how long the tab was shut). **A failed load changes
   nothing**: the fresh state is built and fully populated before it is swapped
   in, the same swap-don't-unwind shape `goToSeed` uses.
 - `src/ui/Settings.tsx` + `.css` — mute, Export (to clipboard, with the text
   shown as well because clipboard permission is not guaranteed), Import
-  (validated *before* anything is replaced), and Hard Reset behind the typed
+  (validated _before_ anything is replaced), and Hard Reset behind the typed
   phrase. `src/ui/App.tsx` loads before the offline catch-up — reversed, a
   returning player would be paid for time their seedling was never alive for —
   and autosaves on three triggers: the interval, `visibilitychange` (the only one
@@ -84,10 +180,10 @@ browser that refuses storage, a file from a build that does not exist yet.
   back at **231.72**; Export produced a **772-character `OG1:` string**; Hard
   Reset with `UPROOT` emptied the game to **0**; Import restored **231.72**.
   Recovery was checked in a pre-seeded context (truncated live save, good
-  backup): the game opened at **144.32** with the toast *"Recovered from a
-  backup — the last save was damaged, so the one before it was opened instead"*,
-  and a context with both slots wrecked opened a fresh tree saying *"Save could
-  not be read"*. No page errors.
+  backup): the game opened at **144.32** with the toast _"Recovered from a
+  backup — the last save was damaged, so the one before it was opened instead"_,
+  and a context with both slots wrecked opened a fresh tree saying _"Save could
+  not be read"_. No page errors.
 
 **Manual test — verifying an offline absence**
 
@@ -95,7 +191,7 @@ STEP 14's note asked for this once saves existed, and now they do. In devtools:
 
 ```js
 const save = JSON.parse(localStorage['old-growth:save']);
-save.data.lastUpdatedAt -= 5 * 3600 * 1000;   // five hours ago
+save.data.lastUpdatedAt -= 5 * 3600 * 1000; // five hours ago
 localStorage['old-growth:save'] = JSON.stringify(save);
 location.reload();
 ```
@@ -158,24 +254,24 @@ oldest rule in the game: **the tree rests and the roots work.**
   implementation to keep in step, and it would drift within two steps.
   - **The canopy penalty is one revocable modifier on the `canopy` tag**, not a
     branch in the payout loop. Underground producers carry `OFFLINE_TAG` and not
-    that one, so the rule is expressed by *which producers the modifier can
-    reach*. It is granted in a `try` and revoked in the matching `finally`:
+    that one, so the rule is expressed by _which producers the modifier can
+    reach_. It is granted in a `try` and revoked in the matching `finally`:
     leaving it published would quarter the canopy for the rest of the session,
     and that is a bug that would look like balance.
   - **Rings are not special-cased.** `updateSeason` pays every boundary the clock
     crossed, so a winter the tree stood through pays whether anyone watched it.
-  - Per-second rates are re-read *after* the penalty is revoked, so the HUD opens
+  - Per-second rates are re-read _after_ the penalty is revoked, so the HUD opens
     on the tree's real Light/s rather than on a quarter of it.
 - `src/engine/weather.ts` — `update()` gained `allowAny`. STEP 12's `allowStorm`
   only skipped the storm, so **a drought fired during the first offline test
   run** — a penalty applied to somebody who was not there to react to it, which
   is exactly the "never cause losses" line this step is supposed to hold. Weather
-  already *running* when the player left still ends normally; only what has yet
+  already _running_ when the player left still ends normally; only what has yet
   to land is skipped, and the schedule rolls on rather than queueing a backlog.
 - `src/ui/AwayModal.tsx` + `.css` — **new**, and the only modal in the game. The
   gains are **already in the balances** when it opens: the simulation ran, and
   holding numbers back from their own systems to hand over on a button would be a
-  second source of truth. Collect animates the *count-up* — each row from zero to
+  second source of truth. Collect animates the _count-up_ — each row from zero to
   its total over 1.5 s — and a second press skips it.
 - Tests: **981 pass** (up from 939). New `engine/offline.test.ts` (30) covers the
   threshold from both sides, the cap at and past its edge, a clock that ran
@@ -221,7 +317,7 @@ and re-import it; this note should be replaced with that.
   broken clock into a reward.
 - **`gainBetween` floors at zero even though nothing offline spends.** The
   guarantee belongs where the number is produced, not in the memory of whoever
-  later adds a system that *does* spend while away.
+  later adds a system that _does_ spend while away.
 - **The cap is stated, not hidden.** A 20 h absence says "you were gone 20h" next
   to what it paid. A player who lost eight hours should be told, once, in the
   quiet voice — that is what makes Tempo's "+4h offline cap" legible as an
@@ -258,7 +354,7 @@ tree fuller every time.
 - `src/content/prestige.ts` — **new**. The gate, the yield, the forest bonus, and
   the Seed Vault as data: four branches of five nodes, each knowing what a level
   of it grants. Adding an heirloom is an edit here and nowhere else.
-  - **The maturity gate is set *equal to* the yield's divisor, not near it.**
+  - **The maturity gate is set _equal to_ the yield's divisor, not near it.**
     `Seeds = ⌊√(light / 1e6)⌋`, so the tree can seed at exactly 1e6 lifetime
     Light — the point the formula first pays a whole Seed. A prestige that reset
     the run and handed back nothing would be a trap, and tying the two constants
@@ -279,7 +375,7 @@ tree fuller every time.
   - **The design's `+ seedFragments/100` awards a fraction of a Seed**, and a
     fraction of a Seed cannot buy anything: every heirloom is priced in whole
     ones. So the fragment term is floored like the other one and the remainder is
-    *kept* — ninety fragments the songbird worked for are ninety fragments in the
+    _kept_ — ninety fragments the songbird worked for are ninety fragments in the
     next run, not a rounding error nobody sees.
 - `src/engine/heirlooms.ts` — **new**. A levels-only ledger, the one in the game
   that a reset copies rather than replaces. Most heirlooms are ordinary modifiers
@@ -287,17 +383,17 @@ tree fuller every time.
   the same shape the Rake takes.
 - `src/engine/simulation.ts` — **the reset is a swap, not an unwind.** A fresh
   `createInitialState` is built and the handful of things that outlive a tree are
-  copied onto it. Everything else resets *because it was never carried*, which is
+  copied onto it. Everything else resets _because it was never carried_, which is
   the safe way round: a field added by a later step starts clean rather than
   leaking into the next run because someone forgot a line in a thirty-field
   teardown. `state` became reassignable for this, and only `goToSeed` reassigns it.
   The constructor's republish sequence is now `hydrate()`, shared by both paths.
   - **Heirlooms top the current run up rather than waiting for the next reset.**
-    The Vault is spent *after* a prestige, so a Seedcase bought with the Seed the
+    The Vault is spent _after_ a prestige, so a Seedcase bought with the Seed the
     reset just paid would sit inert for a whole run — the first purchase every
     player makes, appearing to do nothing. `runStartLevels` records what this run
     has already been handed, and a purchase grants the difference. A remembered
-    *layout* stays deferred, and deliberately: replaying a tree into one the
+    _layout_ stays deferred, and deliberately: replaying a tree into one the
     player is already building would fight for slots that are taken.
   - Buying Quickening re-derives the season on the spot and re-marks the index as
     seen. A shorter year is a different reading of the same moment, and the
@@ -310,13 +406,13 @@ tree fuller every time.
   a counter. The **most recent** thirty are drawn, so the tree just planted is
   always among them.
 - `src/render/ceremony.ts` — **new**. The canopy lets go from the top down and
-  drifts *upward* — the one thing in the game that moves against gravity, which
+  drifts _upward_ — the one thing in the game that moves against gravity, which
   is why it reads as an ending rather than as another effect. Pure functions of
   the leaf positions and one fraction: no pool, no RNG at draw time.
 - `src/ui/SeedVault.tsx` — the Vault drawn as **a trunk in cross-section**,
   because the season badge already taught the player to read rings as this tree's
   own wood. Four limbs, each a chain: a node opens only once the one before it is
-  owned, so the shape on screen *is* the dependency.
+  owned, so the shape on screen _is_ the dependency.
 - `src/engine/resourceRegistry.ts` — `restore(id, amount, total)`: the one write
   that is neither a gain nor a spend. Carrying Seeds across into a fresh registry
   cannot be `add` — that would restate the whole lifetime as this run's earnings.
@@ -337,7 +433,7 @@ tree fuller every time.
 **Two things the screenshots changed**
 
 - **The grove was drawn too large and too saturated.** At a tenth of the canvas
-  it read as a hedge in *front* of the ridgeline and pulled the eye straight off
+  it read as a hedge in _front_ of the ridgeline and pulled the eye straight off
   the player's own tree. It is 7.5% now, hazed 58% toward the hill behind it —
   enough that no two neighbouring species look alike and no further.
 - **The counter was in the bottom-right corner, behind the upgrade panel.** Both
@@ -351,7 +447,7 @@ tree fuller every time.
   irreversible thing in the game, and a cancel button would make it a dialog.
 - **Planted totems and residents do not survive.** The recipes are content and are
   never forgotten, but a carving stands at the base of a tree that no longer
-  exists, and a creature lived in *that* tree. Bond is the supported way to keep
+  exists, and a creature lived in _that_ tree. Bond is the supported way to keep
   one, and it costs Seeds precisely because free symbionts across a reset would
   make the whole branch pointless.
 - **The ground is carried over.** Soil does not change because a tree died — and
@@ -365,14 +461,14 @@ tree fuller every time.
 - [ ] **Nothing persists (STEP 15).** `heirlooms`, `forest`, `memory`,
       `bondSymbiont`, `runStartLevels` and the banked Seeds are all in `GameState`
       and snapshotted. `HeirloomLedger.clear()` is the load hook. Note that
-      `runStartLevels` must be saved *with* the ledger or a reload would re-grant
+      `runStartLevels` must be saved _with_ the ledger or a reload would re-grant
       every starting balance the run has already spent.
 - [ ] **A million lifetime Light is roughly a day of a first-pass canopy.** The
       formula is the design's and the gate is tied to it, so the knob is
       `SEED_LIGHT_DIVISOR` alone — but STEP 19 owns whether a first prestige
       should be a day away. It is the single most important number in the file.
 - [ ] `offlineCapHours` is read by the Vault and by nothing else. STEP 14 owns
-      what the cap *does*; `BASE_OFFLINE_CAP_HOURS` is a placeholder until it does.
+      what the cap _does_; `BASE_OFFLINE_CAP_HOURS` is a placeholder until it does.
 - [ ] Canopy Map replays the whole previous tree, which makes the next run mature
       on its first tick — the height gate is satisfied by construction and only
       the Light gate remains. That may be exactly right for a 25-Seed node deep in
@@ -407,9 +503,9 @@ canopy that is visibly gold in October.
 - `src/content/seasons.ts` — **new**. The four as data: standing modifiers, a
   colour cast, and two flags for the mechanics that are not modifiers
   (`shedsLitter`, `earnsRing`).
-  - **Winter's "−60%" is read as two things going the *same* way.** Light ×0.4 is
+  - **Winter's "−60%" is read as two things going the _same_ way.** Light ×0.4 is
     the plain reading; growth cannot also be −60% because Spring already spends
-    "−20%" on making growth *cheaper*, and a winter that discounted prices
+    "−20%" on making growth _cheaper_, and a winter that discounted prices
     further would reward the hardest season in the game. So winter's growth is
     ×1.6 — dearer, not cheaper. It is the one place this step reads against the
     letter of the design line, and `WINTER_PENALTY` carries the reasoning.
@@ -423,8 +519,8 @@ canopy that is visibly gold in October.
   drought's immunity: a modifier can dry out the shallow roots and leave the
   ones that reached the rock, without naming a single node — and without
   touching Minerals, which a drought has no business taking.
-- `src/engine/seasons.ts` — **new**. Which season it is is a *pure function of
-  elapsed time*, exactly as the hour of the day is; the simulation stores only
+- `src/engine/seasons.ts` — **new**. Which season it is is a _pure function of
+  elapsed time_, exactly as the hour of the day is; the simulation stores only
   which season it last **saw**, so it can notice a boundary. Rings are the
   deliberate exception: a ring is a record of a winter lived through, so it is
   stored — prestige (STEP 13) keeps Rings and resets everything else, and a
@@ -436,11 +532,11 @@ canopy that is visibly gold in October.
 - `src/engine/weather.ts` — **new**. A three-field state machine (running,
   announced, next roll) advancing on **engine seconds**, with time and randomness
   both passed in — so a whole year of weather is reproducible from one seed. Each
-  transition is stamped with the moment it was *due*, not with `now`, so a long
+  transition is stamped with the moment it was _due_, not with `now`, so a long
   jump replays the schedule on its own timeline instead of bunching every event
   onto the first tick back (bounded by `MAX_WEATHER_STEPS`).
   - **Storms are online-only, enforced twice**: never drawn while `allowStorm` is
-    false, and one already announced is *dropped* rather than run if the player
+    false, and one already announced is _dropped_ rather than run if the player
     leaves before it lands. `Simulation.tick(dt, { offline })` is the switch STEP
     14 will throw.
   - The storm itself is resolved by the simulation out of pure helpers here —
@@ -448,7 +544,7 @@ canopy that is visibly gold in October.
     into the wind and is safe), `braceFraction`, `chooseSnappedLimbs` (hard cap
     of two, whatever the rolls say). What snaps pays **Deadwood only**: a storm is
     not a harvest, and there is no refund for wood nobody chose to cut.
-- `src/engine/litter.ts` — **new**. Autumn's piles are *places*, not a number
+- `src/engine/litter.ts` — **new**. Autumn's piles are _places_, not a number
   going up: each has a position at the base and is swept by clicking it. Capped
   at six, so a season spent elsewhere is worth one sweep rather than a backlog,
   and piles survive into winter — leaves left in the snow are still leaves.
@@ -458,7 +554,7 @@ canopy that is visibly gold in October.
   sweeps the rest. Buying it sweeps the base on the spot.
 - `src/engine/simulation.ts` — season and weather go into the tick right behind
   buffs, ahead of the residents: a rain that starts on this tick must be worth its
-  triple *on* this tick, and a winter that turns on it must not pay a single
+  triple _on_ this tick, and a winter that turns on it must not pay a single
   second at summer's rates.
 - `src/render/weather.ts` + `src/render/litter.ts` — **new**, and everything in
   them is a pure function of engine seconds: no particle pool, no RNG, so the
@@ -466,7 +562,7 @@ canopy that is visibly gold in October.
   by **casting** a colour over the existing palette (`ColorCast` in `./color.ts`,
   which now parses `rgb(...)` as well as hex so casts compose) — October is the
   same tree as June, tinted. The brace anchor is drawn on the trunk rather than in
-  the HUD: bracing is *holding the tree*, and a button in the corner would be a
+  the HUD: bracing is _holding the tree_, and a button in the corner would be a
   quick-time event with a tree in the background.
 - `src/ui/SeasonBadge.tsx` / `WeatherBanner.tsx` — **new**. The badge names the
   season, what it is doing to the numbers, and how long is left; the rings are
@@ -481,7 +577,7 @@ canopy that is visibly gold in October.
   `render/weather.test.ts` (20) and `render/litter.test.ts` (10);
   `simulation.test.ts` gained 28 across the accelerated year, ring stacking and
   persistence, the offline storm ban, the brace, the litter rhythm and the Rake.
-  Two existing growth-price tests now quote prices *through Spring* — a fresh save
+  Two existing growth-price tests now quote prices _through Spring_ — a fresh save
   opens in a growth discount, and pretending otherwise would have hidden it.
 - Verified in a real browser (Chromium/Playwright, 1280×800): the four seasons
   read as four different pictures — spring fresh, summer rich, autumn gold with
@@ -504,7 +600,7 @@ canopy that is visibly gold in October.
 - **Rain is clipped at the ground line.** The underground is a cross-section, and
   rain falling through the clay is the kind of small wrongness that cannot be
   un-seen once noticed. Also caught in the frames.
-- **The season casts *over* the shade tint, not instead of it.** Shade is about
+- **The season casts _over_ the shade tint, not instead of it.** Shade is about
   one leaf and is applied first; the month happens to the whole tree and goes on
   top. A crowded canopy still tells on itself in October.
 - **A storm owns the pointer for its fifteen seconds** — the anchor gets first
@@ -579,17 +675,17 @@ live.
   - Level scaling reuses the upgrade convention exactly (`add` × level, `mul` ^
     level). "Level 3" has to mean the same thing wherever a player reads it.
 - **Vein reach.** `veinAt(soil, point, reach)` and `soilConditionsAt(..., reach)`
-  widen every pocket's *radius* without moving it or changing its richness — a
+  widen every pocket's _radius_ without moving it or changing its richness — a
   fungal network does not create minerals, it extends how far a root can feel for
   them. It is threaded through `PartContext.veinReach` and
-  `priceGrowthOptions`, so the grow menu quotes what a tip *will* find under the
+  `priceGrowthOptions`, so the grow menu quotes what a tip _will_ find under the
   current network before it is bought, exactly as it already did for depth.
 - `src/engine/simulation.ts` — `updateSymbionts()` (arrivals + the banked
   progress rows), `collectSymbiontPayouts()`, `republishSymbionts()`,
   `upgradeSymbiont()`, `drainSymbiontArrivals()`, `plantBuriedNuts()`. Tick order
   gained one step behind buffs: **residents are a standing input**, not an event
   the tick should pay around. Growing, pruning and grafting all refresh the rows
-  immediately, so the third blossom brings the bees *on the purchase* rather than
+  immediately, so the third blossom brings the bees _on the purchase_ rather than
   up to a tenth of a second later.
   - **A wider reach rebuilds the whole part pipeline.** A root tip in barren
     ground registers no producer at all (STEP 7's rule), and a producer that does
@@ -598,9 +694,9 @@ live.
   - The buried nuts sprout **in the constructor**, before anything is measured,
     so a free root is part of the tree that loads rather than something that
     appears on top of it. `sproutedNuts` is the handle STEP 14's "While you were
-    away" summary will read. A nut with nowhere to sprout is *kept*, not spent.
-- `src/render/symbionts.ts` — **new**. A creature is a thing living *in the
-  tree*, so every one is positioned off the tree's own projected geometry and
+    away" summary will read. A nut with nowhere to sprout is _kept_, not spent.
+- `src/render/symbionts.ts` — **new**. A creature is a thing living _in the
+  tree_, so every one is positioned off the tree's own projected geometry and
   moves with the camera: bees fly between the actual blossoms the player bought,
   the ants' road runs up the actual trunk, the bird takes the highest twig there
   is and takes a different one when a higher one is grown. `symbiontScene()`
@@ -609,7 +705,7 @@ live.
   ant column and the perch are all tested without a canvas.
 - `src/ui/Symbionts.tsx` + `.css` — **new**. Every creature is on the list from
   the first frame, including the four that have not arrived: a locked card with a
-  live progress bar is a *goal*, and hiding it would leave the whole system
+  live progress bar is a _goal_, and hiding it would leave the whole system
   invisible until it happened by accident.
 - `src/ui/App.tsx` — the **S** hotkey, the panel (mutually exclusive with the
   Journal), and the arrival toast, driven off `drainSymbiontArrivals()`.
@@ -636,7 +732,7 @@ live.
 **Design decisions worth knowing**
 
 - **A resident is never evicted.** Pruning the blossoms that drew the bees does
-  not send them away. Conditions are an *attraction* mechanic, not an upkeep one;
+  not send them away. Conditions are an _attraction_ mechanic, not an upkeep one;
   the alternative turns every cut into a hostage negotiation, and STEP 9 exists
   to make cutting feel free.
 - **The squirrel is the earliest creature in the game, deliberately.** Its
@@ -650,7 +746,7 @@ live.
   looking at the rendered frame, not by reading the code.
 - **The fungal web is violet, not pale.** The first pass sheathed each root in a
   light glow and bleached them into bare sticks against the brown. A violet
-  sheath reads as *something growing on the root*. Also caught in the frames.
+  sheath reads as _something growing on the root_. Also caught in the frames.
 - **Ants move Sap on two lines, resource and `click.power`** — the same
   compromise Lateral Surge makes, for the same reason: taps are still the only
   Sap income in the game, so a resource-only modifier would be invisible.
@@ -663,7 +759,7 @@ live.
 - [ ] **Nothing persists (STEP 15).** `symbionts`, `seedFragments`, `buriedNuts`
       and `veinReach` are all in `GameState` and snapshotted;
       `SymbiontLedger.clear()` and `republishSymbionts()` are the load hooks. The
-      squirrel's whole mechanic is *next session*, so it is the one symbiont that
+      squirrel's whole mechanic is _next session_, so it is the one symbiont that
       cannot actually pay out until saves land — its nuts accrue and the panel
       says so, and `Simulation.sproutedNuts` is already wired.
 - [ ] Seed Fragments accrue but buy nothing until STEP 13's prestige converts
@@ -673,7 +769,7 @@ live.
       level-5 network makes root-tip placement stop mattering, which would undo
       most of STEP 7.
 - [ ] STEP 7's "vein discovery is free" TODO is **half closed**: reach is now a
-      thing the fungus extends, but every pocket is still *drawn* from the first
+      thing the fungus extends, but every pocket is still _drawn_ from the first
       frame. Hiding undetected veins is the other half and belongs with STEP 17's
       progressive disclosure.
 - [ ] Symbiont conditions are re-evaluated every tick (one graph walk at 10 Hz).
@@ -689,7 +785,7 @@ live.
 ### 2026-08-07 — STEP 10: Species and grafting discovery
 
 Until now every part of the tree was made of the same anonymous wood. Now a part
-is made of *something*: six species you unlock and choose between, and fifteen
+is made of _something_: six species you unlock and choose between, and fifteen
 hybrids you make at a fork by joining two limbs that grew there. The tree stops
 being one plant and starts being a collection of decisions you can see from
 across the screen.
@@ -707,13 +803,13 @@ across the screen.
 - `src/content/hybrids.ts` — **new**. All fifteen unordered pairs, keyed by
   `pairKey`, each with its own palette, flavour, a **hint line for its
   silhouette**, and effects no other entry has. Hybrid traits are local by rule —
-  a hybrid is a *place on the tree*, not another global percentage — and a test
+  a hybrid is a _place on the tree_, not another global percentage — and a test
   enforces it.
 - `src/engine/species.ts` — **new**, and the whole system rides on producer
   **tags**. A willow root registers carrying `species:willow` and
   `species:willow/water`, so "willow's Water" is an ordinary tag-targeted
   modifier and the economy never learns that species exist. The two-part tag is
-  load-bearing: `ModifierSet.matching` matches a producer by resource *or* by
+  load-bearing: `ModifierSet.matching` matches a producer by resource _or_ by
   tag and never by both, so the conjunction has to live in a tag name.
 - `src/engine/modifiers.ts` — `scopedTag(scope, tag)` (`species:cherry` +
   `click.critChance` → `species:cherry::click.critChance`). Nothing in the
@@ -761,11 +857,11 @@ across the screen.
   locked, the milestone and a progress bar; fifteen hybrids of which the
   undiscovered are silhouettes carrying their **parent pair and one line of
   hint**. Naming the parents is deliberate: the table is deterministic, so a
-  player reading the grid can go and *make* the one they want instead of grafting
+  player reading the grid can go and _make_ the one they want instead of grafting
   at random. Dormant traits are greyed and say what they are waiting for.
 - `src/ui/Toast.tsx`, `src/ui/GraftTooltip.tsx` — **new**. The toast fires once
   per never-before-made hybrid and dismisses itself. The tooltip always gives a
-  *sentence* rather than a greyed-out silence.
+  _sentence_ rather than a greyed-out silence.
 - `src/ui/App.tsx` — graft mode (**G**), the Journal (**J**), the picker's click
   path, and Escape backing out a chosen limb before the mode. Prune and graft
   turn each other off: two intentions aimed at the same limb must never both be
@@ -793,7 +889,7 @@ across the screen.
 **Design decisions worth knowing**
 
 - **Oak's Sap bonus is local, not tree-wide, and that was a correction.** Written
-  as a whole-tree trait it was baked into the baseline — a new tree is *entirely*
+  as a whole-tree trait it was baked into the baseline — a new tree is _entirely_
   oak — and it then read as a **penalty for planting anything else**: taps
   quietly weakening as the player diversified, with nothing on screen explaining
   why. Scoped to oak wood it is a reason to keep tapping the trunk. (It also
@@ -814,8 +910,7 @@ across the screen.
   maturity rule grafting is "buy two branches, press the button" — no placement,
   no patience, no decision.
 - **Discovery survives the limb.** Pruning a hybrid off drops it from the tally
-  but not from the Journal: the Journal is a record of the save, and (from STEP
-  13) of everything before it.
+  but not from the Journal: the Journal is a record of the save, and (from STEP 13) of everything before it.
 - **Prune refunds are still quoted at list price**, species-agnostic. A birch
   limb therefore refunds less than the fraction of what it cost — 57% of it
   rather than 40% — which is a loss either way, so there is no exploit, but the
@@ -857,12 +952,12 @@ the base — so a cut is a move, not a loss.
   every part price now resolves against so a discount is an ordinary modifier.
 - `src/engine/prune.ts` — **new**, and the whole step turns on one decision:
   **the preview and the transaction are the same function.** `quotePrune()` is a
-  pure read of the graph; `prunePart()` takes its quote *before* touching
+  pure read of the graph; `prunePart()` takes its quote _before_ touching
   anything and pays exactly that. A tooltip can never promise a number the cut
   does not honour.
   - **The refund is priced forward, not remembered.** Parts cost
     `baseCost × 1.15^owned`, so the price of putting a subtree back is fully
-    determined by what the tree carries *now* — no purchase log, no save
+    determined by what the tree carries _now_ — no purchase log, no save
     migration, and rebuilding a canopy differently costs the same as rebuilding
     it identically. `rebuildCostOfType()` sums the last `n` price points, which
     is what makes that symmetry exact rather than approximate.
@@ -870,7 +965,7 @@ the base — so a cut is a move, not a loss.
     `DEADWOOD_PER_WOOD` — so a fat old branch is worth more timber than a spray
     of twigs that happened to cost the same Sap.
   - **Apical dominance** is judged against the whole subtree, not the cut node:
-    a branch whose topmost *leaf* is the tree's high point still costs the tree
+    a branch whose topmost _leaf_ is the tree's high point still costs the tree
     its leader. `APICAL_EPSILON` (1e-9) keeps the check off floating-point noise,
     since apex heights come from walking the graph.
 - `src/engine/buffs.ts` + `src/content/buffs.ts` — **new**. A buff is a bundle of
@@ -899,7 +994,7 @@ the base — so a cut is a move, not a loss.
   through a modifier whose time ran out before it started. `growPart()` prices
   through `state.modifiers` now, so the discount reaches the till and not just
   the menu label.
-- `src/render/prune.ts` — **new**. The marked subtree is washed in red *over* the
+- `src/render/prune.ts` — **new**. The marked subtree is washed in red _over_ the
   tree rather than replacing it: the player is choosing between two versions of
   their own tree, and blanking the limb out would hide the thing they are
   deciding about. Red is deliberately the only red on the canvas.
@@ -909,7 +1004,7 @@ the base — so a cut is a move, not a loss.
   rings from the palette, accent colour from each totem's own content entry so a
   fourth recipe never needs a palette edit.
 - `src/ui/App.tsx` — prune mode, the **P** hotkey, and the inline confirm:
-  hovering marks, the first click *arms*, the second cuts. Escape backs out one
+  hovering marks, the first click _arms_, the second cuts. Escape backs out one
   layer at a time (armed cut → mode → grow menu), and moving to a different limb
   always lands unarmed, so a confirm can never be inherited by a limb the player
   did not confirm.
@@ -948,7 +1043,7 @@ the base — so a cut is a move, not a loss.
 
 The sky stops being a backdrop and starts being an input. There is a sun in it
 now, it goes down, and — the part that matters — a leaf is worth what the sky it
-can *see* makes it worth. Placement above ground finally pays the way placement
+can _see_ makes it worth. Placement above ground finally pays the way placement
 below ground has since STEP 7.
 
 - `src/content/light.ts` — **new**. The occlusion cone (250 world units, 60°
@@ -966,8 +1061,8 @@ below ground has since STEP 7.
     a leaf off; `MAX_COUNTED_OCCLUDERS` (15) is where the floor makes further
     counting pointless, and doubles as the scan's early exit.
   - **The daylight factor** is global and temporal: `lightFactorAt(t)` =
-    `max(0.1, daylightAt(t))`, published as one ordinary `mul` on the *Light
-    resource* under a revocable `daylight` source. Resource-targeted rather than
+    `max(0.1, daylightAt(t))`, published as one ordinary `mul` on the _Light
+    resource_ under a revocable `daylight` source. Resource-targeted rather than
     tag-targeted so every future light source is covered without having to
     remember a tag.
   - `exposureAt(point, canopy, excludeId?)` answers both questions with one
@@ -990,7 +1085,7 @@ below ground has since STEP 7.
     leaf producers wholesale keeps the pipeline itself untouched.
   - `click()` now returns a `ClickOutcome` (`ClickResult` + `dew`).
 - **Dew.** The first tap of each engine day grants 60 s of Sap income — with a
-  floor of 30 taps' worth, because *nothing produces Sap passively yet* and the
+  floor of 30 taps' worth, because _nothing produces Sap passively yet_ and the
   literal formula would pay exactly zero for the whole of the current game. A
   fresh save's very first tap counts as a dawn, so the bonus is discoverable
   instead of eight minutes away.
@@ -998,7 +1093,7 @@ below ground has since STEP 7.
   owns the lit part of the day and the moon the rest, each on a half-sine; they
   swap **at the horizon**, where both are at zero altitude, so the handover is
   never visible. The moon's crescent is one even-odd path (disc minus offset
-  disc), and the hills are drawn *after* the body so a low sun sets behind the
+  disc), and the hills are drawn _after_ the body so a low sun sets behind the
   ridgeline.
 - `src/render/tree.ts` — `shadeTint()` and per-cluster tinting toward
   `PALETTE.leafOccluded`.
@@ -1015,7 +1110,7 @@ below ground has since STEP 7.
   case with mocked positions**: four stacked leaves total 3.11 against four
   spread leaves' 4.00). `sky.test.ts` gained 7 (arc shape, one-way travel, the
   horizon handover, wrapping), `growth.test.ts` 6 (exposure in the context,
-  including that it applies *before* modifiers), `render/tree.test.ts` 5, and
+  including that it applies _before_ modifiers), `render/tree.test.ts` 5, and
   `simulation.test.ts` 13 across sunlight, shading and Dew.
 - Verified in a real browser (Chromium/Playwright, 1280×800, production build):
   the sun arcs and sets behind the hills, the crescent moon rises at night, the
@@ -1032,7 +1127,7 @@ below ground has since STEP 7.
 
 - **Compounding shade, not subtracting.** "Reduced 15% per leaf" reads either
   way. Subtracting kills a leaf outright at seven occluders — a dead purchase
-  with no diagnosis — while compounding keeps every leaf worth *something* and
+  with no diagnosis — while compounding keeps every leaf worth _something_ and
   makes the first mistake the expensive one, which is the right lesson.
 - **The tint uses a square root.** A single occluder costs 15%, and a linear 15%
   tint is invisible against foliage already drawn in three greens: the first
@@ -1041,7 +1136,7 @@ below ground has since STEP 7.
 - **The sun is measured against the visible sky, not a world height.** Anchoring
   it to the cloud ceiling was the honest reading and put it permanently
   off-screen — the tree fits the canvas, so the ceiling is several screens up at
-  any normal framing. It still rises from and sets into the *projected* ground
+  any normal framing. It still rises from and sets into the _projected_ ground
   line, so panning down to the roots takes it away with the horizon.
 - **The blossom boost is capped at two.** Uncapped, ringing one leaf with
   blossoms would beat spreading the canopy — the exact lesson this step exists
@@ -1066,7 +1161,7 @@ below ground has since STEP 7.
 - [ ] The Dew burst has no sound and no ceremony beyond a gold floating number
       (STEP 16 owns audio and juice).
 - [ ] Exposure is not persisted; it is recomputed from the graph on load, which
-      is correct but means STEP 15's save has to be loaded *before* the first
+      is correct but means STEP 15's save has to be loaded _before_ the first
       sweep. `Simulation`'s constructor already does this in the right order.
 - [ ] Offline progress (STEP 14) will need to advance the day cycle for the
       canopy's 25% share — `lightFactorAt` is pure and ready for it, but a long
@@ -1079,7 +1174,7 @@ below ground has since STEP 7.
 
 ### 2026-08-07 — STEP 7: Roots, soil strata and the idle economy
 
-The underground stops being empty brown. There is a *column* down there — four
+The underground stops being empty brown. There is a _column_ down there — four
 layers with mineral pockets buried in the clay and rock — and a root is now worth
 what the ground it reached is worth. The two halves of the tree are wired
 together: the canopy runs at whatever rate the roots can water it.
@@ -1087,7 +1182,7 @@ together: the canopy runs at whatever rate the roots can water it.
 - `src/content/soil.ts` — **new**. The strata table as data: Topsoil `0…300`,
   Clay `300…800`, Rock `800…1600`, Bedrock below, each with its own fill colours
   and a `veinWeight`. Plus the vein-generation tunables and
-  `DEPTH_PRODUCTION_SCALE` (500). **Units:** depth is quoted in *soil units*
+  `DEPTH_PRODUCTION_SCALE` (500). **Units:** depth is quoted in _soil units_
   where the surface is 0 and depth grows downward, related to the graph's
   canonical units by `SOIL_UNITS_PER_CANONICAL` = 1000. That is what lets the
   table read exactly as the design does while the geometry stays
@@ -1101,7 +1196,7 @@ together: the canopy runs at whatever rate the roots can water it.
   whole underground serialises to one number.
 - **Veins pick their layer before their depth**, weighted by `veinWeight`
   (clay and rock carry 8 of 9.5), which is what makes the scatter read as
-  geology rather than as uniform noise. Overlapping pockets award the *richest*,
+  geology rather than as uniform noise. Overlapping pockets award the _richest_,
   so a tip is never punished for landing in two.
 - `src/engine/growth.ts` — production is now sited. `partProducer` and
   `partProductionDelta` take a `PartSoilContext` (`{ soil, placement }`) and
@@ -1122,7 +1217,7 @@ together: the canopy runs at whatever rate the roots can water it.
   a single revocable source. Nothing bespoke: hydration stacks in the normal
   `(base + Σadds) × Πmuls` order like everything else.
 - `src/engine/simulation.ts` — `updateHydration()` runs at the top of every tick
-  and again immediately after any grow or prune, so the HUD and the *next tap*
+  and again immediately after any grow or prune, so the HUD and the _next tap_
   agree with the purchase that was just made instead of lagging up to 100 ms.
   It revokes the old hydration modifiers **before** measuring Water income, which
   makes the absence of a feedback loop structural rather than a coincidence of
@@ -1134,11 +1229,11 @@ together: the canopy runs at whatever rate the roots can water it.
   (`OFFLINE_TAG`) alongside their domain and type, ready for STEP 14. `rootTip`'s
   production gained `requiresVein: true`.
 - `src/render/soil.ts` — **new**. `soilBands()` is pure (clip to the visible
-  soil, keep the *unclipped* edges as gradient stops so a half-visible band still
+  soil, keep the _unclipped_ edges as gradient stops so a half-visible band still
   shades across its whole depth) and therefore tested without a canvas.
   `drawSoil()` fills the bands, draws the bedding planes and the layer names, and
   glows every on-screen pocket. Positioned through the same `TreeLayout` the tree
-  is projected with, so a root you can *see* entering the clay really is earning
+  is projected with, so a root you can _see_ entering the clay really is earning
   the clay's bonus.
 - Ore grains are clamped to 0.9–2.6 px whatever the zoom. The first pass scaled
   them with the pocket radius and the clay came out looking like a bubble bath;
@@ -1148,7 +1243,7 @@ together: the canopy runs at whatever rate the roots can water it.
   (parched/thirsty/watered/overcharged), and a tooltip writing out the whole sum:
   what the roots draw, what the canopy wants, the ratio, and the applied
   multiplier with a line saying which clamp bit. Hydration is the one HUD number
-  that is a *multiplier* rather than a resource, so it gets a shape.
+  that is a _multiplier_ rather than a resource, so it gets a shape.
 - `src/ui/GrowOptionTooltip.tsx` — root options now show depth, layer and the
   depth bonus; a mineral part shows its vein's richness, or a plain warning that
   there is no vein there and the tip would find nothing.
@@ -1198,7 +1293,7 @@ together: the canopy runs at whatever rate the roots can water it.
       the column explorable.
 - [ ] Blossoms produce Light but are not counted in `waterNeed`. Either they
       should drink too or the fiction should explain why not.
-- [ ] Vein *discovery* is free: every pocket is drawn from the first frame. The
+- [ ] Vein _discovery_ is free: every pocket is drawn from the first frame. The
       Mycorrhiza symbiont (STEP 11) is supposed to extend "detection radius",
       which implies undetected veins should be hidden until then.
 - [ ] A root tip cannot be aimed — its angle is fixed by its slot — so hitting a
@@ -1206,7 +1301,7 @@ together: the canopy runs at whatever rate the roots can water it.
       Once pruning has UI (STEP 9) that becomes retry-able; a steerable tip may
       still be worth it.
 - [ ] `soilConditionsAt` is evaluated per part at grow time only. Correct today
-      (placements never change once grown), but a future mechanic that *moves*
+      (placements never change once grown), but a future mechanic that _moves_
       geometry would silently stale every root's rate.
 - [ ] Root production is tagged `'offline'` but nothing consumes the tag yet
       (STEP 14).
@@ -1224,8 +1319,8 @@ The pieces that were already in place — tapered limbs, blob leaf clusters,
 desaturated roots below the soil line, devicePixelRatio handling, resize safety —
 were left alone. What was missing:
 
-- **Camera** (`/src/engine/camera.ts`, pure). Expressed as *the world point at
-  the centre of the viewport* plus a zoom over a base "fits the tree" scale,
+- **Camera** (`/src/engine/camera.ts`, pure). Expressed as _the world point at
+  the centre of the viewport_ plus a zoom over a base "fits the tree" scale,
   which makes the cloud-to-bedrock clamp a direct statement about where the
   viewport edges are instead of an unwound pixel offset. Pan, wheel-scroll,
   cursor-anchored zoom (0.5×–2.0×) and clamping are all pure functions.
@@ -1240,20 +1335,20 @@ were left alone. What was missing:
   the cursor, `+`/`-` to zoom for mice with no pinch to offer. Panning stands
   down while a second finger is down, leaving pinch to STEP 18.
   - **Taps still resolve on `pointerdown` and are never taken back.** The drag
-    threshold decides only when to *also* start moving the camera, so STEP 5's
+    threshold decides only when to _also_ start moving the camera, so STEP 5's
     zero-missed-inputs guarantee is untouched — a drag that starts on the trunk
     pays out its tap and then pans.
 - **Time-of-day sky** (`/src/content/daylight.ts`, `/src/engine/daylight.ts`,
   `/src/render/sky.ts`). A minimal, pure day cycle — enough for the sky to lerp
   through seven keyframes from pre-dawn to deep night. STEP 8 owns the sun, the
-  moon, and what daylight actually *does* to production.
+  moon, and what daylight actually _does_ to production.
   - A new save starts at `DAY_START_FRACTION` (mid-morning), not at `t = 0`:
     opening the game in the dark half of dawn was a cold first impression and
     left the first clicks producing nothing.
 - **Distant hills**, two bands of summed sines on the horizon with horizontal
   parallax, dimmed toward night. Reserved for the Old Growth forest (STEP 13).
 - **Backdrop follows the camera.** Sky and hills are drawn against the
-  *projected* ground line, so panning to the roots takes the horizon off the top
+  _projected_ ground line, so panning to the roots takes the horizon off the top
   of the screen the way a real horizon goes.
 - **Viewport culling** before every draw pass, which is what keeps a 500-node
   tree cheap once the camera is zoomed in.
@@ -1276,11 +1371,10 @@ once between them. The draw order in `Renderer.draw` is the seam.
 
 **Open TODOs from this step**
 
-- [ ] STEP 4 asks for bark colour *per species*; species do not exist until STEP
-      10. `woodColor()` still keys off node type — give it a species argument
+- [ ] STEP 4 asks for bark colour _per species_; species do not exist until STEP 10. `woodColor()` still keys off node type — give it a species argument
       there.
 - [ ] `CLOUD_LEVEL_Y` / `BEDROCK_Y` are in canonical units (±2.4). STEP 7 landed
-      in parallel with this and quotes strata in *soil units*
+      in parallel with this and quotes strata in _soil units_
       (`SOIL_UNITS_PER_CANONICAL` = 1000, Bedrock below 1600 — i.e. −1.6
       canonical), so the camera's floor clears the bedrock with room to spare.
       Worth folding both into `balance.ts` at STEP 19 rather than leaving two
@@ -1300,7 +1394,7 @@ option to see a ghost of the part and what it will cost and produce, click to
 buy. The tree is no longer a fixed drawing — it is the player's build.
 
 **Scope note — STEPs 3 and 4 were only partly done.** STEP 5's commit produced a
-procedural tree *silhouette* (`generateTree` from a blueprint) and a renderer for
+procedural tree _silhouette_ (`generateTree` from a blueprint) and a renderer for
 it, but not STEP 3's actual deliverables: the node-typed `TreeGraph`, its
 `getValidGrowthOptions` / `grow` / `prune` API, or serialisation. STEP 6 names
 `getValidGrowthOptions` directly and cannot exist without it, so the graph model
@@ -1312,8 +1406,8 @@ is backfilled here. STEP 5's own changelog already listed this as the open TODO
   attach, base dimensions, per-generation falloff, cost and production. Adding a
   part type is now a data edit, not an engine edit. `PART_COST_GROWTH` = 1.15.
 - `src/engine/treeGraph.ts` — **new**, the `TreeGraph` (STEP 3 backfill). Nodes
-  store only what cannot be derived: type, parentage, `angle` *relative to the
-  parent's heading*, `attachT` along the parent, `length`, `thickness`, `slot`,
+  store only what cannot be derived: type, parentage, `angle` _relative to the
+  parent's heading_, `attachT` along the parent, `length`, `thickness`, `slot`,
   `speciesId`, `level`, `createdAtTick`. World positions come from
   `computePlacements()`, a pure walk from the trunk. Full API:
   `getValidGrowthOptions` / `grow` / `prune` / `subtree` / `toSegments` /
@@ -1321,12 +1415,12 @@ is backfilled here. STEP 5's own changelog already listed this as the open TODO
   what drives pricing).
 - **Determinism** is the load-bearing property here. The per-fork angle wobble is
   a seeded hash of `(seed, parentId, childType, slot)` rather than a running RNG,
-  so `getValidGrowthOptions` can promise the *exact* geometry a part will have
+  so `getValidGrowthOptions` can promise the _exact_ geometry a part will have
   before it is bought. That is what makes the ghost preview honest rather than
   decorative — there is a test asserting preview position equals grown position.
 - `src/engine/growth.ts` — **new**, where shape meets economy. `partCost`
   (`baseCost × 1.15^owned`, counted per type), `partProducer`,
-  `partProductionDelta` (evaluates the *prospective* producer against live
+  `partProductionDelta` (evaluates the _prospective_ producer against live
   modifiers, so the tooltip quotes the real `/s` the HUD will show, not a base
   rate), and `priceGrowthOptions`.
 - `src/engine/simulation.ts` — `growthOptions(nodeId)`, `growPart()` (checks the
@@ -1336,7 +1430,7 @@ is backfilled here. STEP 5's own changelog already listed this as the open TODO
 - `src/engine/tree.ts` — reduced to the canonical-space ↔ screen projection.
   `TreeSegment.kind` widened from `'trunk' | 'branch'` to the full node type.
 - `src/render/radialMenu.ts` — **new**. `layoutRadialMenu` fans options on a 150°
-  arc, centred *upward* for canopy parts and *downward* for roots, so the menu
+  arc, centred _upward_ for canopy parts and _downward_ for roots, so the menu
   opens into the space the part would grow into. Pure layout + hit-test, tested
   without a canvas.
 - `src/render/tree.ts` — leaf clusters (deterministic overlapping blobs),
@@ -1351,7 +1445,7 @@ is backfilled here. STEP 5's own changelog already listed this as the open TODO
 - `src/ui/GrowOptionTooltip.tsx` — **new**, the tooltip body: name, flavour, cost,
   production delta, and the shortfall when unaffordable.
 - `src/ui/treeInput.ts` — added `onPress` (first refusal, so a tap on a menu dial
-  is never *also* a tap on the tree) and `onMiss` (closes the menu). Both
+  is never _also_ a tap on the tree) and `onMiss` (closes the menu). Both
   optional, so every STEP 5 behaviour and test is untouched.
 - `src/ui/App.tsx` — wires press → menu → purchase → re-open, Escape to close,
   and pushes hover state into the tooltip. The renderer's projected tree is
@@ -1382,7 +1476,7 @@ is backfilled here. STEP 5's own changelog already listed this as the open TODO
 - Dials are dead for `MENU_ARM_MS` (180 ms) after opening. Without it, a player
   drumming on the trunk at 10 Hz opens the menu mid-burst and the next tap buys
   something they never chose. The dials scale in over exactly that window, so the
-  animation *is* the "not live yet" signal.
+  animation _is_ the "not live yet" signal.
 - Re-opening the menu on the same node preserves its arming clock, so a menu the
   player is already using does not go dead again under a stray second tap.
 - After a purchase the menu re-opens on the same node with fresh prices, so you
@@ -1401,7 +1495,7 @@ is backfilled here. STEP 5's own changelog already listed this as the open TODO
       bedrock), no leaf sway animation, no background hills. The renderer draws
       the whole tree every frame with no viewport culling — fine at this size,
       but the "60fps at 500 nodes" target is unverified.
-- [ ] Root growth options currently fan *upward* with the canopy ones when a
+- [ ] Root growth options currently fan _upward_ with the canopy ones when a
       menu mixes both (the trunk's does). Only an all-root menu arcs downward.
 - [ ] Part costs and production rates are first-pass guesses (branch 15, leaf 10,
       root 12; leaf 0.4 Light/s, root 0.3 Water/s). STEP 19 owns real balance.
@@ -1428,7 +1522,7 @@ Active play. The tree is now a click target, taps pay Sap, and the first three
 upgrades are buyable.
 
 - `src/engine/geometry.ts` — `Vec2` / `Segment`, `distanceToSegment` (projection
-  parameter clamped to `[0,1]`, so it measures to the *segment*, not the
+  parameter clamped to `[0,1]`, so it measures to the _segment_, not the
   infinite line), `nearestSegment`, and `hitTestSegments`. A segment's own
   half-width counts toward its hit area on top of the flat tolerance, so the
   trunk is fat and forgiving while twigs stay precise.
@@ -1436,12 +1530,12 @@ upgrades are buyable.
   `TreeBlueprint` (data) drives `generateTree()` into an ordered list of
   `TreeSegment`s in **canonical tree space**: trunk base at the origin, `+y` up,
   ~1 unit ≈ tree height. Deterministic via a seeded PRNG. `treeBounds()` +
-  `projectTree()` map it into screen pixels. This is the clickable *skeleton*
+  `projectTree()` map it into screen pixels. This is the clickable _skeleton_
   only — no leaves, no player-driven growth yet.
 - `src/engine/rng.ts` — `RandomSource` type + mulberry32 `createSeededRandom`,
   so crit rolls and tree jitter are injectable in tests.
 - `src/engine/combo.ts` — the combo meter as `{ stacks, lastClickAt }` with the
-  effective value *derived* at read time rather than stepped per tick, so it is
+  effective value _derived_ at read time rather than stepped per tick, so it is
   exact at any frame rate and trivially testable. Held for
   `COMBO_WINDOW_MS` (1500), then drains linearly to empty at `COMBO_DECAY_MS`
   (3000). `COMBO_BONUS_PER_STACK` = 2%, so 50 stacks = +100%; a raised cap keeps
@@ -1463,7 +1557,7 @@ upgrades are buyable.
   live `combo`, per-upgrade `UpgradeSnapshot`s, and the lifetime `clicks` count.
 - `src/render/effects.ts` — object-pooled floating numbers (600 ms rise + fade,
   gold and larger on crit) and ripples (380 ms). Pools are allocated once and
-  slots reused forever; when saturated the *oldest* slot is recycled rather than
+  slots reused forever; when saturated the _oldest_ slot is recycled rather than
   dropping the newest tap. Effects store absolute spawn times, not countdowns.
 - `src/render/tree.ts` — `computeTreeLayout()` fits the tree to the canvas from
   its **measured** bounds (height or width, whichever binds) and centres the
@@ -1495,7 +1589,7 @@ upgrades are buyable.
 
 **Design decisions worth knowing**
 
-- A tap banks its combo stack *before* it pays out, so the meter and the number
+- A tap banks its combo stack _before_ it pays out, so the meter and the number
   that flies up always agree. A lone first tap therefore pays ×1.02, not ×1.00.
 - The combo drains smoothly between 1.5 s and 3 s instead of hard-resetting at
   the window edge. A click during the drain adds to whatever is left, which

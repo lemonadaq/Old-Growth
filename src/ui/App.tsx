@@ -33,7 +33,10 @@ import { Toast } from './Toast';
 import { Tooltip } from './Tooltip';
 import { UpgradePanel } from './UpgradePanel';
 import { Workshop } from './Workshop';
-import { playSnip, playWeatherCue, setSfxMuted } from './sfx';
+import { audio, type AudioVolumes } from './audio';
+import { MUTE_HOTKEY, WEATHER_CUE } from '../content/audio';
+import { DEFAULT_SETTINGS } from '../content/settings';
+import { watchReducedMotion } from './motion';
 import { attachTreeInput } from './treeInput';
 import './App.css';
 
@@ -199,17 +202,53 @@ export function App() {
     return null;
   }, []);
 
-  const [muted, setMuted] = useState(false);
+  /**
+   * The mixer. Held in three places at once, and it has to be: React renders the
+   * sliders from state, the audio graph needs the numbers now, and the save
+   * needs them written into engine state — while the M hotkey is handled by a
+   * listener wired once on mount that can read none of those. The ref is what
+   * that listener reads.
+   */
+  const [volumes, setVolumes] = useState<AudioVolumes>({
+    master: DEFAULT_SETTINGS.masterVolume,
+    music: DEFAULT_SETTINGS.musicVolume,
+    sfx: DEFAULT_SETTINGS.sfxVolume,
+    muted: DEFAULT_SETTINGS.muted,
+  });
+  const volumesRef = useRef(volumes);
+
+  /** Whether the player has asked their system for less movement. */
+  const [reducedMotion, setReducedMotion] = useState(false);
+
+  /** Apply a mixer change everywhere it has to land, the save included. */
+  const applyVolumes = useCallback((next: AudioVolumes) => {
+    volumesRef.current = next;
+    setVolumes(next);
+    audio.setVolumes(next);
+
+    const sim = simRef.current;
+    if (!sim) return;
+    sim.state.settings = {
+      ...sim.state.settings,
+      muted: next.muted,
+      masterVolume: next.master,
+      musicVolume: next.music,
+      sfxVolume: next.sfx,
+    };
+  }, []);
 
   /** Flip the mute, in the engine's state so the save carries it. */
   const handleToggleMute = useCallback(() => {
-    const sim = simRef.current;
-    if (!sim) return;
-    const next = !sim.state.settings.muted;
-    sim.state.settings = { ...sim.state.settings, muted: next };
-    setMuted(next);
-    setSfxMuted(next);
-  }, []);
+    applyVolumes({ ...volumesRef.current, muted: !volumesRef.current.muted });
+  }, [applyVolumes]);
+
+  /** Move one slider, leaving the others (and the mute) alone. */
+  const handleSetVolume = useCallback(
+    (channel: 'master' | 'music' | 'sfx', value: number) => {
+      applyVolumes({ ...volumesRef.current, [channel]: value });
+    },
+    [applyVolumes],
+  );
 
   /** Uproot everything: the state and both storage keys. */
   const handleHardReset = useCallback(() => {
@@ -263,10 +302,14 @@ export function App() {
       });
     }
 
-    // The save carries the mute; the module-level mirror in `sfx.ts` and the
-    // React state both have to be told, since neither can read engine state.
-    setMuted(sim.state.settings.muted);
-    setSfxMuted(sim.state.settings.muted);
+    // The save carries the mixer. The audio graph and the React sliders both
+    // have to be told, since neither can read engine state.
+    applyVolumes({
+      master: sim.state.settings.masterVolume,
+      music: sim.state.settings.musicVolume,
+      sfx: sim.state.settings.sfxVolume,
+      muted: sim.state.settings.muted,
+    });
 
     // Then catch up on the time the tab was shut. Doing it here rather than
     // inside the loop means the tree the player sees on the first frame is
@@ -276,6 +319,13 @@ export function App() {
     const renderer = new Renderer(canvas);
     rendererRef.current = renderer;
     renderer.setSoil(sim.state.soil);
+
+    // The OS setting, now and whenever it changes. Fires immediately, so the
+    // first frame is already drawn the way the player asked for.
+    const detachMotion = watchReducedMotion((reduced) => {
+      renderer.setReducedMotion(reduced);
+      setReducedMotion(reduced);
+    });
 
     // The renderer caches the projected tree; re-push it only when the graph's
     // structure actually changed, never per frame.
@@ -356,6 +406,10 @@ export function App() {
       renderer.effects.spawnFloatingNumber(at.x, at.y, `${result.hybrid.name}!`, true, now);
 
       if (result.discovered) {
+        // The chime is for the *discovery*, not for the graft: re-growing a
+        // hybrid the Journal already knows is a purchase, and purchases have
+        // their own sound.
+        audio.play('graft');
         renderer.effects.spawnConfetti(at.x, at.y, now);
         setToast({
           title: `${result.hybrid.glyph} ${result.hybrid.name}`,
@@ -401,7 +455,7 @@ export function App() {
         return;
       }
 
-      playSnip();
+      audio.play('prune');
       renderer.effects.spawnPruneBurst(debris, now);
       syncTree(now);
       clearPruneMark();
@@ -442,6 +496,12 @@ export function App() {
       // scissors are out, in which case prune mode owns the whole surface.
       onPress: (point) => {
         const now = Date.now();
+
+        // Every press is a user gesture, and a user gesture is the only thing a
+        // browser will start an AudioContext for. Cheap and idempotent once the
+        // context is running, so it is done here rather than guarded at each of
+        // the dozen places a press can end up.
+        audio.unlock();
 
         // A storm owns the pointer while it blows. Fifteen seconds of holding
         // the trunk beats every other intention the press could have — and the
@@ -548,6 +608,7 @@ export function App() {
         if (priced.affordable) {
           const grown = sim.growPart(priced.option.parentId, priced.option.type);
           if (grown) {
+            audio.play('grow');
             syncTree(now);
             // Prices and affordability moved; re-open on the same node so the
             // player can keep building without re-tapping the limb.
@@ -567,6 +628,11 @@ export function App() {
         // limb's own species moves its click stats.
         const struck = renderer.hitTest(point);
         const result = sim.click(now, Math.random, struck?.id);
+
+        // The pop and the thock are the same event heard from two distances: a
+        // crit is not a louder tap, it is a deeper one.
+        audio.play(result.crit ? 'crit' : 'click');
+
         renderer.effects.spawnHit(
           point.x,
           point.y,
@@ -707,6 +773,10 @@ export function App() {
         closeMenu();
         return;
       }
+      if (event.key.toLowerCase() === MUTE_HOTKEY) {
+        handleToggleMute();
+        return;
+      }
       if (event.key === 'p' || event.key === 'P') {
         togglePrune();
         return;
@@ -755,6 +825,14 @@ export function App() {
         syncSpecies(snapshot);
         gameStore.getState().setSnapshot(snapshot);
         renderer.draw(snapshot, alpha, now);
+
+        // The pad and the weather loops are driven off the snapshot rather than
+        // off events, because they are *states* rather than things that happen:
+        // a season is what it is for a hundred days, and a save loaded mid-storm
+        // should already be raining on the first frame. Both calls are no-ops
+        // when nothing has changed.
+        audio.setSeason(snapshot.season.id);
+        audio.setWeather(snapshot.weather.active?.id ?? null);
 
         // A creature turning up is the one thing the engine does entirely on its
         // own, without the player having pressed anything — so it announces
@@ -808,6 +886,7 @@ export function App() {
         // the frame that noticed, not to every frame afterwards.
         for (const report of sim.drainPrestigeEvents()) {
           // The camera was framed on a tree that no longer exists.
+          audio.play('prestige');
           renderer.resetCamera();
           setToast({
             title: `🌰 ${report.yield.total} Seed${report.yield.total === 1 ? '' : 's'}`,
@@ -826,7 +905,7 @@ export function App() {
         // one-off report of what a storm did.
         for (const event of sim.drainWeatherEvents()) {
           if (event.kind === 'telegraph') {
-            playWeatherCue(event.id);
+            audio.play(WEATHER_CUE[event.id]);
             continue;
           }
           if (event.kind !== 'end' || !event.storm) continue;
@@ -898,6 +977,10 @@ export function App() {
 
     return () => {
       persist();
+      detachMotion();
+      // The pad and the weather loop would otherwise keep running over a game
+      // that no longer exists — in development, straight through a hot reload.
+      audio.dispose();
       window.clearInterval(autosave);
       document.removeEventListener('visibilitychange', handleHide);
       window.removeEventListener('pagehide', persist);
@@ -909,7 +992,16 @@ export function App() {
       simRef.current = null;
       rendererRef.current = null;
     };
-  }, [togglePrune, toggleGraft, toggleJournal, toggleSymbionts, toggleVault, toggleSettings]);
+  }, [
+    togglePrune,
+    toggleGraft,
+    toggleJournal,
+    toggleSymbionts,
+    toggleVault,
+    toggleSettings,
+    applyVolumes,
+    handleToggleMute,
+  ]);
 
   // Mirror the canvas modes into the places that cannot read React state: the
   // input handlers (through a ref) and the renderer (which draws the marks).
@@ -972,6 +1064,7 @@ export function App() {
         }`}
       />
       <Hud
+        reducedMotion={reducedMotion}
         testProducers={testProducers}
         onToggleTestProducers={() => setTestProducers((on) => !on)}
         pruneMode={pruneMode}
@@ -1000,8 +1093,10 @@ export function App() {
         />
       ) : settingsOpen ? (
         <Settings
-          muted={muted}
+          volumes={volumes}
           onToggleMute={handleToggleMute}
+          onSetVolume={handleSetVolume}
+          reducedMotion={reducedMotion}
           onExport={handleExport}
           onImport={handleImport}
           onHardReset={handleHardReset}

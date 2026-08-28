@@ -1,5 +1,7 @@
+import type Decimal from 'break_infinity.js';
 import { formatNumber } from '../engine/format';
-import { RESOURCES } from '../content/resources';
+import { RESOURCES, type ResourceDef } from '../content/resources';
+import { useTweenedDecimal } from './tween';
 import { BuffBar } from './BuffBar';
 import { DaylightGauge } from './DaylightGauge';
 import { HydrationGauge } from './HydrationGauge';
@@ -23,27 +25,66 @@ function DebugCounter() {
   );
 }
 
+/**
+ * One resource row.
+ *
+ * A component of its own purely so each resource can hold its own tween — hooks
+ * cannot be called in a loop over a list, and seven counters easing
+ * independently is the entire point.
+ */
+function ResourceRow({
+  def,
+  amount,
+  rate,
+  tween,
+}: {
+  readonly def: ResourceDef;
+  readonly amount: Decimal;
+  readonly rate: Decimal;
+  readonly tween: boolean;
+}) {
+  const shown = useTweenedDecimal(amount, tween);
+  return (
+    <div className="hud-resource" style={{ borderColor: def.color }}>
+      <span className="hud-resource__glyph" aria-hidden>
+        {def.glyph}
+      </span>
+      <span className="hud-resource__label">{def.label}</span>
+      {/*
+        The tweened figure is decoration over an exact one: the rounded value a
+        player reads is on its way to the truth, so the truth is what goes to a
+        screen reader and to the hover title.
+      */}
+      <span className="hud-resource__value" title={formatNumber(amount)}>
+        {formatNumber(shown)}
+      </span>
+      <span className="hud-resource__rate">{formatNumber(rate)}/s</span>
+    </div>
+  );
+}
+
 /** Resource totals + live per-second rates, driven by the content resource list. */
-function ResourceReadout() {
+function ResourceReadout({ tween }: { readonly tween: boolean }) {
   const resources = useGameStore((s) => s.snapshot.resources);
   const perSecond = useGameStore((s) => s.snapshot.perSecond);
   return (
     <div className="hud-resources">
       {RESOURCES.map((def) => (
-        <div className="hud-resource" key={def.id} style={{ borderColor: def.color }}>
-          <span className="hud-resource__glyph" aria-hidden>
-            {def.glyph}
-          </span>
-          <span className="hud-resource__label">{def.label}</span>
-          <span className="hud-resource__value">{formatNumber(resources[def.id])}</span>
-          <span className="hud-resource__rate">{formatNumber(perSecond[def.id])}/s</span>
-        </div>
+        <ResourceRow
+          key={def.id}
+          def={def}
+          amount={resources[def.id]}
+          rate={perSecond[def.id]}
+          tween={tween}
+        />
       ))}
     </div>
   );
 }
 
 export interface HudProps {
+  /** Whether the player has asked their system for less movement. */
+  readonly reducedMotion: boolean;
   /** Whether the temporary debug producers are running. */
   readonly testProducers: boolean;
   /** Toggle the temporary debug producers. */
@@ -76,6 +117,7 @@ export interface HudProps {
 
 /** React HUD overlay that sits above the full-screen canvas. */
 export function Hud({
+  reducedMotion,
   testProducers,
   onToggleTestProducers,
   pruneMode,
@@ -192,7 +234,7 @@ export function Hud({
         </div>
       </header>
       <WeatherBanner />
-      <ResourceReadout />
+      <ResourceReadout tween={!reducedMotion} />
     </div>
   );
 }

@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { HARD_RESET_PHRASE } from '../content/save';
+import { MUTE_HOTKEY } from '../content/audio';
+import type { AudioVolumes } from './audio';
 import './Settings.css';
 
 /**
- * Settings: the three things a player can do to their save from outside the
- * game, plus the one preference the game can honour today.
+ * Settings: the mixer, and the three things a player can do to their save from
+ * outside the game.
  *
  * Export and Import exist because a browser save is one cleared-site-data away
  * from gone, and a player who has put twenty hours into a tree deserves a copy
@@ -16,8 +18,13 @@ import './Settings.css';
  * playing on cannot undo. Go to Seed at least leaves a forest behind.
  */
 export interface SettingsProps {
-  readonly muted: boolean;
+  /** The three levels and the mute, as the game is currently playing them. */
+  readonly volumes: AudioVolumes;
   readonly onToggleMute: () => void;
+  /** Move one channel. The value is already in `[0, 1]`. */
+  readonly onSetVolume: (channel: 'master' | 'music' | 'sfx', value: number) => void;
+  /** Whether the system has asked for reduced motion. Reported, not settable. */
+  readonly reducedMotion: boolean;
   /** Produce the export text. Async: it compresses. */
   readonly onExport: () => Promise<string>;
   /** Apply pasted text. Resolves to `null` on success, or a reason it failed. */
@@ -38,9 +45,43 @@ function ago(timestamp: number | null): string {
   return `${Math.floor(seconds / 60)}m ago`;
 }
 
+/** One labelled volume slider, shown as a percentage. */
+function VolumeSlider({
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  readonly label: string;
+  readonly value: number;
+  readonly disabled: boolean;
+  readonly onChange: (value: number) => void;
+}) {
+  return (
+    <label className={`settings__slider${disabled ? ' settings__slider--off' : ''}`}>
+      <span className="settings__slider-label">{label}</span>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        // Whole percent steps: the ear cannot tell 63% from 64%, and a slider
+        // with a coarse step is far easier to land on a phone.
+        step={1}
+        value={Math.round(value * 100)}
+        disabled={disabled}
+        aria-label={`${label} volume`}
+        onChange={(event) => onChange(Number(event.target.value) / 100)}
+      />
+      <span className="settings__slider-value">{Math.round(value * 100)}%</span>
+    </label>
+  );
+}
+
 export function Settings({
-  muted,
+  volumes,
   onToggleMute,
+  onSetVolume,
+  reducedMotion,
   onExport,
   onImport,
   onHardReset,
@@ -76,11 +117,54 @@ export function Settings({
       <h2 className="settings__title">Settings</h2>
 
       <section className="settings__block">
+        <h3 className="settings__heading">Sound</h3>
         <label className="settings__toggle">
-          <input type="checkbox" checked={muted} onChange={onToggleMute} />
-          Mute sound effects
+          <input type="checkbox" checked={volumes.muted} onChange={onToggleMute} />
+          Mute everything <kbd className="settings__key">{MUTE_HOTKEY.toUpperCase()}</kbd>
         </label>
+        {/*
+          The sliders stay visible while muted rather than disappearing, and are
+          disabled rather than reset: mute is a pause, not a preference, and a
+          player who unmutes should get back the mix they had.
+        */}
+        <VolumeSlider
+          label="Master"
+          value={volumes.master}
+          disabled={volumes.muted}
+          onChange={(value) => onSetVolume('master', value)}
+        />
+        <VolumeSlider
+          label="Music"
+          value={volumes.music}
+          disabled={volumes.muted}
+          onChange={(value) => onSetVolume('music', value)}
+        />
+        <VolumeSlider
+          label="Effects"
+          value={volumes.sfx}
+          disabled={volumes.muted}
+          onChange={(value) => onSetVolume('sfx', value)}
+        />
+        <p className="settings__note">
+          Every sound in the game is currently synthesised rather than recorded — placeholders until
+          the real ones are made.
+        </p>
       </section>
+
+      {/*
+        Reported, not offered. Reduced motion is read from the system setting the
+        player has already made once for everything they own; showing it here is
+        so that a still canopy reads as *working as asked* rather than as broken.
+      */}
+      {reducedMotion && (
+        <section className="settings__block">
+          <h3 className="settings__heading">Motion</h3>
+          <p className="settings__note">
+            Your system asks for reduced motion, so the canopy is holding still and the drifting
+            leaves are off. Numbers, colours and sound are unaffected.
+          </p>
+        </section>
+      )}
 
       <section className="settings__block">
         <h3 className="settings__heading">Save</h3>

@@ -30,7 +30,6 @@ function UpgradeList({ onBuy }: UpgradePanelProps) {
 
   return (
     <aside className="upgrades" aria-label={t('upgrades.title')}>
-
       <dl className="upgrades__stats">
         <div>
           <dt>{t('upgrades.perTap')}</dt>
@@ -68,11 +67,17 @@ function UpgradeList({ onBuy }: UpgradePanelProps) {
               >
                 <span className="upgrade__name">
                   {def.name}
-                  {state.level > 0 && <span className="upgrade__level">{t('upgrades.level', { level: state.level })}</span>}
+                  {state.level > 0 && (
+                    <span className="upgrade__level">
+                      {t('upgrades.level', { level: state.level })}
+                    </span>
+                  )}
                 </span>
                 <span className="upgrade__desc">{def.description}</span>
                 <span className="upgrade__cost">
-                  {state.maxed ? t('upgrades.maxed') : `${formatNumber(state.cost)} ${currency.label}`}
+                  {state.maxed
+                    ? t('upgrades.maxed')
+                    : `${formatNumber(state.cost)} ${currency.label}`}
                 </span>
               </button>
             </li>

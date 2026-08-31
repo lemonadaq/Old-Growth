@@ -2,6 +2,7 @@ import Decimal from 'break_infinity.js';
 import { SEASON_LENGTH_SECONDS } from '../content/balance';
 import { GROWTH_RULE_BY_TYPE, type TreeNodeType } from '../content/growth';
 import { RESOURCE_IDS, type ResourceId } from '../content/resources';
+import { ACHIEVEMENT_BY_ID } from '../content/achievements';
 import { FEATURE_BY_ID, type FeatureId } from '../content/progression';
 import { ENGINE_VERSION, SAVE_VERSION } from '../content/save';
 import { DEFAULT_SETTINGS, normaliseSettings, type GameSettings } from '../content/settings';
@@ -145,10 +146,23 @@ export interface SaveData {
   readonly seasonLengthSeconds: number;
   /** Winters survived. */
   readonly rings: number;
-  /** Lifetime counters the Stats panel (STEP 19) will read. */
+  /** Lifetime counters the Stats panel reads. */
   readonly clicks: number;
   readonly prunes: number;
   readonly grafts: number;
+  /**
+   * Achievements earned, by id.
+   *
+   * Carried across prestige in the state and therefore written here rather than
+   * with the run's tallies: a badge is a record of what the *player* did, and a
+   * save that forgot them would hand back a Journal full of blanks for things
+   * the player has already done.
+   */
+  readonly achievements: readonly string[];
+  /** Storms taken to a full brace, lifetime. */
+  readonly stormsBraced: number;
+  /** Seconds the offline calculator has paid out for, cumulatively. */
+  readonly offlineSeconds: number;
   readonly seedFragments: number;
   readonly buriedNuts: number;
   readonly nextLitterAt: number;
@@ -259,6 +273,9 @@ export function captureSave(state: GameState, now: number = Date.now()): SaveEnv
     clicks: state.clicks,
     prunes: state.prunes,
     grafts: state.grafts,
+    achievements: [...state.achievements],
+    stormsBraced: state.stormsBraced,
+    offlineSeconds: state.offlineSeconds,
     seedFragments: state.seedFragments,
     buriedNuts: state.buriedNuts,
     nextLitterAt: state.nextLitterAt,
@@ -582,6 +599,16 @@ export function restoreState(data: SaveData): GameState | null {
   state.clicks = count(raw.clicks);
   state.prunes = count(raw.prunes);
   state.grafts = count(raw.grafts);
+  // An achievement the table no longer has is dropped, like a feature id and
+  // unlike a hint: an unknown id here would show as a blank card that can never
+  // be filled in, and would keep paying a bonus nothing explains.
+  state.achievements = new Set(
+    array(raw.achievements)
+      .filter((id): id is string => typeof id === 'string')
+      .filter((id) => ACHIEVEMENT_BY_ID[id] !== undefined),
+  );
+  state.stormsBraced = count(raw.stormsBraced);
+  state.offlineSeconds = Math.max(0, num(raw.offlineSeconds, 0));
   state.seedFragments = count(raw.seedFragments);
   state.buriedNuts = count(raw.buriedNuts);
   state.nextLitterAt = num(raw.nextLitterAt, state.elapsedSeconds);

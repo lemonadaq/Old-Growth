@@ -1,3 +1,9 @@
+import {
+  RHYTHM_COMBO_CAP,
+  SHARPER_INSTINCTS_CRIT,
+  STRONGER_TAPS_POWER,
+  UPGRADE_COST,
+} from './balance';
 import type { ResourceId } from './resources';
 
 /**
@@ -59,27 +65,27 @@ export const UPGRADES: readonly UpgradeDef[] = [
     name: 'Stronger Taps',
     description: 'Bite deeper into the bark. +1 Sap per tap.',
     costResource: 'sap',
-    baseCost: 10,
-    costGrowth: 1.5,
-    effects: [{ type: 'add', target: 'click.power', valuePerLevel: 1 }],
+    baseCost: UPGRADE_COST.strongerTaps.base,
+    costGrowth: UPGRADE_COST.strongerTaps.growth,
+    effects: [{ type: 'add', target: 'click.power', valuePerLevel: STRONGER_TAPS_POWER }],
   },
   {
     id: 'sharperInstincts',
     name: 'Sharper Instincts',
     description: 'Learn where the sap runs richest. +1% critical tap chance.',
     costResource: 'sap',
-    baseCost: 50,
-    costGrowth: 1.6,
-    effects: [{ type: 'add', target: 'click.critChance', valuePerLevel: 0.01 }],
+    baseCost: UPGRADE_COST.sharperInstincts.base,
+    costGrowth: UPGRADE_COST.sharperInstincts.growth,
+    effects: [{ type: 'add', target: 'click.critChance', valuePerLevel: SHARPER_INSTINCTS_CRIT }],
   },
   {
     id: 'rhythmOfGrowth',
     name: 'Rhythm of Growth',
     description: 'Hold a steadier beat. +10 combo stacks the meter can bank.',
     costResource: 'sap',
-    baseCost: 250,
-    costGrowth: 2,
-    effects: [{ type: 'add', target: 'combo.cap', valuePerLevel: 10 }],
+    baseCost: UPGRADE_COST.rhythmOfGrowth.base,
+    costGrowth: UPGRADE_COST.rhythmOfGrowth.growth,
+    effects: [{ type: 'add', target: 'combo.cap', valuePerLevel: RHYTHM_COMBO_CAP }],
   },
   {
     id: RAKE_ID,
@@ -88,8 +94,8 @@ export const UPGRADES: readonly UpgradeDef[] = [
     // Paid for in the thing it collects: a few piles swept by hand buy the tool
     // that sweeps the rest, which is the only price a rake should have.
     costResource: 'leafLitter',
-    baseCost: 40,
-    costGrowth: 1,
+    baseCost: UPGRADE_COST.rake.base,
+    costGrowth: UPGRADE_COST.rake.growth,
     maxLevel: 1,
     effects: [],
   },

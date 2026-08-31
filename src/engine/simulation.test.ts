@@ -11,6 +11,9 @@ import {
   LITTER_PER_LEAF,
   RAIN_DURATION_SECONDS,
   RAIN_WATER_MULTIPLIER,
+  PART_BASE_COST,
+  PART_BASE_RATE,
+  PART_COST_GROWTH,
   RING_PRODUCTION_BONUS,
   SPRING_GROWTH_DISCOUNT,
   STORM_BRACE_TAPS,
@@ -23,6 +26,8 @@ import {
   WINTER_PENALTY,
 } from '../content/balance';
 import { RAKE_ID } from '../content/upgrades';
+import { SPECIES_UNLOCK, SYMBIONT_ARRIVAL } from '../content/balance';
+import { achievementMultiplier } from './achievements';
 import { PRUNE_UNLOCK_PARTS, ROOT_REVEAL_SAP } from '../content/progression';
 import { CANOPY_OFFLINE_RATE, OFFLINE_MIN_SECONDS } from '../content/offline';
 import { OFFLINE_SOURCE } from './offline';
@@ -244,9 +249,21 @@ describe('Simulation.click', () => {
 });
 
 describe('growing the tree', () => {
-  /** Tap the trunk until there is enough Sap to buy anything in reach. */
+  /**
+   * A tree with `amount` Sap to spend, standing past the root gate.
+   *
+   * The *lifetime* total is raised to at least {@link ROOT_REVEAL_SAP} whatever
+   * the balance is, because that is what opens the ground (STEP 17) and these
+   * tests are about what the menu offers rather than about how long a player
+   * taps to get there. Spendable and lifetime are set separately for exactly
+   * that reason.
+   */
   function withSap(sim: Simulation, amount: number): Simulation {
-    sim.state.resources.add('sap', new Decimal(amount));
+    sim.state.resources.restore(
+      'sap',
+      new Decimal(amount),
+      new Decimal(Math.max(amount, ROOT_REVEAL_SAP)),
+    );
     return sim;
   }
 
@@ -264,8 +281,8 @@ describe('growing the tree', () => {
 
     const branch = options.find((o) => o.option.type === 'branch');
     const root = options.find((o) => o.option.type === 'rootSegment');
-    expect(branch?.affordable).toBe(true); // 15 Sap
-    expect(root?.affordable).toBe(true); // 12 Sap
+    expect(branch?.affordable).toBe(true);
+    expect(root?.affordable).toBe(true);
     expect(options.every((o) => o.costResource === 'sap')).toBe(true);
   });
 
@@ -300,8 +317,11 @@ describe('growing the tree', () => {
     sim.growPart(sim.state.tree.rootId, 'branch');
     const afterSecond = sim.state.resources.amount('sap').toNumber();
 
-    expect(first - afterFirst).toBeCloseTo(inSpring(15), 9);
-    expect(afterFirst - afterSecond).toBeCloseTo(inSpring(15 * 1.15), 9);
+    expect(first - afterFirst).toBeCloseTo(inSpring(PART_BASE_COST.branch), 9);
+    expect(afterFirst - afterSecond).toBeCloseTo(
+      inSpring(PART_BASE_COST.branch * PART_COST_GROWTH),
+      9,
+    );
   });
 
   it('runs the full loop: tap for Sap, grow a branch, grow a leaf, gain Light/s', () => {
@@ -324,7 +344,7 @@ describe('growing the tree', () => {
     // A leaf with no roots under it runs at the hydration floor.
     sim.tick(1);
     const snap = sim.snapshot(0);
-    const lit = 0.4 * HYDRATION_MIN * daylight(sim);
+    const lit = PART_BASE_RATE.leafCluster * HYDRATION_MIN * daylight(sim);
     expect(snap.perSecond.light.toNumber()).toBeCloseTo(lit, 9);
     expect(snap.resources.light.toNumber()).toBeCloseTo(lit, 9);
   });
@@ -339,13 +359,13 @@ describe('growing the tree', () => {
     // Water is what that root's depth earns it; Light is two leaves throttled
     // by what that one root can supply to them.
     const end = sim.state.tree.placements().get(root?.id ?? '')?.end as Vec2;
-    const water = 0.3 * depthMultiplier(depthAt(end.y));
+    const water = PART_BASE_RATE.rootSegment * depthMultiplier(depthAt(end.y));
     const hydration = Math.min(HYDRATION_MAX, water / (2 * WATER_NEED_PER_LEAF));
 
     sim.tick(1);
     expect(sim.state.resources.perSecond('water').toNumber()).toBeCloseTo(water, 9);
     expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(
-      0.8 * hydration * daylight(sim),
+      PART_BASE_RATE.leafCluster * 2 * hydration * daylight(sim),
       9,
     );
   });
@@ -356,7 +376,7 @@ describe('growing the tree', () => {
     sim.growPart(branch?.id ?? '', 'leafCluster');
     sim.tick(1);
     expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(
-      0.4 * HYDRATION_MIN * daylight(sim),
+      PART_BASE_RATE.leafCluster * HYDRATION_MIN * daylight(sim),
       9,
     );
 
@@ -374,7 +394,7 @@ describe('growing the tree', () => {
     const sim = new Simulation(state);
     sim.tick(1);
     expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(
-      0.4 * HYDRATION_MIN * daylight(sim),
+      PART_BASE_RATE.leafCluster * HYDRATION_MIN * daylight(sim),
       9,
     );
   });
@@ -438,7 +458,7 @@ describe('roots, soil and the idle economy', () => {
     expect(depth).toBeGreaterThan(0);
     sim.tick(1);
     expect(sim.state.resources.perSecond('water').toNumber()).toBeCloseTo(
-      0.3 * depthMultiplier(depth),
+      PART_BASE_RATE.rootSegment * depthMultiplier(depth),
       9,
     );
   });
@@ -485,7 +505,7 @@ describe('roots, soil and the idle economy', () => {
 
     sim.tick(1);
     expect(sim.state.resources.perSecond('minerals').toNumber()).toBeCloseTo(
-      0.12 * depthMultiplier(depthAt(end.y)) * 2,
+      PART_BASE_RATE.rootTip * depthMultiplier(depthAt(end.y)) * 2,
       9,
     );
   });
@@ -513,7 +533,7 @@ describe('roots, soil and the idle economy', () => {
     expect(seamOption?.production?.vein?.id).toBe('planted');
     // The quote is exactly what the part goes on to produce.
     expect(seamOption?.production?.rate.toNumber()).toBeCloseTo(
-      0.12 * depthMultiplier(depthAt(end.y)) * 2,
+      PART_BASE_RATE.rootTip * depthMultiplier(depthAt(end.y)) * 2,
       9,
     );
   });
@@ -559,8 +579,8 @@ describe('roots, soil and the idle economy', () => {
     sim.tick(1);
     const watered = sim.state.resources.perSecond('light').toNumber();
 
-    expect(parched).toBeCloseTo(0.4 * HYDRATION_MIN * parchedSun, 9);
-    expect(watered).toBeCloseTo(0.4 * HYDRATION_MAX * daylight(sim), 9);
+    expect(parched).toBeCloseTo(PART_BASE_RATE.leafCluster * HYDRATION_MIN * parchedSun, 9);
+    expect(watered).toBeCloseTo(PART_BASE_RATE.leafCluster * HYDRATION_MAX * daylight(sim), 9);
     // Hold the sun still — it moved a second between the two readings — and the
     // lift is exactly the span of the hydration clamp.
     expect(watered / daylight(sim) / (parched / parchedSun)).toBeCloseTo(
@@ -598,7 +618,7 @@ describe('roots, soil and the idle economy', () => {
     const hydrationMods = sim.state.modifiers.all().filter((m) => m.source === HYDRATION_SOURCE);
     expect(hydrationMods).toHaveLength(2);
     expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(
-      0.4 * HYDRATION_MIN * daylight(sim),
+      PART_BASE_RATE.leafCluster * HYDRATION_MIN * daylight(sim),
       9,
     );
   });
@@ -702,7 +722,8 @@ describe('sunlight, the day and leaf shading', () => {
     const sim = clustered();
     sim.tick(1);
 
-    const expected = totalExposure(sim) * 0.4 * sim.state.hydration.value * daylight(sim);
+    const expected =
+      totalExposure(sim) * PART_BASE_RATE.leafCluster * sim.state.hydration.value * daylight(sim);
     expect(sim.state.resources.perSecond('light').toNumber()).toBeCloseTo(expected, 9);
   });
 
@@ -757,7 +778,7 @@ describe('sunlight, the day and leaf shading', () => {
     const exposure = leafOption?.production?.exposure ?? 0;
     expect(exposure).toBeGreaterThan(0);
     expect(leafOption?.production?.rate.toNumber()).toBeCloseTo(
-      0.4 * exposure * sim.state.hydration.value * daylight(sim),
+      PART_BASE_RATE.leafCluster * exposure * sim.state.hydration.value * daylight(sim),
       9,
     );
 
@@ -853,17 +874,19 @@ describe('species and grafting', () => {
   });
 
   it('lets a species be planted once its milestone is met', () => {
+    // Cherry's milestone is lifetime Sap, which a test can simply have drawn —
+    // the point here is that meeting a milestone makes a wood plantable, not
+    // how long the milestone takes. (The *pacing* of the ladder is what
+    // `npm run sim` measures; see BALANCE.md.)
     const sim = funded();
-    // Birch opens at 8 grown parts.
-    let parent = sim.state.tree.rootId;
-    for (let i = 0; i < 8; i += 1) {
-      const node = sim.growPart(parent, 'branch');
-      if (node) parent = node.id;
-    }
+    expect(sim.unlockedSpecies()).not.toContain('cherry');
 
-    expect(sim.unlockedSpecies()).toContain('birch');
-    expect(sim.setPlantingSpecies('birch')).toBe(true);
-    expect(sim.growPart(parent, 'leafCluster')?.speciesId).toBe('birch');
+    sim.state.resources.add('sap', new Decimal(SPECIES_UNLOCK.cherrySap));
+    const branch = sim.growPart(sim.state.tree.rootId, 'branch');
+
+    expect(sim.unlockedSpecies()).toContain('cherry');
+    expect(sim.setPlantingSpecies('cherry')).toBe(true);
+    expect(sim.growPart(branch?.id ?? '', 'leafCluster')?.speciesId).toBe('cherry');
   });
 
   it('never plants a hybrid from the grow menu', () => {
@@ -1105,12 +1128,9 @@ describe('symbionts', () => {
 
   it('announces an arrival once, then stops', () => {
     const sim = funded();
-    // The squirrel comes with the oak branch the blossoms are grown on — it is
-    // the earliest resident in the game, and deliberately so: the first creature
-    // should turn up while the player is still learning what a branch is.
-    blossoms(sim, 3);
+    blossoms(sim, SYMBIONT_ARRIVAL.beeBlossoms);
 
-    expect(sim.drainSymbiontArrivals()).toEqual(['squirrel', 'bees']);
+    expect(sim.drainSymbiontArrivals()).toEqual(['bees']);
     expect(sim.drainSymbiontArrivals()).toEqual([]);
   });
 
@@ -1662,7 +1682,7 @@ describe('leaf litter', () => {
 describe('the ground a root is working in', () => {
   it('tags a root producer with its layer, so weather can find it', () => {
     const sim = new Simulation();
-    sim.state.resources.add('sap', new Decimal(1000));
+    sim.state.resources.add('sap', new Decimal(ROOT_REVEAL_SAP));
     const root = sim.growPart(sim.state.tree.rootId, 'rootSegment');
 
     const producer = sim.state.producers.get(partProducerId(root?.id ?? ''));
@@ -1707,7 +1727,7 @@ describe('the ground a root is working in', () => {
 function mature(sim: Simulation, species = STARTER_SPECIES_ID): void {
   sim.state.resources.add('sap', new Decimal(1e9));
 
-  for (let i = 0; i < 40 && sim.prestigeProgress().heightFraction < 1; i += 1) {
+  for (let i = 0; i < 200 && sim.prestigeProgress().heightFraction < 1; i += 1) {
     const placements = sim.state.tree.placements();
     let best: string | null = null;
     let bestY = -Infinity;
@@ -1950,8 +1970,19 @@ describe('the Old Growth forest', () => {
     const control = new Simulation();
     run(control, sim.state.elapsedSeconds, 0.1);
 
+    // Going to seed also earns badges, and some of those pay 1% of their own
+    // (STEP 19). They are a different multiplier in the same pipeline, so they
+    // are divided out rather than ignored — otherwise this test would quietly
+    // become a test of the achievement table.
+    const badges =
+      achievementMultiplier(sim.state.achievements) /
+      achievementMultiplier(control.state.achievements);
+
     expect(sim.snapshot().prestige.forestMultiplier).toBeCloseTo(1 + FOREST_PRODUCTION_BONUS, 9);
-    expect(lightWorth(sim)).toBeCloseTo(lightWorth(control) * (1 + FOREST_PRODUCTION_BONUS), 9);
+    expect(lightWorth(sim)).toBeCloseTo(
+      lightWorth(control) * (1 + FOREST_PRODUCTION_BONUS) * badges,
+      9,
+    );
   });
 });
 
@@ -2498,13 +2529,7 @@ describe('progression and the gates', () => {
     expect(sim.hasFeature('roots')).toBe(true);
 
     // Mature the tree the way the prestige tests do, then seed it.
-    sim.state.resources.restore(
-      'light',
-      new Decimal(PRESTIGE_LIGHT_REQUIREMENT),
-      new Decimal(PRESTIGE_LIGHT_REQUIREMENT),
-    );
-    let parent = sim.state.tree.rootId;
-    for (let i = 0; i < 8; i += 1) parent = sim.growPart(parent, 'branch')?.id ?? parent;
+    mature(sim);
     expect(sim.canGoToSeed()).toBe(true);
     sim.goToSeed();
     sim.tick(CEREMONY_SECONDS + 0.1);
@@ -2573,6 +2598,13 @@ describe('progression and the gates', () => {
     for (; second < 240 && !sim.hasFeature('roots'); second += 1) {
       for (let i = 0; i < 3; i += 1) sim.click(start + second * 1000 + i * 333, random);
       for (let i = 0; i < 10; i += 1) sim.tick(0.1);
+
+      // Stronger Taps whenever it is affordable. It is the cheapest thing in
+      // the game, the opening beat points straight at it, and the balance
+      // harness assumes a player who buys it — a model of a player who never
+      // does would be measuring a different game from the one BALANCE.md
+      // describes.
+      sim.buyUpgrade('strongerTaps');
 
       // What the arrow is pointing at: the first branch, then a leaf on it.
       if (bought === 0 && sim.growPart(sim.state.tree.rootId, 'branch')) bought = 1;

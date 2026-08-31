@@ -15,6 +15,69 @@ Do not refactor unrelated code.
 
 ## Changelog
 
+### 2026-08-31 — STEP 19: Balance pass, achievements and simulation harness
+
+Eighteen steps of systems, none of them measured. This one puts every number in
+one file, builds a headless bot that plays the game so the numbers can be
+_checked_ rather than argued about, and then does what the bot said.
+
+- `src/content/balance.ts` — **every tunable in the game, in one file**, and the
+  rule is enforced rather than intended: `scripts/check-magic-numbers.mjs` walks
+  `/src/engine` and fails on any numeric literal that is neither structural nor
+  in the allowlist with a reason, and `magicNumbers.test.ts` runs it in CI.
+  `balance.ts` imports nothing from the engine, which is what lets a headless
+  bot read the table with no simulation standing up around it.
+- `npm run sim` — the harness. It runs the **real engine**, no DOM and no
+  renderer, driven by three bots (clicker, root, balanced) and prints a
+  time-to-milestone table with a pass/fail column read off `SIM.targets`. It is
+  deterministic, takes `--seed=N`, and exits non-zero when a target is missed.
+  `npm run sim:trace` narrates one run a line at a time, which is how a balance
+  change gets aimed at the gate that is actually binding.
+- **All targets met**, on five seeds. Full table, per-seed spread and the
+  reasoning behind every curve are in **BALANCE.md**, including the two places
+  the result deviates from the brief and why.
+- **Three bugs the simulation found that no test would have.** The trunk could be
+  sealed shut — five slots shared between branches and roots, and the ground
+  opens _after_ the first branches are bought, so every bot arrived at the roots
+  milestone with a full trunk and dug nothing for the rest of the run. Maturity
+  was refused at exactly its threshold, because a `Decimal` divided by itself is
+  not always exactly one. And the squirrel wanted a single oak branch, so "first
+  symbiont" read 0s on every strategy — a creature that was part of the starting
+  position rather than a reward.
+- **Thirty achievements**, data-driven in `src/content/achievements.ts` and
+  awarded by a pure evaluator that takes a context rather than the simulation,
+  the way progression and prestige already do. Ten pay `+1%` on everything the
+  tree makes, published as one revocable source so a prestige _republishes_
+  rather than re-grants. Earned is a latch: half the table measures something
+  true for a moment ("150 parts at once"), and a card that emptied itself after
+  a cut would read as the game taking something back.
+- **Two new Journal tabs.** Badges shows all thirty, earned or not, with what
+  each wants and how far along the run is — nothing behind a "???", because a
+  list that will not say what it wants is one you cannot play toward. Stats is
+  the lifetime readout, split into what resets with the tree and what never
+  does.
+- A badge landing raises a toast; a batch shows only the last, because three
+  cards in a row is a queue to wait out rather than a thing you did.
+
+**Open TODOs**
+
+- [ ] The second run comes in at about four-fifths of the first, not the half the
+      brief asks for. Closing that would need either a much stronger first payout
+      (making the first run a formality) or a weaker first run; the window in
+      `SIM.targets` reflects what the Vault's early nodes are actually worth.
+      BALANCE.md states the gap rather than hiding it.
+- [ ] The graft window is 9–20 minutes rather than 10–20: the fastest strategy
+      reaches its second species at 9m58s, and every knob that pushes it past ten
+      sends the root bot off a cliff to 22. See BALANCE.md.
+- [ ] The bots do not prune for value, only to free a slot for a graft. A
+      fourth strategy built around pruning would test the half of the economy
+      Deadwood belongs to.
+- [ ] `SIM.horizonSeconds` is four hours, so a third prestige is never measured.
+      The second is the one the brief asks about, but the shape of the curve
+      after it is unverified.
+- [ ] Achievements are awarded once a tick against thirty rows. Cheap now;
+      worth a cadence if the table grows.
+
 ### 2026-08-28 — STEP 18: Final UI, mobile and accessibility
 
 Seventeen steps of systems reached through a HUD that had grown one button per
@@ -29,14 +92,14 @@ behind every word it says.
   Seed is the one thing in the game that becomes possible rather than being
   bought.
 - `src/ui/Panel.tsx` / `Panel.css` — **new**. One shell, one open panel at a
-  time. It owns the close button, Escape, and — the reason it exists — *focus*:
+  time. It owns the close button, Escape, and — the reason it exists — _focus_:
   opening moves focus in, closing gives it back to whatever opened it. Keyed by
   which panel is open, because React would otherwise reuse the instance and the
   mount effect would never re-run, leaving the keyboard outside the panel it
   just opened.
 - **The tree is playable with the keyboard.** `src/engine/treeNav.ts` is the
   model: `out`/`in` follow the limb, `left`/`right` step between siblings
-  *ordered by where they are on screen* rather than by when they were bought.
+  _ordered by where they are on screen_ rather than by when they were bought.
   Siblings clamp instead of wrapping — wrapping teleports focus across the
   canopy — and `focusOrTrunk` keeps focus on something that still exists after a
   cut. `src/render/focus.ts` draws the ring: a wide translucent halo with a thin
@@ -75,7 +138,7 @@ behind every word it says.
 - **Display settings**: text scale 90–130% driving a `--font-scale` on `:root`,
   patterns on leaves, and hints that wait to be dismissed.
 - **Performance**: off-screen segments were already culled; the loop now skips
-  the *draw* while the tab is hidden (the simulation still advances — the tree
+  the _draw_ while the tab is hidden (the simulation still advances — the tree
   does not stop growing because you looked away), and every panel is `memo`'d,
   which matters because `App` re-renders on every pointer move.
 - The chips moved from the bottom edge to their own row under the header, where

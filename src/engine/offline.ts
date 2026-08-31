@@ -1,3 +1,5 @@
+import { MINUTES_PER_HOUR, SECONDS_PER_HOUR, SECONDS_PER_MINUTE } from '../content/units';
+import { EPSILON } from '../content/units';
 import Decimal from 'break_infinity.js';
 import {
   CANOPY_OFFLINE_RATE,
@@ -58,7 +60,7 @@ export function planOffline(
   minSeconds: number = OFFLINE_MIN_SECONDS,
 ): OfflinePlan {
   const elapsed = Number.isFinite(elapsedSeconds) ? Math.max(0, elapsedSeconds) : 0;
-  const cap = Math.max(0, capHours) * 3600;
+  const cap = Math.max(0, capHours) * SECONDS_PER_HOUR;
   const simulated = Math.min(elapsed, cap);
 
   return {
@@ -82,13 +84,13 @@ export function offlineSteps(
   chunkSeconds: number = OFFLINE_CHUNK_SECONDS,
 ): number[] {
   const total = Math.max(0, seconds);
-  const chunk = Math.max(1e-9, chunkSeconds);
+  const chunk = Math.max(EPSILON, chunkSeconds);
 
   const whole = Math.floor(total / chunk);
   const steps = new Array<number>(whole).fill(chunk);
 
   const remainder = total - whole * chunk;
-  if (remainder > 1e-9) steps.push(remainder);
+  if (remainder > EPSILON) steps.push(remainder);
   return steps;
 }
 
@@ -211,13 +213,13 @@ export function offlineNotes(input: OfflineNoteInput): string[] {
 /** Human-readable duration: "3h 20m", "45m", "90s". */
 export function formatDuration(seconds: number): string {
   const total = Math.max(0, Math.round(seconds));
-  if (total < 60) return `${total}s`;
+  if (total < SECONDS_PER_MINUTE) return `${total}s`;
 
-  const minutes = Math.floor(total / 60);
-  if (minutes < 60) return `${minutes}m`;
+  const minutes = Math.floor(total / SECONDS_PER_MINUTE);
+  if (minutes < MINUTES_PER_HOUR) return `${minutes}m`;
 
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
+  const hours = Math.floor(minutes / MINUTES_PER_HOUR);
+  const rest = minutes % MINUTES_PER_HOUR;
   return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
 }
 

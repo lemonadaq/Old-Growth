@@ -1,3 +1,4 @@
+import { EPSILON } from '../content/units';
 import Decimal from 'break_infinity.js';
 import type { TreeNodeType } from '../content/growth';
 import { HYBRID_BY_ID, HYBRID_IDS, hybridFor, type HybridDef } from '../content/hybrids';
@@ -279,7 +280,7 @@ export function unlockProgress(def: SpeciesDef, ctx: UnlockContext): UnlockProgr
       break;
   }
 
-  const safeGoal = Math.max(1e-9, goal);
+  const safeGoal = Math.max(EPSILON, goal);
   return {
     unlocked: current >= goal,
     fraction: Math.min(1, Math.max(0, current / safeGoal)),

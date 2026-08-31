@@ -55,9 +55,7 @@ export function Help() {
               >
                 <p className="journal__help-title">
                   {def.label}
-                  {unlocked && (
-                    <span className="journal__help-open">{t('help.open')}</span>
-                  )}
+                  {unlocked && <span className="journal__help-open">{t('help.open')}</span>}
                 </p>
                 <p className="journal__help-body">{def.blurb}</p>
                 {!unlocked && gate && (

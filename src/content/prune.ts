@@ -13,25 +13,17 @@
  */
 
 /**
- * Share of a subtree's value handed back when it is cut.
+ * Both numbers are tuned in `./balance`:
  *
- * Quoted against what rebuilding that exact set of parts would cost *right now*
- * rather than against what was historically paid for them. The two are the same
- * number — prices depend only on how many parts of a type the tree carries — and
- * the forward-looking reading is the one a player can check: cut a limb, and 40%
- * of the price tag on putting it back comes home.
+ * - `PRUNE_REFUND_FRACTION` — the share of a subtree's value handed back, quoted
+ *   against what rebuilding that exact set of parts would cost *right now*
+ *   rather than against what was historically paid for them. The two are the
+ *   same number (prices depend only on how many parts of a type the tree
+ *   carries) and the forward-looking reading is the one a player can check.
+ * - `DEADWOOD_PER_WOOD` — Deadwood per unit of canonical wood. Canonical units
+ *   are tiny, so this constant carries the whole scale of the Deadwood economy.
  */
-export const PRUNE_REFUND_FRACTION = 0.4;
-
-/**
- * Deadwood per unit of canonical wood — the subtree's Σ(thickness × length).
- *
- * Canonical units are tiny (a first-generation branch is 0.023 × 0.3 ≈ 0.007),
- * so this constant carries the whole scale of the Deadwood economy: at 150 a
- * branch is worth about 1 Deadwood and a well-grown limb about 4. First-pass
- * value; STEP 19 owns real balance.
- */
-export const DEADWOOD_PER_WOOD = 150;
+export { DEADWOOD_PER_WOOD, PRUNE_REFUND_FRACTION } from './balance';
 
 /**
  * Modifier tag every part price is resolved against.

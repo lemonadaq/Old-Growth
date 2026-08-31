@@ -1,5 +1,6 @@
 import Decimal from 'break_infinity.js';
 import { describe, expect, it } from 'vitest';
+import { FIRST_PRESTIGE_SEEDS } from '../content/balance';
 import {
   CEREMONY_SECONDS,
   FOREST_PRODUCTION_BONUS,
@@ -130,10 +131,11 @@ describe('seedYield', () => {
     expect(seedYield(new Decimal(SEED_LIGHT_DIVISOR - 1), 0).total).toBe(0);
   });
 
-  it('pays exactly one Seed at the maturity gate', () => {
-    // The gate is set to the divisor precisely so a first prestige is never a
-    // trap. If this ever fails, one of the two constants moved without the other.
-    expect(seedYield(new Decimal(PRESTIGE_LIGHT_REQUIREMENT), 0).total).toBe(1);
+  it('pays exactly what the first prestige is meant to pay, at the gate', () => {
+    // The divisor is *derived* from the gate and FIRST_PRESTIGE_SEEDS precisely
+    // so a run that ends on the gate pays a known amount and a first prestige is
+    // never a trap. If this fails, the derivation was broken rather than tuned.
+    expect(seedYield(new Decimal(PRESTIGE_LIGHT_REQUIREMENT), 0).total).toBe(FIRST_PRESTIGE_SEEDS);
   });
 
   it('is a square root: four times the Light for twice the Seeds', () => {

@@ -49,10 +49,7 @@ export interface TotemPlacement {
  * way out on a large tree — at that scale a canonically-correct stump would be
  * two pixels of brown mush.
  */
-export function layoutTotems(
-  planted: readonly string[],
-  layout: TreeLayout,
-): TotemPlacement[] {
+export function layoutTotems(planted: readonly string[], layout: TreeLayout): TotemPlacement[] {
   return planted.map((totemId, slot) => ({
     slot,
     totemId,

@@ -1,3 +1,5 @@
+import { EPSILON } from '../content/units';
+import { MAX_CATCH_UP_PAYOUTS } from '../content/balance';
 import Decimal from 'break_infinity.js';
 import type { EffectSpec } from '../content/effects';
 import type { TreeNodeType } from '../content/growth';
@@ -42,11 +44,11 @@ export const SYMBIONT_SOURCE = 'symbionts';
 /**
  * Most cadence payouts a single call can settle.
  *
- * A long absence must not spin: STEP 14 will hand the ledger a jump of hours,
- * and the honest answer there is "as many as fit, up to a sane bound" rather
- * than a loop whose length is decided by how long the player was away.
+ * A long absence must not spin: an offline catch-up hands the ledger a jump of
+ * hours, and the honest answer there is "as many as fit, up to a sane bound"
+ * rather than a loop whose length is decided by how long the player was away.
  */
-export const MAX_CATCH_UP_PAYOUTS = 512;
+export { MAX_CATCH_UP_PAYOUTS };
 
 /** One symbiont living in the tree. */
 export interface ActiveSymbiont {
@@ -304,7 +306,7 @@ export function conditionProgress(
       break;
   }
 
-  const safeGoal = Math.max(1e-9, goal);
+  const safeGoal = Math.max(EPSILON, goal);
   return {
     met: current >= goal,
     fraction: Math.min(1, Math.max(0, current / safeGoal)),

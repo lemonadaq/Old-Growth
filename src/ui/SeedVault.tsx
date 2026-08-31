@@ -63,7 +63,10 @@ function HeirloomNode({
     >
       <p className="vault__name">
         <span aria-hidden>{unlocked ? glyph : '🔒'}</span> {name}
-        <span className="vault__pips" aria-label={t('vault.heirloomLevel', { level, max: maxLevel })}>
+        <span
+          className="vault__pips"
+          aria-label={t('vault.heirloomLevel', { level, max: maxLevel })}
+        >
           {Array.from({ length: maxLevel }, (_, i) => (
             <span
               key={i}
@@ -203,9 +206,7 @@ function SeedVaultPanel({ onBuyHeirloom, onChooseBond, onGoToSeed }: SeedVaultPr
       </section>
 
       {prestige.remembered > 0 && (
-        <p className="vault__memory">
-          🧠 {t('vault.remembered', { parts: prestige.remembered })}
-        </p>
+        <p className="vault__memory">🧠 {t('vault.remembered', { parts: prestige.remembered })}</p>
       )}
 
       <div className="vault__limbs">

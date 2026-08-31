@@ -1,3 +1,4 @@
+import { EPSILON, MS_PER_SECOND } from '../content/units';
 import Decimal from 'break_infinity.js';
 import {
   LITTER_INTERVAL_SECONDS,
@@ -16,6 +17,15 @@ import { SYMBIONTS, SYMBIONT_BY_ID } from '../content/symbionts';
 import { TOTEM_BY_ID } from '../content/totems';
 import { RAKE_ID, UPGRADES, UPGRADE_BY_ID } from '../content/upgrades';
 import { WEATHER_BY_ID } from '../content/weather';
+import { ACHIEVEMENTS, type AchievementDef } from '../content/achievements';
+import {
+  achievementModifiers,
+  achievementMultiplier,
+  achievementProgress,
+  newlyEarned,
+  ACHIEVEMENT_SOURCE,
+  type AchievementContext,
+} from './achievements';
 import { buffModifiers, buffSource, type ActiveBuff } from './buffs';
 import { resolveClick, resolveClickStats, type ClickResult, type ClickStats } from './clicker';
 import { comboFill, comboMultiplier, comboStacksAt, registerComboClick } from './combo';
@@ -133,6 +143,7 @@ import {
   createInitialState,
   type BuffSnapshot,
   type FeatureSnapshot,
+  type AchievementSnapshot,
   type GameSnapshot,
   type GameState,
   type HeirloomSnapshot,
@@ -142,6 +153,7 @@ import {
   type PrestigeSnapshot,
   type ProgressionSnapshot,
   type Resources,
+  type StatsSnapshot,
   type SpeciesSnapshot,
   type SymbiontSnapshot,
   type UpgradeSnapshot,
@@ -272,11 +284,15 @@ export class Simulation {
     this.state.seasonIndexSeen = this.state.season.index;
     this.republishSeason();
     this.republishRings();
-    // The two that outlive the tree entirely: what the Vault has been spent on,
-    // and how many trees stand behind this one. Both are as standing as an aura
-    // and neither has anything to do with the run they are being applied to.
+    // The three that outlive the tree entirely: what the Vault has been spent
+    // on, how many trees stand behind this one, and what the player has already
+    // done. All three are as standing as an aura and none of them has anything
+    // to do with the run they are being applied to — which is exactly why the
+    // badges are *republished* here rather than re-earned: a prestige keeps the
+    // set and throws the modifiers away with the old state.
     this.republishHeirlooms();
     this.republishForest();
+    this.republishAchievements();
     // Producers are rebuilt once the reach is known: a root tip that only finds
     // its pocket through the fungus would otherwise load barren.
     this.syncPartProducers();
@@ -285,8 +301,12 @@ export class Simulation {
     this.updateLightExposure();
     this.updateSymbionts();
     // Last, because the gates are measured against everything above them — and
-    // silently, because a save being read is not a discovery being made.
+    // silently, because a save being read is not a discovery being made. The
+    // badges are latched the same way and for the same reason: a player opening
+    // a save should not be met by a stack of toasts for things they did last
+    // week.
     this.updateFeatures(false);
+    this.updateAchievements(false);
   }
 
   /** Register (or replace) a producer by its id. */
@@ -414,6 +434,123 @@ export class Simulation {
 
     if (announce && opened.length > 0) this.state.featureEvents.push(...opened);
     return opened;
+  }
+
+  /**
+   * Everything the achievement table can be measured against.
+   *
+   * Built fresh per reading rather than cached, for the same reason
+   * {@link progressionContext} is: every field is a getter over live state, and
+   * a stale one would award a badge for a tree that has since been cut.
+   */
+  private achievementContext(): AchievementContext {
+    const tree = this.state.tree;
+    return {
+      lifetime: (resource) => this.state.resources.total(resource).toNumber(),
+      // Only Seeds actually survive a reset, so for everything else this agrees
+      // with `lifetime` — but it is asked separately because "across all your
+      // trees" is a claim the Journal makes, and it should not depend on the
+      // reader knowing which resources happen to be carried.
+      lifetimeAcrossRuns: (resource) => this.state.resources.total(resource).toNumber(),
+      clicks: this.state.clicks,
+      prunes: this.state.prunes,
+      grafts: this.state.grafts,
+      parts: Math.max(0, tree.size - 1),
+      partsOfType: (type) => tree.countOfType(type),
+      discoveries: this.state.discoveries.size,
+      speciesAvailable: this.unlockedSpecies().length,
+      // The ledger only ever holds residents, so its size *is* the count of
+      // creatures that have actually turned up.
+      symbionts: this.state.symbionts.size,
+      totems: this.state.totems.length,
+      rings: this.state.rings,
+      forest: this.state.forest.length,
+      heirloomLevels: this.state.heirlooms.spent,
+      playtimeSeconds: this.state.playtimeSeconds,
+      stormsBraced: this.state.stormsBraced,
+      offlineSeconds: this.state.offlineSeconds,
+    };
+  }
+
+  /**
+   * Award everything the run now qualifies for, and queue it for the toast.
+   *
+   * `announce` separates a badge earned *now* from one that was already in the
+   * save: loading a game awards silently, exactly as a feature gate latches
+   * silently, because a player who opens the tab to thirty toasts has been told
+   * nothing.
+   *
+   * Bonuses are republished rather than added to, so the set and the modifiers
+   * can never drift apart — a prestige keeps the achievements and throws the
+   * tree away, and this is what carries them across.
+   */
+  updateAchievements(announce = true): AchievementDef[] {
+    const won = newlyEarned(this.achievementContext(), this.state.achievements);
+    if (won.length === 0) return [];
+
+    for (const def of won) this.state.achievements.add(def.id);
+    if (announce) this.state.achievementEvents.push(...won.map((def) => def.id));
+    if (won.some((def) => (def.bonus ?? 0) > 0)) this.republishAchievements();
+    return won;
+  }
+
+  /** Re-publish the earned set's bonus as one revocable source. */
+  republishAchievements(): void {
+    this.removeModifiersBySource(ACHIEVEMENT_SOURCE);
+    for (const modifier of achievementModifiers(this.state.achievements)) {
+      this.addModifier(modifier);
+    }
+  }
+
+  /**
+   * Every achievement in table order, earned or not, with how far along it is.
+   *
+   * Measured against one context rather than thirty: the context is a set of
+   * getters over live state and building it per row would re-walk the tree
+   * thirty times a frame.
+   */
+  achievementSnapshot(): AchievementSnapshot[] {
+    const ctx = this.achievementContext();
+    return ACHIEVEMENTS.map((def) => {
+      const progress = achievementProgress(def, ctx);
+      return {
+        id: def.id,
+        earned: this.state.achievements.has(def.id),
+        fraction: progress.fraction,
+        have: progress.have,
+        need: progress.need,
+      };
+    });
+  }
+
+  /** Everything the Stats panel reports, in one reading. */
+  private statsSnapshot(lifetime: Readonly<Resources>): StatsSnapshot {
+    const ctx = this.achievementContext();
+    return {
+      lifetime,
+      clicks: ctx.clicks,
+      prunes: ctx.prunes,
+      grafts: ctx.grafts,
+      parts: ctx.parts,
+      discoveries: ctx.discoveries,
+      rings: ctx.rings,
+      trees: ctx.forest,
+      symbionts: ctx.symbionts,
+      totems: ctx.totems,
+      heirloomLevels: ctx.heirloomLevels,
+      stormsBraced: ctx.stormsBraced,
+      playtimeSeconds: ctx.playtimeSeconds,
+      offlineSeconds: ctx.offlineSeconds,
+      achievementsEarned: this.state.achievements.size,
+      achievementsTotal: ACHIEVEMENTS.length,
+      achievementMultiplier: achievementMultiplier(this.state.achievements),
+    };
+  }
+
+  /** Take the badges nobody has shown yet. Drained, like every other event. */
+  drainAchievementEvents(): string[] {
+    if (this.state.achievementEvents.length === 0) return [];
+    return this.state.achievementEvents.splice(0, this.state.achievementEvents.length);
   }
 
   /** Take the gates nobody has reacted to yet. Drained, like every other event. */
@@ -1165,6 +1302,11 @@ export class Simulation {
       this.updateSymbionts();
     }
 
+    // Counted here rather than at the twentieth tap: a brace abandoned at
+    // nineteen is not a storm held through, and the only moment that can be
+    // known is the moment the wind stops.
+    if (brace >= 1) this.state.stormsBraced += 1;
+
     this.state.stormTaps = 0;
     return { taps, brace, exposed: exposed.length, snapped, deadwood };
   }
@@ -1694,7 +1836,7 @@ export class Simulation {
     now: number = Date.now(),
     minSeconds: number = OFFLINE_MIN_SECONDS,
   ): OfflineReport | null {
-    const elapsed = (now - this.state.lastUpdatedAt) / 1000;
+    const elapsed = (now - this.state.lastUpdatedAt) / MS_PER_SECOND;
     const plan = planOffline(elapsed, offlineCapHours(this.state.heirlooms), minSeconds);
 
     if (!plan.worthRunning) {
@@ -1714,6 +1856,11 @@ export class Simulation {
     const seasonBefore = this.state.season.id;
 
     for (const modifier of offlineModifiers()) this.state.modifiers.add(modifier);
+
+    // The hours the tree actually worked, which is what the "slept on it"
+    // achievement is a claim about. Forfeited hours past the cap are not
+    // counted: they are hours the tree did not work.
+    this.state.offlineSeconds += plan.simulatedSeconds;
 
     const steps = offlineSteps(plan.simulatedSeconds);
     try {
@@ -1831,6 +1978,11 @@ export class Simulation {
     // and the one that matters most — the ground opening at 150 lifetime Sap —
     // is tripped by tapping, which happens outside the tick entirely.
     this.updateFeatures();
+    // Badges after the gates, and for the same reason: they are a reading of
+    // everything above them. An offline catch-up awards silently — a player who
+    // opens the tab to eleven toasts about a night they slept through has been
+    // told nothing.
+    this.updateAchievements(options.offline !== true);
 
     if (this.state.elapsedSeconds >= this.state.nextExposureAt) {
       this.state.nextExposureAt = this.state.elapsedSeconds + EXPOSURE_INTERVAL_SECONDS;
@@ -1956,7 +2108,7 @@ export class Simulation {
     };
 
     const buffs: BuffSnapshot[] = this.state.buffs.entries().map((buff) => {
-      const duration = Math.max(1e-9, buff.expiresAt - buff.grantedAt);
+      const duration = Math.max(EPSILON, buff.expiresAt - buff.grantedAt);
       const remainingSeconds = Math.max(0, buff.expiresAt - elapsed);
       return {
         id: buff.id,
@@ -1988,7 +2140,10 @@ export class Simulation {
               remainingSeconds: Math.max(0, active.endsAt - elapsed),
               fraction: Math.min(
                 1,
-                Math.max(0, (active.endsAt - elapsed) / Math.max(1e-9, activeDef.durationSeconds)),
+                Math.max(
+                  0,
+                  (active.endsAt - elapsed) / Math.max(EPSILON, activeDef.durationSeconds),
+                ),
               ),
             }
           : null,
@@ -2052,6 +2207,8 @@ export class Simulation {
       progression,
       clicks: this.state.clicks,
       prunes: this.state.prunes,
+      achievements: this.achievementSnapshot(),
+      stats: this.statsSnapshot(totals),
       treeRevision: this.state.tree.revision,
       treeSize: this.state.tree.size,
       tick: this.state.tick,

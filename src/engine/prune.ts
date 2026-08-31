@@ -1,3 +1,4 @@
+import { EPSILON } from '../content/units';
 import Decimal from 'break_infinity.js';
 import { GROWTH_RULE_BY_TYPE, type TreeNodeType } from '../content/growth';
 import { DEADWOOD_PER_WOOD, PRUNE_REFUND_FRACTION } from '../content/prune';
@@ -37,7 +38,7 @@ export interface ResourceAmount {
  * that are geometrically level can differ in the last bits. Requiring an exact
  * tie would make apical dominance fire or not fire on rounding noise.
  */
-export const APICAL_EPSILON = 1e-9;
+export const APICAL_EPSILON = EPSILON;
 
 /** What cutting a subtree would remove, and what it would pay. */
 export interface PruneQuote {

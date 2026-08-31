@@ -39,7 +39,10 @@ function clock(seconds: number): string {
 /** The level track as filled and empty pips. */
 function Levels({ level }: { readonly level: number }) {
   return (
-    <span className="symbiont__pips" aria-label={t('symbionts.level', { level, max: SYMBIONT_MAX_LEVEL })}>
+    <span
+      className="symbiont__pips"
+      aria-label={t('symbionts.level', { level, max: SYMBIONT_MAX_LEVEL })}
+    >
       {Array.from({ length: SYMBIONT_MAX_LEVEL }, (_, i) => (
         <span
           key={i}

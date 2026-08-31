@@ -72,22 +72,84 @@ describe('growth constraints', () => {
 
   it('stops offering options once the parent is full', () => {
     const graph = TreeGraph.seedling();
-    const max = GROWTH_RULE_BY_TYPE.trunk.maxChildren;
+    const branch = growOrThrow(graph, graph.rootId, 'branch');
+    const max = GROWTH_RULE_BY_TYPE.branch.maxChildren;
     for (let i = 0; i < max; i += 1) {
-      expect(graph.grow(graph.rootId, 'branch')).not.toBeNull();
+      expect(graph.grow(branch.id, 'twig')).not.toBeNull();
     }
-    expect(graph.getValidGrowthOptions(graph.rootId)).toEqual([]);
-    expect(graph.grow(graph.rootId, 'branch')).toBeNull();
+    expect(graph.getValidGrowthOptions(branch.id)).toEqual([]);
+    expect(graph.grow(branch.id, 'twig')).toBeNull();
+  });
+
+  describe('the trunk reserves room for both halves of the tree', () => {
+    const limits = GROWTH_RULE_BY_TYPE.trunk.maxChildrenByDomain;
+    if (!limits?.canopy || !limits.root) throw new Error('the trunk should reserve slots');
+    const canopy = limits.canopy;
+    const roots = limits.root;
+
+    it('caps branches without touching the root reservation', () => {
+      const graph = TreeGraph.seedling();
+      for (let i = 0; i < canopy; i += 1) {
+        expect(graph.grow(graph.rootId, 'branch')).not.toBeNull();
+      }
+
+      // The canopy is full; the trunk is not.
+      expect(graph.grow(graph.rootId, 'branch')).toBeNull();
+      expect(graph.grow(graph.rootId, 'rootSegment')).not.toBeNull();
+    });
+
+    it('leaves a root growable however the opening minutes were spent', () => {
+      // The soft-lock this reservation exists for: the ground opens *after* the
+      // first branches are bought, so a player who filled the trunk with canopy
+      // must still be able to dig when it does.
+      const graph = TreeGraph.seedling();
+      while (graph.grow(graph.rootId, 'branch') !== null) {
+        /* fill the canopy side completely */
+      }
+      expect(graph.getValidGrowthOptions(graph.rootId).some((o) => o.type === 'rootSegment')).toBe(
+        true,
+      );
+    });
+
+    it('caps roots too', () => {
+      const graph = TreeGraph.seedling();
+      for (let i = 0; i < roots; i += 1) {
+        expect(graph.grow(graph.rootId, 'rootSegment')).not.toBeNull();
+      }
+      expect(graph.grow(graph.rootId, 'rootSegment')).toBeNull();
+      expect(graph.grow(graph.rootId, 'branch')).not.toBeNull();
+    });
   });
 
   it('gives every sibling its own slot', () => {
+    const graph = TreeGraph.seedling();
+    const branch = growOrThrow(graph, graph.rootId, 'branch');
+    growOrThrow(graph, branch.id, 'twig');
+    growOrThrow(graph, branch.id, 'twig');
+    growOrThrow(graph, branch.id, 'leafCluster');
+
+    const slots = graph.children(branch.id).map((c) => c.slot);
+    expect(new Set(slots).size).toBe(slots.length);
+  });
+
+  it('numbers the trunk’s two fans separately', () => {
+    // The trunk reserves slots per domain, so a branch and a root can hold the
+    // same slot number: each is a position in *its own* fan, and the two fans
+    // point in opposite directions. Numbering them together would squeeze the
+    // canopy's spread by however many roots happened to be in the ground.
     const graph = TreeGraph.seedling();
     growOrThrow(graph, graph.rootId, 'branch');
     growOrThrow(graph, graph.rootId, 'branch');
     growOrThrow(graph, graph.rootId, 'rootSegment');
 
-    const slots = graph.children(graph.rootId).map((c) => c.slot);
-    expect(new Set(slots).size).toBe(slots.length);
+    const children = graph.children(graph.rootId);
+    for (const domain of ['canopy', 'root'] as const) {
+      const slots = children
+        .filter((child) => GROWTH_RULE_BY_TYPE[child.type].domain === domain)
+        .map((child) => child.slot);
+      expect(new Set(slots).size).toBe(slots.length);
+      expect(Math.min(...slots)).toBe(0);
+    }
   });
 
   it('reuses a freed slot after a prune', () => {

@@ -1,8 +1,10 @@
 import { useState, memo } from 'react';
 import { HYBRIDS } from '../content/hybrids';
 import { SPECIES, type SpeciesTrait } from '../content/species';
+import { Achievements } from './Achievements';
 import { Help } from './Help';
 import { t } from './i18n';
+import { Stats } from './Stats';
 import { useGameStore } from './useGameStore';
 import './Journal.css';
 
@@ -26,7 +28,7 @@ import './Journal.css';
  * else.
  */
 
-type Tab = 'catalogue' | 'help';
+type Tab = 'catalogue' | 'badges' | 'stats' | 'help';
 
 /** One trait line. Dormant traits are greyed and say what they are waiting for. */
 function Trait({ trait }: { readonly trait: SpeciesTrait }) {
@@ -46,7 +48,6 @@ function JournalPanel() {
 
   return (
     <aside className="journal" aria-label={t('journal.title')}>
-
       <div className="journal__tabs" role="tablist" aria-label={t('journal.sections')}>
         <button
           type="button"
@@ -61,6 +62,24 @@ function JournalPanel() {
           type="button"
           role="tab"
           className="journal__tab"
+          aria-selected={tab === 'badges'}
+          onClick={() => setTab('badges')}
+        >
+          {t('journal.badges')}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className="journal__tab"
+          aria-selected={tab === 'stats'}
+          onClick={() => setTab('stats')}
+        >
+          {t('journal.stats')}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          className="journal__tab"
           aria-selected={tab === 'help'}
           onClick={() => setTab('help')}
         >
@@ -70,6 +89,10 @@ function JournalPanel() {
 
       {tab === 'help' ? (
         <Help />
+      ) : tab === 'badges' ? (
+        <Achievements />
+      ) : tab === 'stats' ? (
+        <Stats />
       ) : (
         <>
           <section>
@@ -96,7 +119,9 @@ function JournalPanel() {
                     <p className="journal__name">
                       <span aria-hidden>{def.glyph}</span> {def.name}
                       {owned > 0 && (
-                        <span className="journal__owned">{t('journal.parts', { count: owned })}</span>
+                        <span className="journal__owned">
+                          {t('journal.parts', { count: owned })}
+                        </span>
                       )}
                     </p>
                     <p className="journal__flavor">{def.flavor}</p>
@@ -144,7 +169,9 @@ function JournalPanel() {
                       <span aria-hidden>{found ? def.glyph : '◈'}</span>{' '}
                       {found ? def.name : t('journal.undiscovered')}
                       {owned > 0 && (
-                        <span className="journal__owned">{t('journal.parts', { count: owned })}</span>
+                        <span className="journal__owned">
+                          {t('journal.parts', { count: owned })}
+                        </span>
                       )}
                     </p>
                     <p className="journal__parents">

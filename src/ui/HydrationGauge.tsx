@@ -71,7 +71,9 @@ function HydrationTooltip({ hydration }: { readonly hydration: HydrationSnapshot
         <div className="tooltip__row">
           <dt>
             {t('hydration.canopyWants')}
-            <span className="tooltip__note">{t('hydration.perLeaf', { count: hydration.leaves })}</span>
+            <span className="tooltip__note">
+              {t('hydration.perLeaf', { count: hydration.leaves })}
+            </span>
           </dt>
           <dd>{t('hydration.waterRate', { amount: formatNumber(hydration.need) })}</dd>
         </div>
@@ -87,9 +89,7 @@ function HydrationTooltip({ hydration }: { readonly hydration: HydrationSnapshot
         </div>
       </dl>
 
-      <p className="tooltip__hint">
-        {t('hydration.needHint', { amount: WATER_NEED_PER_LEAF })}
-      </p>
+      <p className="tooltip__hint">{t('hydration.needHint', { amount: WATER_NEED_PER_LEAF })}</p>
 
       {clampedLow && (
         <p className="tooltip__hint">{t('hydration.floored', { min: HYDRATION_MIN })}</p>
@@ -97,9 +97,7 @@ function HydrationTooltip({ hydration }: { readonly hydration: HydrationSnapshot
       {clampedHigh && (
         <p className="tooltip__hint">{t('hydration.capped', { max: HYDRATION_MAX })}</p>
       )}
-      {hydration.need.lte(0) && (
-        <p className="tooltip__hint">{t('hydration.nothingDrinking')}</p>
-      )}
+      {hydration.need.lte(0) && <p className="tooltip__hint">{t('hydration.nothingDrinking')}</p>}
     </>
   );
 }

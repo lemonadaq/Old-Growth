@@ -1,4 +1,11 @@
 import Decimal from 'break_infinity.js';
+import {
+  BASE_COMBO_CAP,
+  BASE_CRIT_CHANCE,
+  BASE_CRIT_MULT,
+  BASE_CLICK_POWER,
+  CLICK_TOLERANCE_PX,
+} from '../content/balance';
 import { comboMultiplier } from './combo';
 import { applyModifiers, scopedTag, type ModifierSet } from './modifiers';
 
@@ -19,20 +26,20 @@ export const CLICK_STAT_TAG = {
   comboCap: 'combo.cap',
 } as const;
 
-/** Unmodified starting values for the click stats. */
+/** Unmodified starting values for the click stats, gathered from `balance.ts`. */
 export const BASE_CLICK_STATS = {
   /** Sap per tap. */
-  clickPower: 1,
+  clickPower: BASE_CLICK_POWER,
   /** Probability of a critical tap, in `[0, 1]`. */
-  critChance: 0.02,
+  critChance: BASE_CRIT_CHANCE,
   /** Payout multiplier on a critical tap. */
-  critMult: 10,
+  critMult: BASE_CRIT_MULT,
   /** Combo stacks the meter can hold. */
-  comboCap: 50,
+  comboCap: BASE_COMBO_CAP,
 } as const;
 
 /** Pointer distance (CSS px) within which a tap still counts as hitting wood. */
-export const CLICK_TOLERANCE_PX = 16;
+export { CLICK_TOLERANCE_PX };
 
 export interface ClickStats {
   readonly clickPower: Decimal;

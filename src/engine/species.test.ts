@@ -1,5 +1,6 @@
 import Decimal from 'break_infinity.js';
 import { describe, expect, it } from 'vitest';
+import { SPECIES_UNLOCK } from '../content/balance';
 import { partProducerTags } from '../content/growth';
 import { HYBRIDS, hybridFor, pairKey } from '../content/hybrids';
 import { SPECIES, SPECIES_BY_ID, STARTER_SPECIES_ID } from '../content/species';
@@ -239,24 +240,32 @@ describe('unlocks', () => {
     expect(ids).toEqual([STARTER_SPECIES_ID]);
   });
 
+  // Read off the balance table rather than written down again: STEP 19 moved
+  // every threshold into one file precisely so a tuning pass does not have to
+  // edit the tests that guard the rule.
   it('opens a lifetime milestone at exactly its threshold', () => {
     const willow = SPECIES_BY_ID.willow;
-    const under = context({ lifetime: () => new Decimal(39.99) });
-    const at = context({ lifetime: () => new Decimal(40) });
+    const need = SPECIES_UNLOCK.willowWater;
+    const under = context({ lifetime: () => new Decimal(need).sub(0.01) });
+    const at = context({ lifetime: () => new Decimal(need) });
 
     expect(isSpeciesUnlocked(willow, under)).toBe(false);
     expect(isSpeciesUnlocked(willow, at)).toBe(true);
   });
 
   it('reports partial progress toward a locked species', () => {
-    const progress = unlockProgress(SPECIES_BY_ID.birch, context({ parts: 4 }));
+    const need = SPECIES_UNLOCK.birchParts;
+    const progress = unlockProgress(SPECIES_BY_ID.birch, context({ parts: need / 2 }));
     expect(progress.unlocked).toBe(false);
     expect(progress.fraction).toBeCloseTo(0.5, 9);
-    expect(progress.hint).toMatch(/8 parts/);
+    expect(progress.hint).toMatch(new RegExp(`${need} parts`));
   });
 
   it('caps progress at 1 once the milestone is passed', () => {
-    const progress = unlockProgress(SPECIES_BY_ID.birch, context({ parts: 40 }));
+    const progress = unlockProgress(
+      SPECIES_BY_ID.birch,
+      context({ parts: SPECIES_UNLOCK.birchParts * 2 }),
+    );
     expect(progress.unlocked).toBe(true);
     expect(progress.fraction).toBe(1);
   });
@@ -267,8 +276,9 @@ describe('unlocks', () => {
   });
 
   it('returns unlocked species in catalogue order', () => {
+    // Comfortably past every milestone in the balance table, whatever it says.
     const ids = unlockedSpeciesIds(
-      context({ parts: 100, prunes: 100, lifetime: () => new Decimal(1e6) }),
+      context({ parts: 1e6, prunes: 1e6, lifetime: () => new Decimal(1e12) }),
     );
     expect(ids).toEqual(SPECIES.map((s) => s.id));
   });

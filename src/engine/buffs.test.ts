@@ -48,9 +48,7 @@ describe('buffModifiers', () => {
   });
 
   it('carries the Sap bonus onto the resource itself', () => {
-    const sap = buffModifiers(SURGE).find(
-      (m) => m.targetKind === 'resource' && m.target === 'sap',
-    );
+    const sap = buffModifiers(SURGE).find((m) => m.targetKind === 'resource' && m.target === 'sap');
     expect(sap?.value).toBeCloseTo(1 + LATERAL_SURGE_SAP_BONUS, 9);
   });
 

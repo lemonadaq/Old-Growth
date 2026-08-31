@@ -36,7 +36,10 @@ function WorkshopPanel({ onCraft }: WorkshopProps) {
         {t('workshop.stock', { amount: formatNumber(deadwood) })}
       </p>
 
-      <ol className="workshop__slots" aria-label={t('workshop.slots', { filled: totems.length, total: MAX_TOTEMS })}>
+      <ol
+        className="workshop__slots"
+        aria-label={t('workshop.slots', { filled: totems.length, total: MAX_TOTEMS })}
+      >
         {Array.from({ length: MAX_TOTEMS }, (_, slot) => {
           const planted = totems[slot];
           const def = planted ? TOTEM_BY_ID[planted] : undefined;

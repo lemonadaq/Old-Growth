@@ -76,9 +76,7 @@ export function GraftTooltip({ assessment }: GraftTooltipProps) {
           </p>
         ))}
 
-      {assessment.firstDiscovery && (
-        <p className="tooltip__hint">{t('graft.undiscovered')}</p>
-      )}
+      {assessment.firstDiscovery && <p className="tooltip__hint">{t('graft.undiscovered')}</p>}
     </>
   );
 }

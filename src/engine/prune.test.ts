@@ -81,8 +81,7 @@ describe('rebuildCostOfType', () => {
     const owned = 6;
     const cut = rebuildCostOfType('twig', owned, 2).toNumber();
     // Regrowing from `owned - 2` back to `owned` pays those same two prices.
-    const regrow =
-      partCost('twig', owned - 2).toNumber() + partCost('twig', owned - 1).toNumber();
+    const regrow = partCost('twig', owned - 2).toNumber() + partCost('twig', owned - 1).toNumber();
     expect(cut).toBeCloseTo(regrow, 9);
   });
 

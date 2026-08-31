@@ -8,11 +8,14 @@
  * to a quarter rate, and a player with roots to spare overcharges them.
  */
 
-/** Water per second one leaf cluster wants in order to run at full rate. */
-export const WATER_NEED_PER_LEAF = 0.35;
-
-/** Floor on the hydration multiplier: a parched canopy still limps along. */
-export const HYDRATION_MIN = 0.25;
-
-/** Ceiling on the hydration multiplier: surplus Water stops paying past here. */
-export const HYDRATION_MAX = 1.5;
+/**
+ * The three numbers behind the link, tuned in `./balance`:
+ *
+ * - `WATER_NEED_PER_LEAF` — Water per second one leaf cluster wants to run at
+ *   full rate.
+ * - `HYDRATION_MIN` — floor on the multiplier: a parched canopy still limps
+ *   along rather than switching off.
+ * - `HYDRATION_MAX` — ceiling: surplus Water stops paying past here, so roots
+ *   are worth building and not worth hoarding.
+ */
+export { WATER_NEED_PER_LEAF, HYDRATION_MIN, HYDRATION_MAX } from './balance';

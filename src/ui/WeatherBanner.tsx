@@ -56,9 +56,7 @@ export function WeatherBanner() {
       <span className="weather__body">
         <span className="weather__name">
           {def.label}
-          {storm && (
-            <span className="weather__call">{t('weather.brace')}</span>
-          )}
+          {storm && <span className="weather__call">{t('weather.brace')}</span>}
         </span>
 
         {storm ? (

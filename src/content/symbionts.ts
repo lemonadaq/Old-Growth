@@ -1,3 +1,4 @@
+import { SYMBIONT_ARRIVAL } from './balance';
 import { DAY_LENGTH_SECONDS } from './daylight';
 import type { EffectSpec } from './effects';
 import type { TreeNodeType } from './growth';
@@ -138,7 +139,7 @@ export const SONGBIRD_INTERVAL_SECONDS = 180;
  * it can see from, so this is the one condition met by building *upward* rather
  * than by building more.
  */
-export const SONGBIRD_HEIGHT = 1.25;
+export const SONGBIRD_HEIGHT = SYMBIONT_ARRIVAL.songbirdHeight;
 
 /**
  * The five.
@@ -157,10 +158,11 @@ export const SYMBIONTS: readonly SymbiontDef[] = [
     name: 'Bees',
     glyph: '🐝',
     flavor: 'They found the flowers before you knew you had any.',
-    arrival: 'A hive has taken to the blossoms. Every tap now has a better chance of striking rich.',
+    arrival:
+      'A hive has taken to the blossoms. Every tap now has a better chance of striking rich.',
     levelLabel: 'Hive',
     color: '#e6b422',
-    condition: { kind: 'partsOfType', type: 'blossom', count: 3 },
+    condition: { kind: 'partsOfType', type: 'blossom', count: SYMBIONT_ARRIVAL.beeBlossoms },
     effectLabel: 'Pollination: +3% critical tap chance per hive level.',
     effects: [{ type: 'add', targetKind: 'tag', target: 'click.critChance', value: 0.03 }],
     upgrades: [
@@ -190,7 +192,7 @@ export const SYMBIONTS: readonly SymbiontDef[] = [
     arrival: 'Ants have found the deadwood and built a road up the trunk. The Sap runs harder.',
     levelLabel: 'Colony',
     color: '#8a5a3a',
-    condition: { kind: 'lifetime', resource: 'deadwood', amount: 5 },
+    condition: { kind: 'lifetime', resource: 'deadwood', amount: SYMBIONT_ARRIVAL.antDeadwood },
     effectLabel: 'Tending: +5% Sap per colony level.',
     effects: [
       { type: 'mul', targetKind: 'resource', target: 'sap', value: 1.05 },
@@ -224,10 +226,16 @@ export const SYMBIONTS: readonly SymbiontDef[] = [
     name: 'Mycorrhiza',
     glyph: '🍄',
     flavor: 'Not quite a plant and not quite an animal, and older at this than either.',
-    arrival: 'A fungal network has laced itself through your roots. The ground has fewer secrets now.',
+    arrival:
+      'A fungal network has laced itself through your roots. The ground has fewer secrets now.',
     levelLabel: 'Network',
     color: '#b98cd6',
-    condition: { kind: 'partsInStratum', type: 'rootTip', stratum: 'clay', count: 1 },
+    condition: {
+      kind: 'partsInStratum',
+      type: 'rootTip',
+      stratum: 'clay',
+      count: SYMBIONT_ARRIVAL.mycorrhizaTips,
+    },
     effectLabel: 'Hyphae: mineral pockets are found 50% further out per network level.',
     effects: [],
     veinReachPerLevel: 0.5,
@@ -289,10 +297,16 @@ export const SYMBIONTS: readonly SymbiontDef[] = [
     name: 'Squirrel',
     glyph: '🐿️',
     flavor: 'Buries far more than it ever digs up. Most oaks are planted by forgetfulness.',
-    arrival: 'A squirrel has moved into the oak. It is already burying things and already forgetting where.',
+    arrival:
+      'A squirrel has moved into the oak. It is already burying things and already forgetting where.',
     levelLabel: 'Cache',
     color: '#c07a3a',
-    condition: { kind: 'speciesParts', speciesId: STARTER_SPECIES_ID, type: 'branch', count: 1 },
+    condition: {
+      kind: 'speciesParts',
+      speciesId: STARTER_SPECIES_ID,
+      type: 'branch',
+      count: SYMBIONT_ARRIVAL.squirrelOakBranches,
+    },
     effectLabel:
       'Caching: buries a nut each day per cache level. Every buried nut sprouts into a free root segment next session.',
     effects: [],

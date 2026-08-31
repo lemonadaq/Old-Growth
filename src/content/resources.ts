@@ -8,13 +8,7 @@
 
 /** Stable identifiers for every resource in the game. */
 export type ResourceId =
-  | 'sap'
-  | 'light'
-  | 'water'
-  | 'minerals'
-  | 'leafLitter'
-  | 'deadwood'
-  | 'seeds';
+  'sap' | 'light' | 'water' | 'minerals' | 'leafLitter' | 'deadwood' | 'seeds';
 
 /** Where a resource is primarily produced / conceptually lives. */
 export type ResourceDomain = 'trunk' | 'canopy' | 'roots' | 'cycle' | 'prestige';

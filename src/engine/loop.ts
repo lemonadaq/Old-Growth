@@ -11,18 +11,17 @@
  * a real `requestAnimationFrame`.
  */
 
-/** Simulation ticks per second. */
-export const TICK_RATE = 10;
-
-/** Milliseconds of simulated time per fixed tick. */
-export const MS_PER_TICK = 1000 / TICK_RATE;
+import { MAX_FRAME_MS, TICK_RATE } from '../content/balance';
+import { MS_PER_SECOND } from '../content/units';
 
 /**
- * Largest frame delta we will process in one call. Longer gaps (tab was
- * backgrounded, breakpoint hit) are clamped so we never try to catch up with an
- * unbounded number of ticks — the classic "spiral of death".
+ * `TICK_RATE` is simulation ticks per second and `MAX_FRAME_MS` is the largest
+ * frame delta processed in one call; both are tuned in `balance.ts`.
  */
-export const MAX_FRAME_MS = 250;
+export { MAX_FRAME_MS, TICK_RATE };
+
+/** Milliseconds of simulated time per fixed tick. */
+export const MS_PER_TICK = MS_PER_SECOND / TICK_RATE;
 
 export interface LoopCallbacks {
   /** Advance the simulation by one fixed step. `dtSeconds` is constant. */
@@ -58,7 +57,7 @@ export class GameLoop {
 
     let ticks = 0;
     while (this.accumulatorMs >= MS_PER_TICK) {
-      this.cb.update(MS_PER_TICK / 1000);
+      this.cb.update(MS_PER_TICK / MS_PER_SECOND);
       this.accumulatorMs -= MS_PER_TICK;
       ticks += 1;
     }
@@ -78,8 +77,8 @@ export class GameLoop {
     this.framesThisWindow += 1;
     this.windowMs += frameDtMs;
 
-    if (this.windowMs >= 1000) {
-      const seconds = this.windowMs / 1000;
+    if (this.windowMs >= MS_PER_SECOND) {
+      const seconds = this.windowMs / MS_PER_SECOND;
       const fps = Math.round(this.framesThisWindow / seconds);
       const tps = Math.round(this.ticksThisWindow / seconds);
       this.cb.onStats?.({ fps, tps });

@@ -1,3 +1,12 @@
+import {
+  FIRST_TAP_SAP,
+  GRAFT_UNLOCK_SPECIES,
+  PRESTIGE_REVEAL_MATURITY,
+  PRUNE_UNLOCK_PARTS,
+  ROOT_REVEAL_PARTS,
+  ROOT_REVEAL_SAP,
+  SYMBIONT_PANEL_INTEREST,
+} from './balance';
 import type { TreeNodeType } from './growth';
 import type { ResourceId } from './resources';
 import { PICKER_MIN_SPECIES } from './species';
@@ -31,48 +40,40 @@ import { PICKER_MIN_SPECIES } from './species';
  * measured by the engine, exactly as `SpeciesUnlock` is.
  */
 
-/* ------------------------------------------------------------- the numbers */
-
-/** Sap the first beat waits for — about ten taps, before anything else exists. */
-export const FIRST_TAP_SAP = 10;
+/* --------------------------------------------------- the numbers, from balance */
 
 /**
- * Lifetime Sap at which the ground opens up.
+ * Every gate's threshold, tuned in `./balance` and re-exported here so the table
+ * below reads as one page:
  *
- * Chosen so a player who does nothing but tap reaches it inside a couple of
- * minutes, and one who buys a branch and a leaf first still reaches it inside
- * four: the roots are the half of the game that runs while the tab is shut, and
- * a first session that ends before they exist is a first session that never
- * shows what the game is.
+ * - `FIRST_TAP_SAP` — Sap the first beat waits for. About ten taps, before
+ *   anything else exists.
+ * - `ROOT_REVEAL_SAP` / `ROOT_REVEAL_PARTS` — the two routes to the ground
+ *   opening, whichever arrives first. Chosen so a player who does nothing but
+ *   tap reaches it inside a few minutes, and one who spends everything on tree
+ *   gets there at about the same time: the roots are the half of the game that
+ *   runs while the tab is shut, and a first session that ends before they exist
+ *   is one that never showed what the game is.
+ * - `PRUNE_UNLOCK_PARTS` — parts on the tree before the scissors come out.
+ * - `GRAFT_UNLOCK_SPECIES` — distinct species standing before the knife does.
+ * - `SYMBIONT_PANEL_INTEREST` — how interested a creature has to be before the
+ *   panel about creatures appears. Half-way rather than on arrival: its job is to
+ *   say "something is nearly here and this is what it wants".
+ * - `PRESTIGE_REVEAL_MATURITY` — maturity at which Go to Seed becomes visible,
+ *   greyed, with its progress on it. Not at 100%: a prestige button that appears
+ *   already pressable is a button nobody has thought about.
+ * - `HINT_DURATION_MS` — how long a hint bubble stays up before it counts as read.
  */
-export const ROOT_REVEAL_SAP = 150;
-
-/** Parts on the tree before the scissors come out. */
-export const PRUNE_UNLOCK_PARTS = 8;
-
-/** Distinct species standing on the tree before the knife does. */
-export const GRAFT_UNLOCK_SPECIES = 2;
-
-/**
- * How interested a creature has to be before the panel about creatures appears.
- *
- * Half-way, rather than on arrival: the panel's job is to say "something is
- * nearly here and this is what it wants", and one that only opened once the bees
- * had already moved in would be a panel that never told anybody anything.
- */
-export const SYMBIONT_PANEL_INTEREST = 0.5;
-
-/**
- * Maturity at which Go to Seed becomes visible — greyed, with its progress on it.
- *
- * Not at 100%: a prestige button that appears already pressable is a button
- * nobody has thought about, and the last quarter of a run is exactly when the
- * player should be deciding whether to spend it growing or end it.
- */
-export const PRESTIGE_REVEAL_MATURITY = 0.75;
-
-/** How long a hint bubble stays up before it counts as read, in ms. */
-export const HINT_DURATION_MS = 14_000;
+export {
+  FIRST_TAP_SAP,
+  GRAFT_UNLOCK_SPECIES,
+  HINT_DURATION_MS,
+  PRESTIGE_REVEAL_MATURITY,
+  PRUNE_UNLOCK_PARTS,
+  ROOT_REVEAL_PARTS,
+  ROOT_REVEAL_SAP,
+  SYMBIONT_PANEL_INTEREST,
+} from './balance';
 
 /* -------------------------------------------------------- the measurements */
 
@@ -150,8 +151,15 @@ export const FEATURES: readonly FeatureDef[] = [
       'Everything above ground stops when you do. Roots do not: they draw Water while the ' +
       'tab is shut, and the deeper they reach the more they find. A root tip that lands in a ' +
       'mineral vein worries Minerals out of the clay.',
-    requirement: { kind: 'lifetime', resource: 'sap', amount: ROOT_REVEAL_SAP },
-    locked: `Draw ${ROOT_REVEAL_SAP} Sap from the tree`,
+    // Either route opens it: Sap drawn, or tree built. See ROOT_REVEAL_PARTS.
+    requirement: {
+      kind: 'any',
+      of: [
+        { kind: 'lifetime', resource: 'sap', amount: ROOT_REVEAL_SAP },
+        { kind: 'parts', count: ROOT_REVEAL_PARTS },
+      ],
+    },
+    locked: `Draw ${ROOT_REVEAL_SAP} Sap from the tree, or grow ${ROOT_REVEAL_PARTS} parts`,
   },
   {
     id: 'symbionts',

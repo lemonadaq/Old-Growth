@@ -127,12 +127,7 @@ export {
   type WeatherEvent,
   type WeatherLogEntry,
 } from './weather';
-export {
-  LitterGround,
-  litterAmount,
-  litterPosition,
-  type LitterPile,
-} from './litter';
+export { LitterGround, litterAmount, litterPosition, type LitterPile } from './litter';
 export {
   COMBO_BONUS_AT_FULL,
   COMBO_BONUS_PER_STACK,

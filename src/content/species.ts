@@ -1,3 +1,4 @@
+import { SPECIES_UNLOCK } from './balance';
 import type { TreeNodeType } from './growth';
 import type { ResourceId } from './resources';
 
@@ -259,7 +260,7 @@ export const SPECIES: readonly SpeciesDef[] = [
         value: 0.85,
       },
     ],
-    unlock: { kind: 'parts', count: 8 },
+    unlock: { kind: 'parts', count: SPECIES_UNLOCK.birchParts },
   },
   {
     id: 'willow',
@@ -300,7 +301,7 @@ export const SPECIES: readonly SpeciesDef[] = [
         dormant: true,
       },
     ],
-    unlock: { kind: 'lifetime', resource: 'water', amount: 40 },
+    unlock: { kind: 'lifetime', resource: 'water', amount: SPECIES_UNLOCK.willowWater },
   },
   {
     id: 'maple',
@@ -337,7 +338,7 @@ export const SPECIES: readonly SpeciesDef[] = [
         dormant: true,
       },
     ],
-    unlock: { kind: 'lifetime', resource: 'light', amount: 60 },
+    unlock: { kind: 'lifetime', resource: 'light', amount: SPECIES_UNLOCK.mapleLight },
   },
   {
     id: 'pine',
@@ -374,7 +375,7 @@ export const SPECIES: readonly SpeciesDef[] = [
         dormant: true,
       },
     ],
-    unlock: { kind: 'prunes', count: 3 },
+    unlock: { kind: 'prunes', count: SPECIES_UNLOCK.pinePrunes },
   },
   {
     id: 'cherry',
@@ -411,7 +412,7 @@ export const SPECIES: readonly SpeciesDef[] = [
         value: 0.05,
       },
     ],
-    unlock: { kind: 'lifetime', resource: 'sap', amount: 750 },
+    unlock: { kind: 'lifetime', resource: 'sap', amount: SPECIES_UNLOCK.cherrySap },
   },
 ] as const;
 

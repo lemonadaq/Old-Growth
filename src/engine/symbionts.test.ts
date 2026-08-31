@@ -1,5 +1,6 @@
 import Decimal from 'break_infinity.js';
 import { describe, expect, it } from 'vitest';
+import { SYMBIONT_ARRIVAL } from '../content/balance';
 import type { ResourceId } from '../content/resources';
 import {
   SEED_FRAGMENTS_PER_SEED,
@@ -212,7 +213,10 @@ describe('conditionProgress', () => {
 
   it('is met at exactly the goal, and stays capped above it', () => {
     const at = (blossoms: number) =>
-      conditionProgress(SYMBIONT_BY_ID.bees.condition, emptyContext({ partsOfType: () => blossoms }));
+      conditionProgress(
+        SYMBIONT_BY_ID.bees.condition,
+        emptyContext({ partsOfType: () => blossoms }),
+      );
 
     expect(at(3).met).toBe(true);
     expect(at(3).fraction).toBe(1);
@@ -239,9 +243,10 @@ describe('conditionProgress', () => {
 
   it('writes its hints like a person — no "1 root tips"', () => {
     const hints = SYMBIONTS.map((def) => conditionProgress(def.condition, emptyContext()).hint);
-    expect(hints).toContain('Reach 1 root tip into the Clay.');
-    expect(hints).toContain('Grow 3 blossoms.');
-    expect(hints).toContain('Grow 1 branch of oak.');
+    expect(hints).toContain(`Reach ${SYMBIONT_ARRIVAL.mycorrhizaTips} root tip into the Clay.`);
+    expect(hints).toContain(`Grow ${SYMBIONT_ARRIVAL.beeBlossoms} blossoms.`);
+    expect(hints).toContain(`Grow ${SYMBIONT_ARRIVAL.squirrelOakBranches} branches of oak.`);
+    // The rule this test is really about: no "1 root tips", ever.
     for (const hint of hints) expect(hint).not.toMatch(/\b1 \w+s\b/);
   });
 
@@ -255,10 +260,12 @@ describe('conditionProgress', () => {
 
   it('measures a species — the squirrel wants an oak branch, not just any branch', () => {
     const birch = emptyContext({
-      partsOfSpecies: (speciesId) => (speciesId === 'birch' ? 5 : 0),
+      partsOfSpecies: (speciesId) =>
+        speciesId === 'birch' ? SYMBIONT_ARRIVAL.squirrelOakBranches : 0,
     });
     const oak = emptyContext({
-      partsOfSpecies: (speciesId, type) => (speciesId === 'oak' && type === 'branch' ? 1 : 0),
+      partsOfSpecies: (speciesId, type) =>
+        speciesId === 'oak' && type === 'branch' ? SYMBIONT_ARRIVAL.squirrelOakBranches : 0,
     });
 
     expect(conditionProgress(SYMBIONT_BY_ID.squirrel.condition, birch).met).toBe(false);

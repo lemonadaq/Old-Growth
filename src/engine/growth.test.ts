@@ -1,3 +1,4 @@
+import { PART_BASE_RATE } from '../content/balance';
 import Decimal from 'break_infinity.js';
 import { describe, expect, it } from 'vitest';
 import { GROWTH_RULE_BY_TYPE, PART_COST_GROWTH } from '../content/growth';
@@ -28,7 +29,7 @@ describe('partCost', () => {
     expect(partCost('branch', 0).toNumber()).toBeCloseTo(GROWTH_RULE_BY_TYPE.branch.baseCost, 9);
   });
 
-  it('grows ×1.15 per part of that type already owned', () => {
+  it('grows by PART_COST_GROWTH per part of that type already owned', () => {
     const base = GROWTH_RULE_BY_TYPE.leafCluster.baseCost;
     expect(partCost('leafCluster', 1).toNumber()).toBeCloseTo(base * PART_COST_GROWTH, 9);
     expect(partCost('leafCluster', 5).toNumber()).toBeCloseTo(base * PART_COST_GROWTH ** 5, 9);
@@ -73,7 +74,7 @@ describe('partProducer', () => {
       { soil: BARREN_SOIL, placement: placementAt(-0.5) },
     );
     // 500 soil units down doubles production.
-    expect(Number(producer?.baseRate)).toBeCloseTo(0.6, 9);
+    expect(Number(producer?.baseRate)).toBeCloseTo(PART_BASE_RATE.rootSegment * 2, 9);
   });
 
   it('registers nothing for a root tip that found no vein', () => {
@@ -90,13 +91,13 @@ describe('partProducer', () => {
       { id: 'rootTip-3', type: 'rootTip' },
       { soil: soilWithVeinAt(-0.5, 2), placement: placementAt(-0.5) },
     );
-    expect(Number(producer?.baseRate)).toBeCloseTo(0.12 * 2 * 2, 9);
+    expect(Number(producer?.baseRate)).toBeCloseTo(PART_BASE_RATE.rootTip * 2 * 2, 9);
   });
 
   it('treats a part with no known placement as sitting in barren surface soil', () => {
     expect(
       Number(partProducer({ id: 'rootSegment-2', type: 'rootSegment' })?.baseRate),
-    ).toBeCloseTo(0.3, 9);
+    ).toBeCloseTo(PART_BASE_RATE.rootSegment, 9);
     expect(partProducer({ id: 'rootTip-3', type: 'rootTip' })).toBeNull();
   });
 });
@@ -105,7 +106,7 @@ describe('partProductionDelta', () => {
   it('quotes the unmodified rate when nothing is boosting it', () => {
     const delta = partProductionDelta('leafCluster', new ModifierSet());
     expect(delta?.resource).toBe('light');
-    expect(delta?.rate.toNumber()).toBeCloseTo(0.4, 9);
+    expect(delta?.rate.toNumber()).toBeCloseTo(PART_BASE_RATE.leafCluster, 9);
   });
 
   it('is null for a part that produces nothing', () => {
@@ -115,7 +116,10 @@ describe('partProductionDelta', () => {
   it('applies modifiers that target the part’s tags', () => {
     const modifiers = new ModifierSet();
     modifiers.add({ source: 'test', type: 'mul', targetKind: 'tag', target: 'canopy', value: 2 });
-    expect(partProductionDelta('leafCluster', modifiers)?.rate.toNumber()).toBeCloseTo(0.8, 9);
+    expect(partProductionDelta('leafCluster', modifiers)?.rate.toNumber()).toBeCloseTo(
+      PART_BASE_RATE.leafCluster * 2,
+      9,
+    );
   });
 
   it('applies modifiers that target the produced resource', () => {
@@ -127,13 +131,19 @@ describe('partProductionDelta', () => {
       target: 'light',
       value: 0.1,
     });
-    expect(partProductionDelta('leafCluster', modifiers)?.rate.toNumber()).toBeCloseTo(0.5, 9);
+    expect(partProductionDelta('leafCluster', modifiers)?.rate.toNumber()).toBeCloseTo(
+      PART_BASE_RATE.leafCluster + 0.1,
+      9,
+    );
   });
 
   it('ignores modifiers aimed at a different part’s tags', () => {
     const modifiers = new ModifierSet();
     modifiers.add({ source: 'test', type: 'mul', targetKind: 'tag', target: 'root', value: 5 });
-    expect(partProductionDelta('leafCluster', modifiers)?.rate.toNumber()).toBeCloseTo(0.4, 9);
+    expect(partProductionDelta('leafCluster', modifiers)?.rate.toNumber()).toBeCloseTo(
+      PART_BASE_RATE.leafCluster,
+      9,
+    );
   });
 
   it('reports no soil conditions for a part in the canopy', () => {
@@ -155,7 +165,7 @@ describe('partProductionDelta', () => {
     expect(delta?.depth).toBeCloseTo(500, 9);
     expect(delta?.stratum?.id).toBe('clay');
     expect(delta?.depthMultiplier).toBeCloseTo(2, 9);
-    expect(delta?.rate.toNumber()).toBeCloseTo(0.6, 9);
+    expect(delta?.rate.toNumber()).toBeCloseTo(PART_BASE_RATE.rootSegment * 2, 9);
   });
 
   it('quotes zero, and says why, for a mineral part with no vein', () => {
@@ -177,7 +187,7 @@ describe('partProductionDelta', () => {
       placement: placementAt(-0.5),
     });
     expect(delta?.vein?.richness).toBe(2);
-    expect(delta?.rate.toNumber()).toBeCloseTo(0.12 * 2 * 2 * 3, 9);
+    expect(delta?.rate.toNumber()).toBeCloseTo(PART_BASE_RATE.rootTip * 2 * 2 * 3, 9);
   });
 
   it('keeps a zero rate at zero even under an additive modifier', () => {
@@ -251,7 +261,7 @@ describe('priceGrowthOptions', () => {
     const priced = priceGrowthOptions(graph, branch?.id ?? '', resources, new ModifierSet());
     const leaf = priced.find((p) => p.option.type === 'leafCluster');
     expect(leaf?.production?.resource).toBe('light');
-    expect(leaf?.production?.rate.toNumber()).toBeCloseTo(0.4, 9);
+    expect(leaf?.production?.rate.toNumber()).toBeCloseTo(PART_BASE_RATE.leafCluster, 9);
 
     const twig = priced.find((p) => p.option.type === 'twig');
     expect(twig?.production).toBeNull();
@@ -274,7 +284,7 @@ describe('priceGrowthOptions', () => {
     // The root leaves the trunk base heading down, so it is quoted underground
     // and already earning its depth bonus.
     expect(root?.production?.depth).toBeGreaterThan(0);
-    expect(root?.production?.rate.toNumber()).toBeGreaterThan(0.3);
+    expect(root?.production?.rate.toNumber()).toBeGreaterThan(PART_BASE_RATE.rootSegment);
   });
 
   it('returns nothing for a node with no valid options', () => {
@@ -295,7 +305,7 @@ describe('light exposure in the part context', () => {
   it('quotes a leaf in full sun when nothing is known about its position', () => {
     const delta = partProductionDelta('leafCluster', new ModifierSet());
     expect(delta?.exposure).toBe(1);
-    expect(delta?.rate.toNumber()).toBeCloseTo(0.4, 9);
+    expect(delta?.rate.toNumber()).toBeCloseTo(PART_BASE_RATE.leafCluster, 9);
   });
 
   it('scales a shaded leaf by its exposure', () => {
@@ -304,7 +314,7 @@ describe('light exposure in the part context', () => {
       exposure: 0.6,
     });
     expect(delta?.exposure).toBe(0.6);
-    expect(delta?.rate.toNumber()).toBeCloseTo(0.4 * 0.6, 9);
+    expect(delta?.rate.toNumber()).toBeCloseTo(PART_BASE_RATE.leafCluster * 0.6, 9);
   });
 
   it('lets a blossom-boosted leaf go above full sun', () => {
@@ -312,7 +322,7 @@ describe('light exposure in the part context', () => {
       soil: BARREN_SOIL,
       exposure: 1.5,
     });
-    expect(delta?.rate.toNumber()).toBeCloseTo(0.6, 9);
+    expect(delta?.rate.toNumber()).toBeCloseTo(PART_BASE_RATE.leafCluster * 1.5, 9);
   });
 
   it('applies exposure before modifiers, not after', () => {
@@ -328,8 +338,8 @@ describe('light exposure in the part context', () => {
       soil: BARREN_SOIL,
       exposure: 0.5,
     });
-    // (0.4 × 0.5) + 1, not (0.4 + 1) × 0.5.
-    expect(delta?.rate.toNumber()).toBeCloseTo(1.2, 9);
+    // (rate × 0.5) + 1, not (rate + 1) × 0.5.
+    expect(delta?.rate.toNumber()).toBeCloseTo(PART_BASE_RATE.leafCluster * 0.5 + 1, 9);
   });
 
   it('leaves parts the sun does not reach without an exposure at all', () => {
@@ -337,7 +347,7 @@ describe('light exposure in the part context', () => {
     // A blossom is not marked `shaded`, and a root is underground.
     expect(partProductionDelta('blossom', new ModifierSet(), context)?.exposure).toBeNull();
     expect(partProductionDelta('blossom', new ModifierSet(), context)?.rate.toNumber()).toBeCloseTo(
-      0.15,
+      PART_BASE_RATE.blossom,
       9,
     );
     expect(partProductionDelta('rootSegment', new ModifierSet(), context)?.exposure).toBeNull();
@@ -348,6 +358,6 @@ describe('light exposure in the part context', () => {
       { id: 'leafCluster-9', type: 'leafCluster' },
       { soil: BARREN_SOIL, exposure: 0.25 },
     );
-    expect(Number(producer?.baseRate)).toBeCloseTo(0.1, 9);
+    expect(Number(producer?.baseRate)).toBeCloseTo(PART_BASE_RATE.leafCluster * 0.25, 9);
   });
 });

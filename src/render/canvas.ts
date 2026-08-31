@@ -298,7 +298,7 @@ export class Renderer {
     if (!this.menu || this.menu.items.length === 0) return null;
     const count = this.menu.items.length;
     const from = this.hoveredItem ?? (delta > 0 ? -1 : 0);
-    return this.highlightMenu(((from + delta) % count + count) % count);
+    return this.highlightMenu((((from + delta) % count) + count) % count);
   }
 
   /**

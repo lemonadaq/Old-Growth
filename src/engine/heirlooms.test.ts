@@ -90,10 +90,7 @@ describe('heirloomCost', () => {
 
   it('compounds with each level owned', () => {
     const def = HEIRLOOM_BY_ID.seedcase;
-    expect(heirloomCost(def, 2).toNumber()).toBeCloseTo(
-      def.baseCost * def.costGrowth ** 2,
-      6,
-    );
+    expect(heirloomCost(def, 2).toNumber()).toBeCloseTo(def.baseCost * def.costGrowth ** 2, 6);
   });
 
   it('stays flat for a one-level node', () => {
@@ -139,9 +136,7 @@ describe('heirloomModifiers', () => {
   });
 
   it('scales an additive effect linearly with its level', () => {
-    const combo = heirloomModifiers(owning({ metronome: 2 })).find(
-      (m) => m.target === 'combo.cap',
-    );
+    const combo = heirloomModifiers(owning({ metronome: 2 })).find((m) => m.target === 'combo.cap');
     expect(combo?.type).toBe('add');
     expect(Number(combo?.value)).toBeCloseTo(30, 6);
   });

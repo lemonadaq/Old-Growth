@@ -20,6 +20,7 @@ import { WEATHER_BY_ID } from '../content/weather';
 import type { SeasonEvent } from '../engine/seasons';
 import { enableTestProducers, disableTestProducers } from '../engine/debugProducers';
 import { focusOrTrunk, navigate, type NavDirection } from '../engine/treeNav';
+import { ACHIEVEMENT_BY_ID } from '../content/achievements';
 import { GROWTH_RULE_BY_TYPE } from '../content/growth';
 import { Renderer } from '../render/canvas';
 import { Announcer } from './Announcer';
@@ -559,7 +560,13 @@ export function App() {
       audio.play(result.crit ? 'crit' : 'click');
 
       if (at) {
-        renderer.effects.spawnHit(at.x, at.y, t('canvas.gain', { amount: formatNumber(result.gain) }), result.crit, now);
+        renderer.effects.spawnHit(
+          at.x,
+          at.y,
+          t('canvas.gain', { amount: formatNumber(result.gain) }),
+          result.crit,
+          now,
+        );
         if (result.dew) {
           renderer.effects.spawnHit(
             at.x,
@@ -1085,7 +1092,11 @@ export function App() {
       // Journal is scrolling it — taking either keystroke for the tree would
       // break the DOM controls to make the canvas work, which is not a trade
       // accessibility work is allowed to make.
-      if (typeof target?.closest === 'function' && target.closest('.panel, .dock, .hud, .grow-sheet')) return;
+      if (
+        typeof target?.closest === 'function' &&
+        target.closest('.panel, .dock, .hud, .grow-sheet')
+      )
+        return;
 
       const direction = ARROW_DIRECTION[event.key];
 
@@ -1213,6 +1224,27 @@ export function App() {
             glyph: '🌱',
             color: '#a8875e',
             key: now + 5,
+          });
+        }
+
+        // Badges (STEP 19). Drained rather than read off the snapshot for the
+        // same reason arrivals are: earning one is an event. Only the last of a
+        // batch is shown — three landing on the same tick is common (a prestige
+        // trips several at once) and three cards in a row is a queue the player
+        // has to wait out rather than a thing they did.
+        const badges = sim.drainAchievementEvents();
+        const badge = badges.length > 0 ? ACHIEVEMENT_BY_ID[badges[badges.length - 1]] : undefined;
+        if (badge) {
+          audio.play('graft');
+          setToast({
+            title: `${badge.glyph} ${badge.name}`,
+            body:
+              badges.length > 1
+                ? t('toast.achievementMany', { count: badges.length, name: badge.description })
+                : badge.description,
+            glyph: '🏅',
+            color: '#ffd27a',
+            key: now + 6,
           });
         }
 
@@ -1547,9 +1579,7 @@ export function App() {
         ? t('dock.vaultTitle', { key: 'V' })
         : t('dock.vaultTitleGrowing', {
             key: 'V',
-            percent: Math.round(
-              Math.min(maturity.heightFraction, maturity.lightFraction) * 100,
-            ),
+            percent: Math.round(Math.min(maturity.heightFraction, maturity.lightFraction) * 100),
           }),
       hotkey: 'V',
       active: openPanel === 'vault',

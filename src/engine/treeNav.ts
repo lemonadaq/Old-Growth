@@ -74,11 +74,7 @@ export function siblingsLeftToRight(graph: TreeGraph, node: TreeNode): TreeNode[
  * to enter the tree somewhere, and the trunk is the one part that always exists
  * and the one every other part hangs off.
  */
-export function navigate(
-  graph: TreeGraph,
-  from: string | null,
-  direction: NavDirection,
-): string {
+export function navigate(graph: TreeGraph, from: string | null, direction: NavDirection): string {
   if (from === null) return graph.rootId;
   const node = graph.node(from);
   if (!node) return graph.rootId;

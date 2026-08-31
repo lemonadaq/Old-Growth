@@ -443,7 +443,15 @@ function drawSongbird(
 
   ctx.fillStyle = PALETTE.songbirdBelly;
   ctx.beginPath();
-  ctx.ellipse(cx + glance * size * 0.1, cy + size * 0.2, size * 0.44, size * 0.3, 0, 0, Math.PI * 2);
+  ctx.ellipse(
+    cx + glance * size * 0.1,
+    cy + size * 0.2,
+    size * 0.44,
+    size * 0.3,
+    0,
+    0,
+    Math.PI * 2,
+  );
   ctx.fill();
 
   ctx.fillStyle = PALETTE.songbird;

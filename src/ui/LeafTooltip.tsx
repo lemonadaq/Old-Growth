@@ -90,14 +90,10 @@ export function LeafTooltip({ nodeId }: LeafTooltipProps) {
       </dl>
 
       {leaf.occluders > 0 && (
-        <p className="tooltip__hint">
-          {floored ? t('leaf.buried') : t('leaf.crowded')}
-        </p>
+        <p className="tooltip__hint">{floored ? t('leaf.buried') : t('leaf.crowded')}</p>
       )}
       {leaf.blossoms >= BLOSSOM_BOOST_MAX_STACKS && (
-        <p className="tooltip__hint">
-          {t('leaf.blossomCap', { count: BLOSSOM_BOOST_MAX_STACKS })}
-        </p>
+        <p className="tooltip__hint">{t('leaf.blossomCap', { count: BLOSSOM_BOOST_MAX_STACKS })}</p>
       )}
     </>
   );

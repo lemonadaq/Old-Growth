@@ -1,3 +1,4 @@
+import { EPSILON } from '../content/units';
 import Decimal from 'break_infinity.js';
 import { RING_PRODUCTION_BONUS, SEASON_LENGTH_SECONDS, SEASONS_PER_YEAR } from '../content/balance';
 import { DAY_LENGTH_SECONDS } from '../content/daylight';
@@ -64,7 +65,7 @@ export function absoluteSeasonIndex(
   elapsedSeconds: number,
   seasonLengthSeconds: number = SEASON_LENGTH_SECONDS,
 ): number {
-  const length = Math.max(1e-9, seasonLengthSeconds);
+  const length = Math.max(EPSILON, seasonLengthSeconds);
   return Math.floor(Math.max(0, elapsedSeconds) / length);
 }
 
@@ -80,7 +81,7 @@ export function seasonAt(
   elapsedSeconds: number,
   seasonLengthSeconds: number = SEASON_LENGTH_SECONDS,
 ): SeasonCycle {
-  const length = Math.max(1e-9, seasonLengthSeconds);
+  const length = Math.max(EPSILON, seasonLengthSeconds);
   const elapsed = Math.max(0, elapsedSeconds);
 
   const index = Math.floor(elapsed / length);

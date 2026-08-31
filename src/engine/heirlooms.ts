@@ -1,3 +1,4 @@
+import { MIN_SEASON_LENGTH_FACTOR } from '../content/balance';
 import Decimal from 'break_infinity.js';
 import type { TreeNodeType } from '../content/growth';
 import {
@@ -255,7 +256,7 @@ export function seasonLengthFactor(ledger: HeirloomLevels): number {
     }
   }
 
-  return Math.max(0.1, 1 - fraction);
+  return Math.max(MIN_SEASON_LENGTH_FACTOR, 1 - fraction);
 }
 
 /** Hours of absence the tree will pay for, base plus whatever Tempo added. */

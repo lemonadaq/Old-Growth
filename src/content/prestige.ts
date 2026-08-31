@@ -15,80 +15,44 @@ import type { ResourceId } from './resources';
  * `./totems.ts` do.
  */
 
-/* ---------------------------------------------------------------- maturity */
+/* ------------------------------------------------- the numbers, from balance */
 
 /**
- * Lifetime Light one Seed is measured against: `Seeds = ⌊√(light / this)⌋`.
+ * Everything above the Vault is a number a balance pass moves, so every one of
+ * them lives in `./balance` and is re-exported here:
  *
- * Straight from the design line. It is a *square root*, so the second Seed costs
- * four times the first and the tenth a hundred times — which is what stops a
- * player from prestiging on a whim and what makes each run want to be longer
- * than the last.
+ * - `SEED_LIGHT_DIVISOR` — lifetime Light one Seed is measured against:
+ *   `Seeds = ⌊√(light / this)⌋`. A *square root*, so the second Seed costs four
+ *   times the first and the tenth a hundred times, which is what stops a player
+ *   prestiging on a whim and what makes each run want to be longer than the last.
+ * - `PRESTIGE_LIGHT_REQUIREMENT` — the Light gate, deliberately *equal* to the
+ *   divisor rather than a number of its own: it is the point at which the yield
+ *   formula first pays out a whole Seed, so the gate and the reward cannot drift
+ *   apart. A prestige that reset the run and handed back nothing would be a trap,
+ *   and that equality is the one line guaranteeing it can never happen.
+ * - `PRESTIGE_HEIGHT_UNITS` — how tall the tree must stand, measured to the
+ *   highest point of the canopy (see `treeHeight`), because height is the one
+ *   thing about a tree you can judge from across a field.
+ * - `SEED_FRAGMENTS_PER_SEED` — how many of the songbird's fragments make a Seed.
+ * - `CEREMONY_SECONDS` — how long "Go to Seed" runs before the reset lands.
+ * - `FOREST_PRODUCTION_BONUS` — what one tree on the hills adds to all production.
+ * - `FOREST_RENDER_LIMIT` — most silhouettes drawn at once. Past this the forest
+ *   is a *counter*: the thirty-first tree is a pixel nobody can pick out, and the
+ *   bonus it grants is already legible in the badge.
+ * - `BASE_OFFLINE_CAP_HOURS` — hours of absence the tree pays for before the
+ *   calculator stops counting. Stated so Tempo's "+4h offline cap" has a base to
+ *   add to; `src/engine/offline.ts` owns what the cap *does*.
  */
-export const SEED_LIGHT_DIVISOR = 1e6;
-
-/** Seed Fragments the songbird has to drop before they are worth one Seed. */
-export const SEED_FRAGMENTS_PER_SEED = 100;
-
-/**
- * How tall the tree must stand before it can seed, in canonical units.
- *
- * A bare trunk is 0.6, so this is nearly twice the sapling the run starts as:
- * enough deliberate upward building that "maturity" is something the player made
- * rather than something that happened. It is measured to the highest point of
- * the canopy — see `treeHeight` — because height is the one thing about a tree
- * you can judge from across a field.
- *
- * **The canopy has a ceiling, and this has to sit under it.** `depthFalloff`
- * shrinks every generation of wood, so each branch added above the last buys
- * less height than the one before: a tree grown as greedily upward as the rules
- * allow tops out around 1.32, and one grown as a normal round canopy lands well
- * short of that. A gate at the ceiling would be a gate nobody could pass. This
- * is roughly a dozen well-placed parts, with real headroom above it.
- */
-export const PRESTIGE_HEIGHT_UNITS = 1.15;
-
-/**
- * Lifetime Light the tree must have gathered before it can seed.
- *
- * Deliberately *equal* to {@link SEED_LIGHT_DIVISOR} rather than a number of its
- * own: it is the point at which the yield formula first pays out a whole Seed,
- * so the gate and the reward cannot drift apart. A prestige that reset the run
- * and handed back nothing would be a trap, and this is the one line that
- * guarantees it can never happen.
- */
-export const PRESTIGE_LIGHT_REQUIREMENT = SEED_LIGHT_DIVISOR;
-
-/** How long the "Go to Seed" ceremony runs before the reset lands. */
-export const CEREMONY_SECONDS = 6;
-
-/* ------------------------------------------------------------------ forest */
-
-/** What one tree standing in the Old Growth forest adds to all production. */
-export const FOREST_PRODUCTION_BONUS = 0.01;
-
-/**
- * Most silhouettes drawn on the hills at once.
- *
- * Past this the forest is a *counter* rather than more marks on the ridge: the
- * thirty-first tree is a pixel nobody can pick out, and the bonus it grants is
- * already legible in the badge. The trees drawn are the most recent thirty, each
- * standing in the spot its own planting index gave it, so the newest tree is
- * always visible and no existing one ever moves.
- */
-export const FOREST_RENDER_LIMIT = 30;
-
-/* ---------------------------------------------------------------- offline */
-
-/**
- * Hours of absence the tree pays for before STEP 14's calculator stops counting.
- *
- * Stated here, unused by anything but the Tempo heirloom and the Vault's own
- * readout, because Tempo's second node is "+4h offline cap" and a bonus with no
- * base to add to would be a number the player cannot check. STEP 14 owns what
- * the cap *does*; this owns what it is.
- */
-export const BASE_OFFLINE_CAP_HOURS = 8;
+export {
+  BASE_OFFLINE_CAP_HOURS,
+  CEREMONY_SECONDS,
+  FOREST_PRODUCTION_BONUS,
+  FOREST_RENDER_LIMIT,
+  PRESTIGE_HEIGHT_UNITS,
+  PRESTIGE_LIGHT_REQUIREMENT,
+  SEED_FRAGMENTS_PER_SEED,
+  SEED_LIGHT_DIVISOR,
+} from './balance';
 
 /* --------------------------------------------------------------- heirlooms */
 

@@ -1,4 +1,12 @@
 import {
+  CANOPY_MIN_ELEVATION_DEGREES,
+  DEFAULT_TREE_SEED,
+  FAN_INNER,
+  FAN_RAMP,
+  ROOT_MIN_DEPRESSION_DEGREES,
+} from '../content/balance';
+import { RADIANS_PER_DEGREE } from '../content/units';
+import {
   ATTACH_SPREAD_MIN,
   GROWTH_RULE_BY_TYPE,
   type GrowthRule,
@@ -27,8 +35,6 @@ import type { TreeSegment } from './tree';
  * preview honest.
  */
 
-const DEG = Math.PI / 180;
-
 /** Canonical heading of the trunk: straight up. */
 export const TRUNK_DIRECTION = Math.PI / 2;
 
@@ -43,14 +49,17 @@ export const ROOT_DIRECTION = -Math.PI / 2;
  */
 export const DEFAULT_SPECIES_ID = STARTER_SPECIES_ID;
 
-/** Seed behind the deterministic angle wobble. */
-export const DEFAULT_TREE_SEED = 20260806;
+/** Seed behind the deterministic angle wobble; tuned in `balance.ts`. */
+export { DEFAULT_TREE_SEED };
 
 /** Canopy limbs are never allowed to point below this angle above horizontal. */
-const CANOPY_MIN_ELEVATION = 8 * DEG;
+const CANOPY_MIN_ELEVATION = CANOPY_MIN_ELEVATION_DEGREES * RADIANS_PER_DEGREE;
 
 /** Roots are never allowed to point above this angle below horizontal. */
-const ROOT_MIN_DEPRESSION = 8 * DEG;
+const ROOT_MIN_DEPRESSION = ROOT_MIN_DEPRESSION_DEGREES * RADIANS_PER_DEGREE;
+
+/** Midpoint of `[0, 1)`, so a jitter roll comes out symmetric about zero. */
+const HALF = 0.5;
 
 /** One node of the tree. Plain data — safe to serialise as-is. */
 export interface TreeNode {
@@ -145,7 +154,7 @@ function jitterFor(
   degrees: number,
 ): number {
   const random = createSeededRandom(hashString(`${seed}:${parentId}:${type}:${slot}`));
-  return (random() - 0.5) * 2 * degrees * DEG;
+  return (random() - HALF) * 2 * degrees * RADIANS_PER_DEGREE;
 }
 
 /**
@@ -160,7 +169,7 @@ export function fanOffset(slot: number, maxChildren: number, spreadRad: number):
   const side = slot % 2 === 0 ? 1 : -1;
   const rank = Math.floor(slot / 2);
   const ranks = Math.max(1, Math.ceil(maxChildren / 2) - 1);
-  return side * spreadRad * (0.45 + 0.55 * Math.min(1, rank / ranks));
+  return side * spreadRad * (FAN_INNER + FAN_RAMP * Math.min(1, rank / ranks));
 }
 
 /**
@@ -439,8 +448,11 @@ export class TreeGraph {
    * Every part that could be grown on `nodeId` right now, with the geometry it
    * would have. Empty when the node is terminal or already full.
    *
-   * All options share the same slot — whichever is bought takes it — so the
-   * ghost preview of each shows exactly where that part would land.
+   * Options normally all share one slot — whichever is bought takes it — so the
+   * ghost preview of each shows exactly where that part would land. The trunk is
+   * the exception: it reserves slots per domain (see
+   * `GrowthRule.maxChildrenByDomain`), so a branch and a root offered at the
+   * same moment are offered *different* slots, one in each fan.
    */
   getValidGrowthOptions(nodeId: string): GrowthOption[] {
     const parent = this.nodes.get(nodeId);
@@ -449,11 +461,29 @@ export class TreeGraph {
     const parentRule = GROWTH_RULE_BY_TYPE[parent.type];
     if (parent.childIds.length >= parentRule.maxChildren) return [];
 
-    const used = new Set(this.children(nodeId).map((child) => child.slot));
-    const slot = nextFreeSlot(used, parentRule.maxChildren);
-    if (slot >= parentRule.maxChildren) return [];
+    const children = this.children(nodeId);
+    const perDomain = parentRule.maxChildrenByDomain;
+    const options: GrowthOption[] = [];
 
-    return parentRule.allowedChildren.map((type) => this.optionFor(parent, parentRule, type, slot));
+    for (const type of parentRule.allowedChildren) {
+      const domain = GROWTH_RULE_BY_TYPE[type].domain;
+      // Without a reservation every child competes for one shared fan; with one,
+      // each domain counts its own slots so the two fans stay the shape they
+      // would have been if the other half of the tree did not exist.
+      const cap = perDomain?.[domain] ?? parentRule.maxChildren;
+      const used = new Set(
+        (perDomain
+          ? children.filter((child) => GROWTH_RULE_BY_TYPE[child.type].domain === domain)
+          : children
+        ).map((child) => child.slot),
+      );
+
+      const slot = nextFreeSlot(used, cap);
+      if (slot >= cap) continue;
+      options.push(this.optionFor(parent, parentRule, type, slot, cap));
+    }
+
+    return options;
   }
 
   private optionFor(
@@ -461,6 +491,7 @@ export class TreeGraph {
     parentRule: GrowthRule,
     type: TreeNodeType,
     slot: number,
+    fanSlots: number = parentRule.maxChildren,
   ): GrowthOption {
     const childRule = GROWTH_RULE_BY_TYPE[type];
     const parentDirection = this.placements().get(parent.id)?.direction ?? parent.angle;
@@ -473,7 +504,7 @@ export class TreeGraph {
         : parentDirection;
 
     const offset =
-      fanOffset(slot, parentRule.maxChildren, childRule.spreadDegrees * DEG) +
+      fanOffset(slot, fanSlots, childRule.spreadDegrees * RADIANS_PER_DEGREE) +
       jitterFor(this.seed, parent.id, type, slot, childRule.jitterDegrees);
 
     const absolute = clampDirection(reference + offset, childRule);

@@ -55,10 +55,7 @@ export function pulseAlpha(now: number, armed: boolean): number {
 }
 
 /** The screen points of a marked subtree — where the debris falls from. */
-export function markedPoints(
-  segments: readonly ScreenSegment[],
-  ids: ReadonlySet<string>,
-): Vec2[] {
+export function markedPoints(segments: readonly ScreenSegment[], ids: ReadonlySet<string>): Vec2[] {
   return segments.filter((segment) => ids.has(segment.id)).map((segment) => segment.b);
 }
 
@@ -87,7 +84,13 @@ export function drawPruneMark(
     if (segment.kind === 'leafCluster' || segment.kind === 'blossom') {
       ctx.fillStyle = PALETTE.pruneMark;
       ctx.beginPath();
-      ctx.arc(segment.b.x, segment.b.y, Math.max(5, segment.width * FOLIAGE_MARK_SCALE), 0, Math.PI * 2);
+      ctx.arc(
+        segment.b.x,
+        segment.b.y,
+        Math.max(5, segment.width * FOLIAGE_MARK_SCALE),
+        0,
+        Math.PI * 2,
+      );
       ctx.fill();
       continue;
     }

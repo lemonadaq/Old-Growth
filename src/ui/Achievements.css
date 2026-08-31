@@ -1,0 +1,45 @@
+/*
+ * STEP 19's achievement page. It borrows the Journal's card grid on purpose —
+ * a badge and a species are the same kind of thing to read, and giving them two
+ * layouts would be two things to learn.
+ */
+.badges__lede {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--hud-muted);
+}
+
+.badge {
+  /* Unearned cards are dimmed rather than hidden: a list that will not say what
+     it wants is a list you cannot play toward. */
+  opacity: 0.62;
+}
+
+.badge--earned {
+  opacity: 1;
+  border-left-color: var(--hud-accent);
+}
+
+.badge__bonus {
+  margin-left: auto;
+  padding: 1px 5px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--hud-accent);
+  border: 1px solid currentColor;
+  border-radius: 999px;
+}
+
+.badge__progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--hud-muted);
+}
+
+.badge__progress .journal__bar {
+  flex: 1;
+}

@@ -1,0 +1,26 @@
+{
+  "src/engine/format.ts": {
+    "1e15": "Where scientific notation takes over — a property of the suffix table's length, not a knob.",
+    "10": "Base of the logarithm the tier and the mantissa are derived from.",
+    "3": "Digits per suffix tier — how many powers of ten K, M, B and T are apart."
+  },
+  "src/engine/litter.ts": {
+    "10": "parseInt radix."
+  },
+  "src/engine/migrations.ts": {
+    "10": "parseInt radix, twice, parsing a semver part."
+  },
+  "src/engine/rng.ts": {
+    "0x6d2b79f5": "mulberry32. Changing any constant here changes the algorithm, not the balance.",
+    "15": "As above.",
+    "7": "As above.",
+    "61": "As above.",
+    "14": "As above.",
+    "4294967296": "2^32 — the divisor that maps a uint32 into [0, 1)."
+  },
+  "src/engine/treeGraph.ts": {
+    "0.5": "Midpoint of [0, 1), so a symmetric jitter roll comes out centred on zero.",
+    "0x811c9dc5": "FNV-1a offset basis. Changing it changes the hash, not the balance.",
+    "0x01000193": "FNV-1a prime, as above."
+  }
+}

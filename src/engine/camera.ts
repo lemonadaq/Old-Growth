@@ -1,3 +1,11 @@
+import {
+  BEDROCK_Y,
+  CLOUD_LEVEL_Y,
+  HORIZONTAL_SPAN,
+  MAX_ZOOM,
+  MIN_ZOOM,
+  ZOOM_STEP,
+} from '../content/balance';
 import type { TreeLayout } from './tree';
 
 /**
@@ -14,21 +22,14 @@ import type { TreeLayout } from './tree';
  * devicePixelRatio.
  */
 
-/** Zoom limits. 1 fits the tree; below 1 pulls back, above 1 leans in. */
-export const MIN_ZOOM = 0.5;
-export const MAX_ZOOM = 2;
-
-/** Highest the view may rise, in canonical units above the ground line. */
-export const CLOUD_LEVEL_Y = 2.4;
-
-/** Deepest the view may sink. Roots bottom out well above this. */
-export const BEDROCK_Y = -2.4;
-
-/** How far either side of the trunk the view may wander. */
-export const HORIZONTAL_SPAN = 2;
-
-/** One notch of keyboard or button zoom. */
-export const ZOOM_STEP = 1.2;
+/**
+ * The frame the camera works inside, all of it tuned in `balance.ts`:
+ * `MIN_ZOOM`/`MAX_ZOOM` (1 fits the tree; below pulls back, above leans in),
+ * `CLOUD_LEVEL_Y` and `BEDROCK_Y` (the highest and deepest the view may go),
+ * `HORIZONTAL_SPAN` (how far either side of the trunk it may wander), and
+ * `ZOOM_STEP` (one notch of keyboard or button zoom).
+ */
+export { BEDROCK_Y, CLOUD_LEVEL_Y, HORIZONTAL_SPAN, MAX_ZOOM, MIN_ZOOM, ZOOM_STEP };
 
 /** The visible region of the canvas, in CSS pixels. */
 export interface Viewport {

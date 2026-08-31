@@ -13,34 +13,27 @@
  */
 
 /**
- * Time away below which nothing happens at all.
+ * The three tunables, all of them in `./balance`:
  *
- * A tab reload, a laptop lid closed for a moment, a crash and a restart: the
- * player did not "go away", and a modal celebrating four seconds of Water would
- * be noise the first time and an annoyance every time after.
+ * - `OFFLINE_MIN_SECONDS` — time away below which nothing happens at all. A tab
+ *   reload, a lid closed for a moment, a crash and a restart: the player did not
+ *   "go away", and a modal celebrating four seconds of Water would be noise the
+ *   first time and an annoyance every time after.
+ * - `OFFLINE_CHUNK_SECONDS` — length of one catch-up chunk. Coarse on purpose:
+ *   the simulation is correct at any step size, so the only thing a finer chunk
+ *   buys is arithmetic and the only thing it costs is a load that hangs. Twelve
+ *   hours is 720 chunks, which is instant; the same span at the live 100 ms step
+ *   would be 432,000.
+ * - `CANOPY_OFFLINE_RATE` — share of its usual rate the canopy earns while the
+ *   player is away. Not zero, or every player is pushed toward roots and away
+ *   from half the game; not one either, or being *there* is worth nothing.
  */
-export const OFFLINE_MIN_SECONDS = 60;
-
-/**
- * Length of one catch-up chunk, in seconds.
- *
- * Coarse on purpose. The simulation is correct at any step size — every system
- * it advances is written against elapsed seconds rather than tick counts — so
- * the only thing a finer chunk buys is arithmetic, and the only thing it costs
- * is a load that hangs. Twelve hours is 720 chunks, which is instant; the same
- * span at the live 100 ms step would be 432,000.
- */
-export const OFFLINE_CHUNK_SECONDS = 60;
-
-/**
- * Share of its usual rate the canopy earns while the player is away.
- *
- * Not zero: leaves do not stop working because a tab closed, and a canopy that
- * paid nothing offline would push every player toward roots and away from half
- * the game. Not one either — being *there* has to be worth more than not being
- * there, or active play has nothing to offer.
- */
-export const CANOPY_OFFLINE_RATE = 0.25;
+export {
+  CANOPY_OFFLINE_RATE,
+  COLLECT_COUNT_UP_MS,
+  OFFLINE_CHUNK_SECONDS,
+  OFFLINE_MIN_SECONDS,
+} from './balance';
 
 /**
  * The producer tag the offline penalty is applied to.
@@ -52,10 +45,9 @@ export const CANOPY_OFFLINE_RATE = 0.25;
  */
 export const CANOPY_TAG = 'canopy';
 
-/**
- * How long the Collect button's count-up runs, in milliseconds.
- *
- * The one number here the player actually feels. Long enough that a big haul
- * *arrives* rather than appearing, short enough that nobody waits for it twice.
+/*
+ * `COLLECT_COUNT_UP_MS` (re-exported above) is how long the Collect button's
+ * count-up runs — the one number here the player actually feels. Long enough
+ * that a big haul *arrives* rather than appearing, short enough that nobody
+ * waits for it twice.
  */
-export const COLLECT_COUNT_UP_MS = 1500;

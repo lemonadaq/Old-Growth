@@ -1,4 +1,11 @@
+import { EPSILON } from '../content/units';
 import Decimal from 'break_infinity.js';
+
+/** How many powers of ten one suffix tier spans. */
+const DIGITS_PER_TIER = 3;
+
+/** The magnitude one tier is worth: 1e3, so K is 1e3 and T is 1e12. */
+const TIER_STEP = 10 ** DIGITS_PER_TIER;
 
 /** Suffixes for the K/M/B/T tiers (1e3, 1e6, 1e9, 1e12). */
 const SUFFIXES = ['', 'K', 'M', 'B', 'T'] as const;
@@ -24,18 +31,18 @@ export function formatNumber(value: Decimal): string {
   if (value.lt(0)) {
     return `-${formatNumber(value.neg())}`;
   }
-  if (value.lt(1000)) {
+  if (value.lt(TIER_STEP)) {
     return trim(value.toNumber());
   }
 
   if (value.gte(SCIENTIFIC_THRESHOLD)) {
-    const exponent = Math.floor(value.log10() + 1e-9);
+    const exponent = Math.floor(value.log10() + EPSILON);
     const mantissa = value.div(Decimal.pow(10, exponent)).toNumber();
     return `${trim(mantissa)}e${exponent}`;
   }
 
   // K/M/B/T tiers: tier 1..4 for 1e3..1e12.
-  const tier = Math.floor(Math.floor(value.log10() + 1e-9) / 3);
-  const scaled = value.div(Decimal.pow(1000, tier)).toNumber();
+  const tier = Math.floor(Math.floor(value.log10() + EPSILON) / DIGITS_PER_TIER);
+  const scaled = value.div(Decimal.pow(TIER_STEP, tier)).toNumber();
   return `${trim(scaled)}${SUFFIXES[tier]}`;
 }

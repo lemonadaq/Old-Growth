@@ -25,17 +25,20 @@
  * hitting a cliff.
  */
 
-/** Clicks within this many ms of the previous one lose no combo. */
-export const COMBO_WINDOW_MS = 1500;
+import {
+  COMBO_BONUS_AT_FULL,
+  COMBO_DECAY_MS,
+  COMBO_FULL_STACKS,
+  COMBO_WINDOW_MS,
+} from '../content/balance';
 
-/** The meter is fully empty this many ms after the last click. */
-export const COMBO_DECAY_MS = 3000;
-
-/** Stack count at which the combo bonus reaches {@link COMBO_BONUS_AT_FULL}. */
-export const COMBO_FULL_STACKS = 50;
-
-/** Bonus click power granted at {@link COMBO_FULL_STACKS} stacks (1 = +100%). */
-export const COMBO_BONUS_AT_FULL = 1;
+/**
+ * The meter's four numbers, tuned in `balance.ts`:
+ * `COMBO_WINDOW_MS` (clicks inside it lose nothing), `COMBO_DECAY_MS` (fully
+ * empty this long after the last click), `COMBO_FULL_STACKS` and
+ * `COMBO_BONUS_AT_FULL` (the bonus reached there; 1 = +100%).
+ */
+export { COMBO_BONUS_AT_FULL, COMBO_DECAY_MS, COMBO_FULL_STACKS, COMBO_WINDOW_MS };
 
 /** Bonus click power per stack. Stacks above the base cap keep paying out. */
 export const COMBO_BONUS_PER_STACK = COMBO_BONUS_AT_FULL / COMBO_FULL_STACKS;

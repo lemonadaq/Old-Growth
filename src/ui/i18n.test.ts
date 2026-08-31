@@ -38,9 +38,7 @@ describe('interpolate', () => {
   });
 
   it('fills every occurrence and every name', () => {
-    expect(interpolate('{a} and {b} and {a}', { a: 'one', b: 'two' })).toBe(
-      'one and two and one',
-    );
+    expect(interpolate('{a} and {b} and {a}', { a: 'one', b: 'two' })).toBe('one and two and one');
   });
 
   it('takes numbers as readily as strings', () => {
@@ -128,7 +126,12 @@ describe('the table matches the code that uses it', () => {
   }
 
   /** Prefixes whose keys are chosen at runtime, and so cannot be scanned for. */
-  const DYNAMIC = ['hydration.parched', 'hydration.thirsty', 'hydration.steady', 'hydration.overcharged'];
+  const DYNAMIC = [
+    'hydration.parched',
+    'hydration.thirsty',
+    'hydration.steady',
+    'hydration.overcharged',
+  ];
 
   it('defines every key the code asks for', () => {
     const missing = [...USED].filter((key) => lookup(key) === undefined);

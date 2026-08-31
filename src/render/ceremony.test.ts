@@ -50,9 +50,7 @@ describe('ceremonySeeds', () => {
 
   it('fades them out as they climb away', () => {
     const leaves = canopy(4);
-    expect(ceremonySeeds(leaves, 1)[0].alpha).toBeLessThan(
-      ceremonySeeds(leaves, 0.5)[0].alpha,
-    );
+    expect(ceremonySeeds(leaves, 1)[0].alpha).toBeLessThan(ceremonySeeds(leaves, 0.5)[0].alpha);
   });
 
   it('keeps every value drawable', () => {

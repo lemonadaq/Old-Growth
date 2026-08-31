@@ -1,5 +1,6 @@
 import type Decimal from 'break_infinity.js';
 import {
+  MAX_WEATHER_STEPS,
   STORM_BRACE_TAPS,
   STORM_MAX_SNAPS,
   STORM_SNAP_CHANCE,
@@ -8,6 +9,7 @@ import {
   WEATHER_MIN_GAP_SECONDS,
   WEATHER_TELEGRAPH_SECONDS,
 } from '../content/balance';
+import { RADIANS_PER_DEGREE } from '../content/units';
 import { WEATHERS, WEATHER_BY_ID, type WeatherDef, type WeatherId } from '../content/weather';
 import type { Modifier } from './modifiers';
 import type { RandomSource } from './rng';
@@ -48,7 +50,7 @@ export const WEATHER_SOURCE = 'weather';
  * "replay the schedule, up to a sane limit" rather than a loop whose length is
  * decided by how long the player was away.
  */
-export const MAX_WEATHER_STEPS = 64;
+export { MAX_WEATHER_STEPS };
 
 /** A weather event that is currently running. */
 export interface ActiveWeather {
@@ -255,8 +257,6 @@ export class WeatherScheduler {
 
 /* ------------------------------------------------------------------- storms */
 
-const DEG = Math.PI / 180;
-
 /** How far a heading leans off vertical, in radians. */
 export function limbDeviation(direction: number): number {
   return Math.abs(Math.PI / 2 - direction);
@@ -272,7 +272,7 @@ export function limbDeviation(direction: number): number {
  */
 export function isWideLimb(node: Pick<TreeNode, 'type'>, placement: NodePlacement): boolean {
   if (node.type !== 'branch') return false;
-  return limbDeviation(placement.direction) > STORM_WIDE_DEGREES * DEG;
+  return limbDeviation(placement.direction) > STORM_WIDE_DEGREES * RADIANS_PER_DEGREE;
 }
 
 /** Every limb on the tree the wind is currently able to lever, in graph order. */

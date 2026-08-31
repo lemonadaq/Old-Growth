@@ -204,6 +204,36 @@ export interface GameState {
   features: Set<FeatureId>;
   /** Gates that opened since the UI last looked, in the order they opened. */
   featureEvents: FeatureId[];
+  /**
+   * Achievements already earned, by id.
+   *
+   * A **latch**, like `features`, and for a stronger reason: half the table
+   * measures something that is true for a moment ("150 parts at once") and false
+   * again after the next cut. A Journal card that emptied itself when a player
+   * pruned would read as the game taking something back.
+   *
+   * Carried across prestige — an achievement is a record of what the *player*
+   * did, not of what this tree is — which is also why the ten that pay a bonus
+   * are republished rather than re-granted on the way into a new run.
+   */
+  achievements: Set<string>;
+  /** Achievements earned since the UI last looked, in the order they landed. */
+  achievementEvents: string[];
+  /**
+   * Storms taken to a full brace, lifetime.
+   *
+   * Counted at the moment the storm blows out rather than at the twentieth tap,
+   * because a brace that was abandoned at nineteen is not a storm held through.
+   */
+  stormsBraced: number;
+  /**
+   * Seconds the offline calculator has actually paid out for, cumulatively.
+   *
+   * The forfeited half of a capped absence is not counted: the claim behind the
+   * "slept on it" achievement is that the tree worked for eight hours, and hours
+   * past the cap are hours it did not.
+   */
+  offlineSeconds: number;
   /** What the player has chosen about how the game behaves. */
   settings: GameSettings;
 }
@@ -488,6 +518,10 @@ export interface GameSnapshot {
   readonly clicks: number;
   /** Lifetime count of limbs cut. */
   readonly prunes: number;
+  /** Every achievement in table order, earned or not, with its progress. */
+  readonly achievements: readonly AchievementSnapshot[];
+  /** The numbers the Stats panel reports. */
+  readonly stats: StatsSnapshot;
   /**
    * Structural revision of the tree graph. Consumers that cache derived tree
    * geometry (the renderer projects it only on change) compare this instead of
@@ -498,6 +532,49 @@ export interface GameSnapshot {
   readonly treeSize: number;
   readonly tick: number;
   readonly elapsedSeconds: number;
+}
+
+/** One achievement, as the Journal draws it. */
+export interface AchievementSnapshot {
+  readonly id: string;
+  readonly earned: boolean;
+  /** Progress toward it in `[0, 1]`, and the pair of numbers behind that. */
+  readonly fraction: number;
+  readonly have: number;
+  readonly need: number;
+}
+
+/**
+ * The Stats panel's whole reading.
+ *
+ * Deliberately a flat record of counters rather than a view over the state: the
+ * panel is a *record of the save*, and half of what it reports (Seeds ever
+ * earned, trees given up, badges) survives a prestige that throws the rest away.
+ */
+export interface StatsSnapshot {
+  /** Lifetime gross of every resource, ever earned this run. */
+  readonly lifetime: Readonly<Resources>;
+  readonly clicks: number;
+  readonly prunes: number;
+  readonly grafts: number;
+  /** Parts standing right now, trunk excluded. */
+  readonly parts: number;
+  readonly discoveries: number;
+  readonly rings: number;
+  /** Trees standing in the Old Growth forest — runs completed. */
+  readonly trees: number;
+  readonly symbionts: number;
+  readonly totems: number;
+  readonly heirloomLevels: number;
+  readonly stormsBraced: number;
+  /** Seconds actually spent playing, absences excluded. */
+  readonly playtimeSeconds: number;
+  /** Seconds the offline calculator has paid out for. */
+  readonly offlineSeconds: number;
+  readonly achievementsEarned: number;
+  readonly achievementsTotal: number;
+  /** What the earned badges multiply every rate by. */
+  readonly achievementMultiplier: number;
 }
 
 /** Debug counters sampled by the loop once per second. */
@@ -561,6 +638,10 @@ export function createInitialState(now: number = Date.now()): GameState {
     playtimeSeconds: 0,
     features: new Set(),
     featureEvents: [],
+    achievements: new Set(),
+    achievementEvents: [],
+    stormsBraced: 0,
+    offlineSeconds: 0,
     settings: DEFAULT_SETTINGS,
   };
 }

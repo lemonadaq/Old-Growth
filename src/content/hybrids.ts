@@ -1,4 +1,3 @@
-import type { ResourceId } from './resources';
 import type { SpeciesPalette, SpeciesTrait } from './species';
 
 /**
@@ -18,17 +17,12 @@ import type { SpeciesPalette, SpeciesTrait } from './species';
  * Layer note: content stays free of engine imports.
  */
 
-/** What a graft costs before the per-graft escalation. */
-export const GRAFT_BASE_COST: readonly {
-  readonly resource: ResourceId;
-  readonly amount: number;
-}[] = [
-  { resource: 'sap', amount: 250 },
-  { resource: 'water', amount: 60 },
-];
-
-/** Each graft multiplies the price of the next by this. */
-export const GRAFT_COST_GROWTH = 1.6;
+/**
+ * What a graft costs, and how fast the next one escalates. Both live in
+ * `./balance` with the rest of the tuning; re-exported here so the hybrid table
+ * still reads as one page.
+ */
+export { GRAFT_BASE_COST, GRAFT_COST_GROWTH } from './balance';
 
 /**
  * Children a branch must already carry to count as mature enough to graft.

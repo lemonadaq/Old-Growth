@@ -1,3 +1,4 @@
+import { ATTACH_SPREAD_MIN, PART_BASE_COST, PART_BASE_RATE, PART_COST_GROWTH } from './balance';
 import type { ResourceId } from './resources';
 import { stratumResourceTag, stratumTag, type StratumId } from './soil';
 import { speciesResourceTag, speciesTag, STARTER_SPECIES_ID } from './species';
@@ -61,6 +62,21 @@ export interface GrowthRule {
   readonly allowedChildren: readonly TreeNodeType[];
   /** Hard cap on direct children. */
   readonly maxChildren: number;
+  /**
+   * Per-domain caps inside {@link maxChildren}, when the two halves of the tree
+   * must not compete for the same slots.
+   *
+   * Only the trunk needs this, and it needs it badly. The trunk is the one part
+   * both a branch and a root can hang off, and the ground opens *after* the
+   * first branches are bought — so with one shared cap a player who spends
+   * their opening minutes growing canopy arrives at the roots milestone with a
+   * full trunk and no way to ever grow a root. The balance simulation walked
+   * straight into that: every bot reached the roots gate with five branches on
+   * the trunk and dug nothing for the rest of the run.
+   *
+   * A missing entry means the domain may use any free slot.
+   */
+  readonly maxChildrenByDomain?: Partial<Record<TreeDomain, number>>;
   /** Half-angle (degrees) a child may deviate from its reference direction. */
   readonly spreadDegrees: number;
   /** Deterministic per-child wobble (degrees) so no two forks look alike. */
@@ -81,22 +97,19 @@ export interface GrowthRule {
 }
 
 /**
- * Every part costs `baseCost × 1.15^(parts of that type already owned)`, so the
- * hundredth leaf is a real decision and the first is nearly free.
+ * Every part costs `baseCost × PART_COST_GROWTH^(parts of that type already
+ * owned)`, so the hundredth leaf is a real decision and the first is nearly
+ * free. Both the curve and the base prices live in `./balance`.
  */
-export const PART_COST_GROWTH = 1.15;
-
-/**
- * Fraction of the parent's length below which spread children never attach —
- * limbs sprout from the upper half, not out of the base.
- */
-export const ATTACH_SPREAD_MIN = 0.45;
+export { ATTACH_SPREAD_MIN, PART_COST_GROWTH };
 
 /**
  * The part catalogue.
  *
- * Costs and rates here are first-pass values chosen so the STEP 6 loop reads
- * clearly (a handful of taps buys the first branch); STEP 19 owns real balance.
+ * Shapes — lengths, thicknesses, spreads, what may grow on what — are *this*
+ * file's business, because they are what a part is. Prices and production rates
+ * are not: they come from `./balance`, so a balance pass never has to read a
+ * table of geometry to find a number it wants to move.
  */
 export const GROWTH_RULES: readonly GrowthRule[] = [
   {
@@ -106,7 +119,8 @@ export const GROWTH_RULES: readonly GrowthRule[] = [
     domain: 'canopy',
     description: 'The heart of the tree. Tap it for Sap; grow limbs and roots from it.',
     allowedChildren: ['branch', 'rootSegment'],
-    maxChildren: 5,
+    maxChildren: 9,
+    maxChildrenByDomain: { canopy: 5, root: 4 },
     spreadDegrees: 70,
     jitterDegrees: 9,
     childAttach: 'spread',
@@ -114,7 +128,7 @@ export const GROWTH_RULES: readonly GrowthRule[] = [
     baseThickness: 0.046,
     depthFalloff: 1,
     costResource: 'sap',
-    baseCost: 0,
+    baseCost: PART_BASE_COST.trunk,
   },
   {
     type: 'branch',
@@ -131,7 +145,7 @@ export const GROWTH_RULES: readonly GrowthRule[] = [
     baseThickness: 0.023,
     depthFalloff: 0.86,
     costResource: 'sap',
-    baseCost: 15,
+    baseCost: PART_BASE_COST.branch,
   },
   {
     type: 'twig',
@@ -148,7 +162,7 @@ export const GROWTH_RULES: readonly GrowthRule[] = [
     baseThickness: 0.012,
     depthFalloff: 0.9,
     costResource: 'sap',
-    baseCost: 8,
+    baseCost: PART_BASE_COST.twig,
   },
   {
     type: 'leafCluster',
@@ -165,8 +179,8 @@ export const GROWTH_RULES: readonly GrowthRule[] = [
     baseThickness: 0.052,
     depthFalloff: 1,
     costResource: 'sap',
-    baseCost: 10,
-    production: { resource: 'light', baseRate: 0.4, shaded: true },
+    baseCost: PART_BASE_COST.leafCluster,
+    production: { resource: 'light', baseRate: PART_BASE_RATE.leafCluster, shaded: true },
   },
   {
     type: 'blossom',
@@ -183,8 +197,8 @@ export const GROWTH_RULES: readonly GrowthRule[] = [
     baseThickness: 0.03,
     depthFalloff: 1,
     costResource: 'sap',
-    baseCost: 60,
-    production: { resource: 'light', baseRate: 0.15 },
+    baseCost: PART_BASE_COST.blossom,
+    production: { resource: 'light', baseRate: PART_BASE_RATE.blossom },
   },
   {
     type: 'rootSegment',
@@ -201,8 +215,8 @@ export const GROWTH_RULES: readonly GrowthRule[] = [
     baseThickness: 0.02,
     depthFalloff: 0.88,
     costResource: 'sap',
-    baseCost: 12,
-    production: { resource: 'water', baseRate: 0.3 },
+    baseCost: PART_BASE_COST.rootSegment,
+    production: { resource: 'water', baseRate: PART_BASE_RATE.rootSegment },
   },
   {
     type: 'rootTip',
@@ -219,8 +233,8 @@ export const GROWTH_RULES: readonly GrowthRule[] = [
     baseThickness: 0.011,
     depthFalloff: 1,
     costResource: 'sap',
-    baseCost: 35,
-    production: { resource: 'minerals', baseRate: 0.12, requiresVein: true },
+    baseCost: PART_BASE_COST.rootTip,
+    production: { resource: 'minerals', baseRate: PART_BASE_RATE.rootTip, requiresVein: true },
   },
 ] as const;
 

@@ -1,3 +1,4 @@
+import { EPSILON } from '../content/units';
 import Decimal from 'break_infinity.js';
 import { GROWTH_RULE_BY_TYPE, type TreeNodeType } from '../content/growth';
 import {
@@ -119,7 +120,16 @@ export interface PrestigeProgress {
 export function prestigeProgress(height: number, lifetimeLight: Decimal): PrestigeProgress {
   const lightNeeded = new Decimal(PRESTIGE_LIGHT_REQUIREMENT);
   const heightFraction = Math.min(1, Math.max(0, height / PRESTIGE_HEIGHT_UNITS));
-  const lightFraction = Math.min(1, Math.max(0, lifetimeLight.div(lightNeeded).toNumber() || 0));
+
+  // Asked of the Decimals rather than of the ratio. A `Decimal` divided by
+  // itself is not always exactly 1 — the mantissa/exponent pair loses the last
+  // bit — so a tree that had gathered *precisely* the required Light was told
+  // it had gathered 0.9999999999999999 of it and refused. The fraction below is
+  // for the progress bar; this is the gate.
+  const enough = lifetimeLight.gte(lightNeeded);
+  const lightFraction = enough
+    ? 1
+    : Math.min(1, Math.max(0, lifetimeLight.div(lightNeeded).toNumber() || 0));
 
   return {
     height,
@@ -128,7 +138,7 @@ export function prestigeProgress(height: number, lifetimeLight: Decimal): Presti
     light: lifetimeLight,
     lightNeeded,
     lightFraction,
-    ready: heightFraction >= 1 && lightFraction >= 1,
+    ready: heightFraction >= 1 && enough,
     fraction: Math.min(heightFraction, lightFraction),
   };
 }
@@ -321,6 +331,6 @@ export function beginCeremony(now: number, seeds: SeedYield): Ceremony {
 
 /** How far through a ceremony `now` is, in `[0, 1]`. */
 export function ceremonyFraction(ceremony: Ceremony, now: number): number {
-  const span = Math.max(1e-9, ceremony.endsAt - ceremony.startedAt);
+  const span = Math.max(EPSILON, ceremony.endsAt - ceremony.startedAt);
   return Math.min(1, Math.max(0, (now - ceremony.startedAt) / span));
 }

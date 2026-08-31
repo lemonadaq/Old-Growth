@@ -80,19 +80,13 @@ export function GrowOptionTooltip({ priced }: GrowOptionTooltipProps) {
         )}
       </dl>
 
-      {priced.production?.missingVein && (
-        <p className="tooltip__hint">{t('growOption.noVein')}</p>
-      )}
+      {priced.production?.missingVein && <p className="tooltip__hint">{t('growOption.noVein')}</p>}
 
       {priced.production?.exposure !== null &&
         priced.production?.exposure !== undefined &&
-        priced.production.exposure < 1 && (
-          <p className="tooltip__hint">{t('growOption.shaded')}</p>
-        )}
+        priced.production.exposure < 1 && <p className="tooltip__hint">{t('growOption.shaded')}</p>}
 
-      {!priced.production && (
-        <p className="tooltip__hint">{t('growOption.structural')}</p>
-      )}
+      {!priced.production && <p className="tooltip__hint">{t('growOption.structural')}</p>}
     </>
   );
 }

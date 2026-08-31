@@ -134,7 +134,6 @@ function SettingsPanel({
 
   return (
     <aside className="settings" aria-label={t('settings.title')}>
-
       <section className="settings__block">
         <h3 className="settings__heading">{t('settings.sound')}</h3>
         <label className="settings__toggle">

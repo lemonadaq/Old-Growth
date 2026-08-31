@@ -28,12 +28,12 @@ Deadwood, Seeds. Tone: cozy, warm, botanical.
 
 The codebase is split into four layers with a strict one-way dependency rule:
 
-| Folder          | Responsibility                                   | Constraints                          |
-| --------------- | ------------------------------------------------ | ------------------------------------ |
-| `/src/engine`   | Pure game logic: state, fixed-timestep loop, sim | **No React imports.** Framework-free |
-| `/src/render`   | Canvas 2D drawing of the scene                   | Reads snapshots, no game mutation    |
-| `/src/ui`       | React components, HUD overlay, input             | Wires engine + render together       |
-| `/src/content`  | Data definitions (resources, later: species…)    | Plain data, strictly typed           |
+| Folder         | Responsibility                                   | Constraints                          |
+| -------------- | ------------------------------------------------ | ------------------------------------ |
+| `/src/engine`  | Pure game logic: state, fixed-timestep loop, sim | **No React imports.** Framework-free |
+| `/src/render`  | Canvas 2D drawing of the scene                   | Reads snapshots, no game mutation    |
+| `/src/ui`      | React components, HUD overlay, input             | Wires engine + render together       |
+| `/src/content` | Data definitions (resources, later: species…)    | Plain data, strictly typed           |
 
 ### The loop
 

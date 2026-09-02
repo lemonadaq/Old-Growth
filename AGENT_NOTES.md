@@ -124,6 +124,12 @@ reported.
       new version" nudge.
 - [ ] `deploy:vercel` assumes a linked project. Nobody has run it against a real
       account yet, so the first deploy may still want a `vercel link`.
+- [ ] **The `v1.0.0` tag exists locally but is not on the remote.** This
+      session's GitHub credential pushes branches and not tags: pushing the tag
+      returns 403, and so does creating the ref through the API. The tag points
+      at the merge commit on `main`, so anyone with push rights can publish it
+      with `git tag -a v1.0.0 <sha>` followed by a tag push, or cut it from the
+      GitHub releases page.
 
 ### 2026-08-31 — STEP 19: Balance pass, achievements and simulation harness
 

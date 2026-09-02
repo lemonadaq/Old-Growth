@@ -1,0 +1,104 @@
+/*
+ * The recovery screen. Deliberately the calmest surface in the game: no red, no
+ * alarm glyph, the same warm bark-and-parchment palette as every panel. Whatever
+ * has gone wrong, the player's next thirty seconds go better if the screen looks
+ * like the game they were playing rather than a browser error.
+ */
+.crash {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  overflow: auto;
+  background: linear-gradient(#2b1c0f, #16100a);
+  color: var(--hud-text);
+}
+
+.crash__card {
+  width: min(34rem, 100%);
+  padding: 1.5rem;
+  border: 1px solid var(--hud-border);
+  border-radius: 0.75rem;
+  background: rgba(28, 20, 12, 0.72);
+  box-shadow: 0 1.25rem 3rem rgba(0, 0, 0, 0.45);
+}
+
+.crash__title {
+  margin: 0 0 0.6rem;
+  font-size: 1.5rem;
+  color: var(--hud-accent);
+}
+
+.crash__body {
+  margin: 0 0 0.9rem;
+  line-height: 1.5;
+}
+
+.crash__status {
+  margin: 0 0 1.1rem;
+  padding: 0.6rem 0.75rem;
+  border-left: 3px solid #8fd694;
+  border-radius: 0.25rem;
+  background: rgba(143, 214, 148, 0.1);
+  color: var(--hud-text);
+  line-height: 1.45;
+}
+
+/* Nothing to rescue is not an error either — it is usually a first session. */
+.crash__status--none {
+  border-left-color: var(--hud-muted);
+  background: rgba(253, 243, 224, 0.06);
+  color: var(--hud-muted);
+}
+
+.crash__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.crash__button {
+  padding: 0.55rem 1.1rem;
+  border: 1px solid var(--hud-accent);
+  border-radius: 0.4rem;
+  background: var(--hud-accent);
+  color: #2b1c0f;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  /* A phone-sized target, because this screen is the one place where a mis-tap
+     costs the player the only path they have back to their tree. */
+  min-height: 2.75rem;
+}
+
+.crash__button--ghost {
+  background: transparent;
+  color: var(--hud-accent);
+}
+
+.crash__note {
+  margin: 0.9rem 0 0.4rem;
+  color: var(--hud-muted);
+  font-size: 0.85rem;
+}
+
+.crash__text {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid var(--hud-border);
+  border-radius: 0.4rem;
+  background: rgba(10, 8, 6, 0.6);
+  color: var(--hud-text);
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  resize: vertical;
+}
+
+.crash__detail {
+  margin: 1.1rem 0 0;
+  color: var(--hud-muted);
+  font-size: 0.78rem;
+  word-break: break-word;
+}

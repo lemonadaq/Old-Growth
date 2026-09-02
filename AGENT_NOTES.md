@@ -15,6 +15,116 @@ Do not refactor unrelated code.
 
 ## Changelog
 
+### 2026-09-02 — STEP 20: Release build and deployment
+
+Nineteen steps of game, and no way for anyone to play it. This one turns the
+repo into something that lands on a phone: a crash screen that hands the save
+back, an installable offline build, two package targets, and a QA pass run
+against the production bundle rather than the dev server.
+
+- **A crash cannot take the save with it.** `src/ui/ErrorBoundary.tsx` wraps the
+  whole app in `main.tsx` and shows a recovery screen in the game's own palette:
+  what happened, that the tree is safe, a Reload button and a **Copy my save**
+  button that produces the same `OG1:` string Settings exports, so it goes back
+  in through the same Import box. Two details carry it. The save text is read in
+  `getDerivedStateFromError` — the render phase, _before_ React commits the
+  unmount and `App`'s cleanup writes a half-dead simulation over the file — and
+  the new `readRawSave` in `storage.ts` returns the bytes without parsing,
+  migrating or validating them, because a save this build cannot read is still
+  the player's twenty hours. Nothing on the screen clears anything: a crash loop
+  that deleted the file would be unrecoverable, and Hard Reset already exists
+  behind a typed word for anyone who wants one.
+- **The debug instruments are out of the release.** The FPS/TPS counter and the
+  "Start test producer" switch — a resource a second into everything, in the
+  HUD, since STEP 2 — are now behind `import.meta.env.DEV`, which is a build
+  constant, so the production bundle does not contain them rather than merely
+  hiding them. That closes the oldest open TODO in this file. `console.*` and
+  `debugger` go the same way, dropped by esbuild in production only (`mode` guard
+  in `vite.config.ts`) so development and the tests keep theirs.
+- **It installs.** `public/manifest.webmanifest` (name, `standalone`, theme
+  `#8fc6e8` and background `#1b1208` from the palette, `start_url` and `scope`
+  relative so a subdirectory host works), 192/512 icons plus a maskable 512 and
+  an apple-touch icon, an SVG favicon and an `.ico` for everything that asks for
+  `/favicon.ico` whether it is linked or not. All of it is **generated from one
+  drawing**: `public/icon.svg` is the tree as vectors, `scripts/lib/glyph.mjs` is
+  the same tree as inside-tests sampled nine times a pixel, and
+  `npm run assets:icons` rasterises both the icons and the 1200x630 social card.
+  The PNG and ICO encoders are in `scripts/lib/` — every library that would have
+  drawn these is a native module, and `zlib` plus fifty lines is not.
+- **It plays with the network off.** `scripts/build-sw.mjs` writes `sw.js` into
+  the finished build, because only the build knows the hashed filenames.
+  Navigations are network-first falling back to the cached shell (the shell is
+  the one URL that is not content-hashed, so cache-first would pin a returning
+  player to the build they first opened); everything else is cache-first. The
+  cache is named for a hash of its own contents, so a redeploy that changed
+  nothing does not evict a player's copy. No `skipWaiting`: swapping assets under
+  a running tab is how you end up with half of two builds.
+- **Two package targets.** `npm run deploy:vercel` with a committed `vercel.json`
+  — hashed assets immutable for a year, `sw.js` and `index.html` explicitly
+  uncacheable. `npm run package:itch` is a second build with `--base ./`, since
+  itch serves from a per-build subdirectory where absolute `/assets/...` is a
+  white page; it zips `dist-itch` with `index.html` at the root using a zip
+  writer in `scripts/lib/zip.mjs` (deflate, CRC32, fixed timestamps so a rebuild
+  is byte-identical — `zip` is not installed everywhere a release gets cut).
+- **The budget is checked, not eyeballed.** `npm run analyze` gzips every file in
+  a build, groups it and exits non-zero over the 1.2 MB JS ceiling. Current
+  release: **143 KB of gzipped JavaScript** — 11% of the budget — 6.6 KB of CSS,
+  and 66 KB of icons and the social card that are not on the critical path.
+- **README.md and CREDITS.md**, the second of which says plainly that every sound
+  is synthesised at runtime and that no licence has been chosen for the
+  recordings that would replace it, along with what has to be recorded here
+  before any of them ship.
+- Tests: `scripts/lib/zip.test.mjs` reads archives back the way a zip reader does
+  rather than checking that the writer wrote what it wrote, and
+  `scripts/lib/release.test.mjs` covers CRC-32 against its published check value,
+  the PNG and ICO encoders, the precache list, the worker's two strategies and
+  the bundle budget's edges. `readRawSave` is covered in `save.test.ts`,
+  including the unparseable-file case that is its whole reason for existing.
+  **1280 tests pass**; lint and build are clean.
+
+**QA checklist — executed 2026-09-02 against `npm run build` + `npm run preview`**
+
+Driven by Playwright over the production bundle. Twenty-four checks, all
+passing. Playwright is present in this container but is deliberately **not** a
+project dependency, so the runner is not committed; the table is what it
+reported.
+
+| Item                   | Result                                                                                                                                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Fresh save flow        | ✅ Game starts, HUD reads out, taps pay Sap, the save is written on `pagehide` and reloads intact. No console errors.                                                                      |
+| Export / import        | ✅ Export produces `OG1:`, Hard Reset empties both keys, the exported string imports back with no error shown.                                                                             |
+| 8h offline             | ✅ Back-dating `data.lastSeen` by eight hours and reopening shows the "While you were away" report. No console errors.                                                                     |
+| Two prestiges in a row | ⚠️ Not run by hand — 45–75 minutes each. Covered headlessly by `npm run sim`, which measures both prestiges on three bots (see BALANCE.md).                                                |
+| Mobile Safari          | ⚠️ No WebKit build available in this container. Ran a Pixel 5 profile instead: touch taps land, no horizontal overflow, no errors. The iOS meta tags are written but untested on a device. |
+| Keyboard-only run      | ✅ Canvas focuses, arrows walk the tree, Enter taps and grows, the live region announces, and Tab reaches every dock item.                                                                 |
+| Reduced motion         | ✅ Runs clean under `prefers-reduced-motion: reduce`.                                                                                                                                      |
+| Hard reset             | ✅ Typed `UPROOT` clears the live save and the backup.                                                                                                                                     |
+| Crash recovery         | ✅ Forcing `getContext` to throw brings up the recovery screen; the export button returns a valid save; the file is byte-identical after, and after reloading into the crash again.        |
+| PWA                    | ✅ Manifest serves and parses with four icons, the worker registers and controls the page after a reload, and the game loads with the network switched off.                                |
+
+**Open TODOs**
+
+- [ ] The PWA was verified by its parts — manifest, icons, worker, offline load —
+      not by an install. The acceptance criterion names Android and desktop
+      Chrome, and neither is available here; someone with a phone should confirm
+      the prompt appears and the maskable icon looks right in the launcher.
+- [ ] Same for mobile Safari. The tags are there; the device is not.
+- [ ] The README screenshot is the opening minutes with the trunk
+      keyboard-focused. Replace it with a late-game canopy once there is a real
+      save to photograph.
+- [ ] `og-image.png` is the tree on a gradient with no text on it. Drawing type
+      without a font renderer looks worse than no type at all, so it stays a
+      placeholder until someone makes a real card.
+- [ ] `src/engine/debugProducers.ts` and its HUD switch are now dev-only rather
+      than deleted. They are still a live cheat in a development build, which is
+      the right place for them, but the module can go the day nobody misses it.
+- [ ] The service worker has no update prompt. A new build is picked up on the
+      next fresh open, silently, which is right for a game with hashed assets and
+      wrong the day a save-format migration ships — that needs a "reload for the
+      new version" nudge.
+- [ ] `deploy:vercel` assumes a linked project. Nobody has run it against a real
+      account yet, so the first deploy may still want a `vercel link`.
+
 ### 2026-08-31 — STEP 19: Balance pass, achievements and simulation harness
 
 Eighteen steps of systems, none of them measured. This one puts every number in

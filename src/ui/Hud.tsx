@@ -135,15 +135,28 @@ export function Hud({
           <SeasonBadge />
           <DaylightGauge />
           <HydrationGauge />
-          <button
-            type="button"
-            className="hud-toggle"
-            aria-pressed={testProducers}
-            onClick={onToggleTestProducers}
-          >
-            {testProducers ? t('hud.debugProducerOn') : t('hud.debugProducerOff')}
-          </button>
-          <DebugCounter />
+          {/*
+            The development instruments: a frame counter and a switch that pours
+            a resource a second into everything. Both were how the engine was
+            checked while it was being built, and neither is something a player
+            should find in a released game — one is noise, the other is a cheat
+            with a button. `import.meta.env.DEV` is a constant at build time, so
+            the release bundle does not merely hide them, it does not contain
+            them.
+          */}
+          {import.meta.env.DEV && (
+            <>
+              <button
+                type="button"
+                className="hud-toggle"
+                aria-pressed={testProducers}
+                onClick={onToggleTestProducers}
+              >
+                {testProducers ? t('hud.debugProducerOn') : t('hud.debugProducerOff')}
+              </button>
+              <DebugCounter />
+            </>
+          )}
         </div>
       </header>
       {/*

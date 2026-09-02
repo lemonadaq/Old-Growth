@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Old Growth">
+  <title>Old Growth</title>
+  <!--
+    The game's mark: a tapered trunk, three leaf clusters, and roots reaching
+    into the soil — half of Old Growth happens underground, and an icon showing
+    only a canopy would be advertising a different game.
+
+    This is the same drawing as `scripts/lib/glyph.mjs`, which rasterises the
+    PNG icons and the social card. The two are kept in step by hand; if you move
+    a circle here, move it there and re-run `npm run assets:icons`.
+  -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8fc6e8" />
+      <stop offset="1" stop-color="#e7f0d8" />
+    </linearGradient>
+    <linearGradient id="soil" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6b4a2b" />
+      <stop offset="1" stop-color="#2e1d10" />
+    </linearGradient>
+    <clipPath id="card">
+      <rect x="0" y="0" width="512" height="512" rx="112" ry="112" />
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#card)">
+    <rect x="0" y="0" width="512" height="512" fill="url(#sky)" />
+    <rect x="0" y="400" width="512" height="112" fill="url(#soil)" />
+    <circle cx="425" cy="77" r="38" fill="#fff3c4" />
+
+    <!-- Roots, under the trunk so the joins disappear behind it. -->
+    <g stroke="#a8875e" stroke-linecap="round" fill="none">
+      <line x1="256" y1="390" x2="154" y2="486" stroke-width="29" />
+      <line x1="256" y1="390" x2="364" y2="476" stroke-width="27" />
+      <line x1="256" y1="400" x2="266" y2="507" stroke-width="20" />
+    </g>
+
+    <!-- Trunk, two limbs, and the sunlit edge that keeps it from reading flat. -->
+    <polygon points="233,174 279,174 299.5,430 212.5,430" fill="#6a4726" />
+    <g stroke="#6a4726" stroke-linecap="round" fill="none">
+      <line x1="256" y1="287" x2="143" y2="215" stroke-width="37" />
+      <line x1="256" y1="256" x2="374" y2="190" stroke-width="35" />
+    </g>
+    <polygon points="272,184 286,184 292,420 266,420" fill="#8c6238" />
+
+    <!-- Canopy: shade, body, then the highlight facing the sun. -->
+    <g fill="#4f7a35">
+      <circle cx="256" cy="154" r="120" />
+      <circle cx="133" cy="205" r="77" />
+      <circle cx="384" cy="179" r="82" />
+    </g>
+    <g fill="#6f9e4a">
+      <circle cx="256" cy="143" r="110" />
+      <circle cx="133" cy="197" r="68" />
+      <circle cx="384" cy="172" r="73" />
+    </g>
+    <g fill="#93bd63">
+      <circle cx="225" cy="108" r="51" />
+      <circle cx="364" cy="148" r="28" />
+    </g>
+  </g>
+</svg>

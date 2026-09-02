@@ -6,7 +6,15 @@ import { SYMBIONT_BY_ID } from '../content/symbionts';
 import { isNewerThanCurrent, migrateSave, MIGRATIONS } from './migrations';
 import { parseSaveText, validateEnvelope, type SaveEnvelope } from './save';
 import { Simulation } from './simulation';
-import { clearSave, decodeSave, encodeSave, loadGame, saveGame, type SaveStore } from './storage';
+import {
+  clearSave,
+  decodeSave,
+  encodeSave,
+  loadGame,
+  readRawSave,
+  saveGame,
+  type SaveStore,
+} from './storage';
 import type { TreeNode } from './treeGraph';
 
 /** A `localStorage` stand-in, so the tests never touch a real browser's. */
@@ -385,6 +393,35 @@ describe('storage', () => {
 
     clearSave(store);
     expect(store.data.size).toBe(0);
+  });
+});
+
+/**
+ * What the crash screen calls. It runs when the game has already fallen over,
+ * so the one thing it must never do is form an opinion about the file.
+ */
+describe('readRawSave', () => {
+  it('hands back the live save exactly as written', () => {
+    const store = memoryStore();
+    saveGame(playedGame().save(7), store);
+    expect(readRawSave(store)).toBe(store.data.get(SAVE_KEY));
+  });
+
+  it('returns a save this build cannot parse, rather than nothing', () => {
+    // The whole point: a file from a newer version, or one a bug half-wrote, is
+    // still the player's twenty hours and still worth exporting.
+    const store = memoryStore({ [SAVE_KEY]: '{"version":"99.0","timestamp":1,"data":{' });
+    expect(readRawSave(store)).toBe('{"version":"99.0","timestamp":1,"data":{');
+  });
+
+  it('falls back to the backup when the live slot is empty', () => {
+    const store = memoryStore({ [SAVE_KEY]: '', [SAVE_BACKUP_KEY]: '{"backup":true}' });
+    expect(readRawSave(store)).toBe('{"backup":true}');
+  });
+
+  it('reports nothing on a fresh browser, or one that refuses storage', () => {
+    expect(readRawSave(memoryStore())).toBeNull();
+    expect(readRawSave(null)).toBeNull();
   });
 });
 

@@ -4,8 +4,46 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#8fc6e8" />
-    <meta name="description" content="Old Growth — a cozy botanical incremental game." />
-    <title>Old Growth</title>
+
+    <title>Old Growth — a cozy clicker where the skill tree is a real tree</title>
+    <meta name="description" content="A cozy clicker where the skill tree is a real tree." />
+    <meta name="author" content="Old Growth" />
+
+    <!--
+      Relative hrefs throughout: the game ships to a domain root (Vercel) and to
+      a per-build subdirectory (itch.io) from the same source, and an absolute
+      `/icon.svg` is a 404 in the second case.
+    -->
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+    <link rel="alternate icon" href="./favicon.ico" sizes="16x16 32x32" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+
+    <!-- Standalone on iOS, where the manifest is only half-read. -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Old Growth" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Old Growth" />
+    <meta property="og:description" content="A cozy clicker where the skill tree is a real tree." />
+    <!--
+      Absolute for the crawlers, which do not resolve a relative image against
+      the page as reliably as a browser does. Only the hosted build is ever
+      linked, so the root path is the right one here.
+    -->
+    <meta property="og:image" content="/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="A tree with its roots showing, on a warm sky" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Old Growth" />
+    <meta
+      name="twitter:description"
+      content="A cozy clicker where the skill tree is a real tree."
+    />
+    <meta name="twitter:image" content="/og-image.png" />
   </head>
   <body>
     <div id="root"></div>

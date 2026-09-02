@@ -139,6 +139,34 @@ export function saveGame(
 }
 
 /**
+ * The save exactly as it sits in storage, without reading a word of it.
+ *
+ * This is what a crash needs. Everything else here parses, migrates and
+ * validates before handing anything back — sensible when the game is about to
+ * run on the result, and precisely wrong when the game has just fallen over and
+ * the only job left is to get the player's file out of the browser and into
+ * their hands. A save the current build cannot parse is still a save some build
+ * can, so the text is returned untouched.
+ *
+ * The backup is the fallback for the same reason `loadGame` prefers it to
+ * nothing: a live slot that is empty or unreadable does not mean there is no
+ * file to rescue.
+ */
+export function readRawSave(store: SaveStore | null = browserStore()): string | null {
+  if (!store) return null;
+  for (const key of [SAVE_KEY, SAVE_BACKUP_KEY]) {
+    try {
+      const text = store.getItem(key);
+      if (text !== null && text.trim() !== '') return text;
+    } catch {
+      // Try the other key: a browser that refuses one read may allow the next,
+      // and there is nothing better to do with the failure here.
+    }
+  }
+  return null;
+}
+
+/**
  * Erase both keys. What Hard Reset does, and it keeps nothing on purpose —
  * including the backup, which would otherwise let the next load undo it.
  */

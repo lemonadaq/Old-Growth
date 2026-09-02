@@ -24,7 +24,7 @@ _checked_ rather than argued about, and then does what the bot said.
 - `src/content/balance.ts` — **every tunable in the game, in one file**, and the
   rule is enforced rather than intended: `scripts/check-magic-numbers.mjs` walks
   `/src/engine` and fails on any numeric literal that is neither structural nor
-  in the allowlist with a reason, and `magicNumbers.test.ts` runs it in CI.
+  in the allowlist with a reason, and `check-magic-numbers.test.mjs` runs it in CI.
   `balance.ts` imports nothing from the engine, which is what lets a headless
   bot read the table with no simulation standing up around it.
 - `npm run sim` — the harness. It runs the **real engine**, no DOM and no

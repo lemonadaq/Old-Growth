@@ -15,7 +15,7 @@ import type { ResourceId } from './resources';
  * 1. `/src/engine` contains no numeric literals beyond structural ones. That is
  *    enforced, not merely intended — `scripts/check-magic-numbers.mjs` walks the
  *    engine and fails on any value that is not in its allowlist, and
- *    `src/engine/magicNumbers.test.ts` runs it in CI.
+ *    `scripts/check-magic-numbers.test.mjs` runs it in CI.
  * 2. Nothing here imports from `/src/engine`, so the balance table stays
  *    readable by a headless bot (`npm run sim`) with no simulation standing up
  *    around it.

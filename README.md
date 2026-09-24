@@ -18,6 +18,11 @@ once v1.0 is out in the world._
 
 - **The tree is the skill tree.** A procedurally drawn canvas tree that grows
   where you grow it — branches, twigs, leaf clusters, roots, all placed by you.
+- **The Heartwood.** A sixty-one node passive map, drawn as a trunk in
+  cross-section: six branches out from the centre, two notables apiece, and a
+  keystone at the end of each that gives something and takes something. A node
+  opens only when something you have already taken touches it, so a build is a
+  route. Rings and badges pay for the minors; the keystones cost Seeds.
 - **Clicking with teeth.** Crits, a combo meter, and Dew on the first tap of a
   new day.
 - **Two economies.** The canopy makes Light while you watch; the roots make

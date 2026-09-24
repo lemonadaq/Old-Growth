@@ -188,15 +188,21 @@
 }
 
 /*
- * Phone: the chips shrink to a glyph and a number.
+ * Compact: the chips shrink to a glyph and a number.
  *
- * Seven labelled chips stacked down the left edge is most of a 390px screen,
- * and the screen is the tree. The word and the per-second rate are *clipped*
- * rather than removed, so they are still read out — a screen reader still hears
- * "Sap 35.7, 0 per second", which is the whole chip. What goes is only the part
- * a sighted player can get from the colour and the glyph.
+ * Two screens need this and they are not the same screen. A phone held upright
+ * is *narrow*: seven labelled chips stacked down the left edge is most of a
+ * 390px screen, and the screen is the tree. A phone held sideways is **short**
+ * — around 800×370 — which the width query never caught, so until now a
+ * landscape phone got the desktop HUD: full chips, four rows of them, over a
+ * canvas 370px tall. Hence the `or`.
+ *
+ * The word and the per-second rate are *clipped* rather than removed, so they
+ * are still read out — a screen reader still hears "Sap 35.7, 0 per second",
+ * which is the whole chip. What goes is only the part a sighted player can get
+ * from the colour and the glyph.
  */
-@media (max-width: 620px) {
+@media (max-width: 620px), (max-height: 560px) {
   /* Four badges and a title do not fit across 390px, so the row is allowed to
      become two rather than pushing the last gauge off the screen. */
   .hud-header {
@@ -211,7 +217,9 @@
   .hud-resources {
     gap: 5px;
     /* The phone's panels are bottom sheets, so nothing is to the right of the
-       chips to leave room for. */
+       chips to leave room for. The landscape drawer *is* to their right, and
+       says so through `.app--panel` below rather than by reserving the room
+       permanently. */
     padding-right: 0;
   }
 
@@ -229,5 +237,57 @@
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
+  }
+}
+
+/*
+ * Landscape phone, where the scarce axis is height.
+ *
+ * Every rule here buys back vertical room for the canvas, because at 370px the
+ * tree has to live in what the HUD does not take. The title goes first: it is
+ * the one thing on screen that tells a player something they already know.
+ */
+@media (max-height: 560px) {
+  /* A phone on its side puts the notch on one of the short edges, so the inset
+     that matters here is horizontal — the one nothing needed while the dock
+     owned the bottom and the header owned the top. */
+  .hud {
+    padding: 8px max(8px, env(safe-area-inset-right, 0px)) 8px
+      max(8px, env(safe-area-inset-left, 0px));
+  }
+
+  .hud-title {
+    display: none;
+  }
+
+  .hud-resources {
+    margin-top: 6px;
+  }
+
+  .hud-resource {
+    padding: 3px 7px;
+    font-size: 11px;
+    border-radius: 7px;
+  }
+
+  /*
+   * Room for the drawer, but only while there is a drawer.
+   *
+   * A chip hidden behind an open Journal is a number the player cannot read
+   * while spending it — which is why the desktop HUD reserves the space
+   * permanently. On a 370px-tall screen that reservation costs a whole row of
+   * chips even with every panel shut, so it is spent only when the panel is
+   * actually open. `.app--panel` comes from `App`, which is the only thing that
+   * knows.
+   */
+  .app--panel .hud-resources {
+    padding-right: min(46vw, 348px);
+  }
+
+  /* And the same for the gauges, which live on the right and would otherwise be
+     the first thing the drawer covers — the season and the sun are readings a
+     player checks *while* deciding what to buy. */
+  .app--panel .hud-header__right {
+    padding-right: min(46vw, 348px);
   }
 }

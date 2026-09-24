@@ -1,20 +1,18 @@
-/* STEP 11's residents. The final UI (STEP 18) folds this into the dock. */
+/*
+ * Contents of the panel shell, not a panel.
+ *
+ * This used to frame itself — `position: absolute`, a width, a background and a
+ * rounded border — back when it floated over the canvas on its own. STEP 18 put
+ * it inside `Panel`, which owns all of that now, and the leftover framing was
+ * fighting the shell: an absolutely positioned child escapes the shell's scroll
+ * box, so the Grow panel's two children were drawn on top of each other and
+ * over the panel's own edge. What is left here is layout *inside* the shell.
+ */
 .symbionts {
-  pointer-events: auto; /* the HUD ignores pointer events by default */
-  position: absolute;
-  top: 56px;
-  right: 12px;
-  width: 300px;
-  max-height: calc(100% - 96px);
-  overflow-y: auto;
+  pointer-events: auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 12px;
-  background: var(--hud-bg);
-  border: 1px solid var(--hud-border);
-  border-radius: 10px;
-  backdrop-filter: blur(4px);
 }
 
 .symbionts__title {

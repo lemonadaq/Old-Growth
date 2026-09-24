@@ -22,9 +22,16 @@
   outline: none;
 }
 
+/*
+ * The shell takes focus when it opens, so it needs a focus ring — but drawn
+ * *inside* its own border rather than around it. A 2px accent ring offset
+ * outwards traces the whole sheet, and on a phone, where opening a panel is the
+ * most common thing anyone does, that read as the panel being alarmed rather
+ * than focused.
+ */
 .panel:focus-visible {
   outline: 2px solid var(--hud-accent);
-  outline-offset: 2px;
+  outline-offset: -3px;
 }
 
 @keyframes panel-in {
@@ -94,9 +101,20 @@
   padding: 0 12px 12px;
 }
 
-/* The panel's own children were written as free-standing panels; inside the
-   shell they are content, so their framing is dropped. */
-.panel__body > * {
+/*
+ * A belt to go with the braces.
+ *
+ * The children no longer frame themselves — each stylesheet was reframed rather
+ * than overridden — but this stays, because the failure it prevents is silent
+ * and ugly: a child that positions itself escapes the shell's scroll box and is
+ * drawn over the panel's own edge, which is exactly what the Grow panel did
+ * with its two children for three steps.
+ *
+ * `.panel .panel__body > *` rather than `.panel__body > *`: the old rule tied
+ * on specificity with `.upgrades`, and a tie is settled by which stylesheet the
+ * bundler happened to put last. That is not a rule, it is a coin toss.
+ */
+.panel .panel__body > * {
   position: static;
   width: auto;
   max-height: none;
@@ -111,6 +129,30 @@
   .panel {
     animation: none;
   }
+}
+
+/*
+ * The wide variant: the Heartwood, which is a map and not a list.
+ *
+ * It keeps the drawer's anchoring — top right, stopping above the dock — and
+ * only takes more of both axes, so opening it is the same motion as opening
+ * anything else rather than a different kind of screen appearing. The `vw`
+ * ceiling is what leaves the tree visible down the left: a passive map that
+ * covers the game entirely stops feeling like part of it.
+ */
+.panel--wide {
+  width: min(760px, 62vw);
+  max-height: calc(100% - 96px);
+}
+
+.panel--wide .panel__body {
+  /* The map fills whatever is left after the title bar, and scrolls nothing:
+     panning is the canvas's job, and a scrollbar here would fight it. */
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* Phone: a sheet from the bottom, above the tab bar, as wide as the screen. */
@@ -136,5 +178,53 @@
       opacity: 1;
       transform: translateY(0);
     }
+  }
+
+  /* The map takes the sheet as tall as it can get: 62% of a portrait phone is
+     a square of map about 240px on a side, which is not a map. */
+  .panel--wide {
+    width: 100%;
+    max-height: calc(100% - 72px);
+  }
+}
+
+/*
+ * Landscape phone: a drawer down the right edge.
+ *
+ * Not the bottom sheet — a sheet that can only be 62% of 370px is 230px of
+ * panel with a 140px slot of game above it, and both halves are useless. The
+ * drawer instead takes the height it can and leaves the tree the left of the
+ * screen, which is where the trunk is drawn anyway.
+ *
+ * `top`/`bottom` rather than `max-height`: the body is the only thing that
+ * scrolls, so the shell must be told exactly how tall it is. Stopping above the
+ * dock is what keeps the last row of a panel off the tab bar — the same reason
+ * the desktop rule subtracts 140px, restated for a screen where the subtraction
+ * would leave nothing.
+ */
+@media (max-width: 900px) and (max-height: 560px) {
+  .panel {
+    top: 8px;
+    right: 8px;
+    bottom: 56px;
+    width: min(46vw, 348px);
+    max-height: none;
+    border-radius: 12px;
+  }
+
+  .panel__bar {
+    padding: 6px 10px 4px;
+  }
+
+  .panel__body {
+    padding: 0 10px 10px;
+  }
+
+  /* Landscape is the shape the map likes best — wide and short — so it takes
+     most of the width and every pixel of height there is. */
+  .panel--wide {
+    left: 8px;
+    width: auto;
+    max-height: none;
   }
 }

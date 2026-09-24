@@ -273,6 +273,33 @@ export const WINTER_PENALTY = 0.6;
  */
 export const RING_PRODUCTION_BONUS = 0.05;
 
+/* ------------------------------------------------------------- heartwood */
+
+/**
+ * What the passive map is paid for with.
+ *
+ * Two pools, deliberately earned by playing two different ways, and neither of
+ * them a resource — nothing here competes with the Vault for Seeds or with the
+ * tree for Sap. They are counters over things the player has *done*.
+ *
+ * - **One point for the sapling itself.** A map that opens with nothing to
+ *   spend teaches nothing, and the first node is how anyone learns what the
+ *   screen is for.
+ * - **One per ring**, which is the same thing rings already mean: a year the
+ *   tree stood through. It is the slow pool, and it never resets, because rings
+ *   do not either.
+ * - **One per badge.** Thirty achievements already measure the interesting
+ *   corners of the game — a first graft, a storm held, a hundred and fifty
+ *   parts standing — and they were worth `+1%` each and nothing else. Paying
+ *   them in points is what turns the Journal from a record into a route.
+ * - **One per Seed ever earned**, for the keystones alone. Lifetime rather than
+ *   the balance, so spending Seeds in the Vault never costs a keystone.
+ */
+export const PASSIVE_POINTS_AT_START = 1;
+export const PASSIVE_POINTS_PER_RING = 1;
+export const PASSIVE_POINTS_PER_BADGE = 1;
+export const PASSIVE_POINTS_PER_SEED = 1;
+
 /* ------------------------------------------------------------ leaf litter */
 
 /** Engine seconds between leaf-litter piles forming at the base in Autumn. */

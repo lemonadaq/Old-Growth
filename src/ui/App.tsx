@@ -27,6 +27,7 @@ import { Announcer } from './Announcer';
 import { GraftTooltip } from './GraftTooltip';
 import { GrowSheet } from './GrowSheet';
 import { GrowOptionTooltip } from './GrowOptionTooltip';
+import { Heartwood } from './Heartwood';
 import { Hud } from './Hud';
 import { Journal } from './Journal';
 import { LeafTooltip } from './LeafTooltip';
@@ -87,11 +88,12 @@ interface DiscoveryToast {
 }
 
 /** The panels the dock can open. Exactly one is ever open. */
-type PanelId = 'grow' | 'journal' | 'symbionts' | 'vault' | 'settings';
+type PanelId = 'grow' | 'heart' | 'journal' | 'symbionts' | 'vault' | 'settings';
 
 /** Each panel's title, which is also its accessible name in the shell. */
 const PANEL_TITLES: Readonly<Record<PanelId, string>> = {
   grow: 'upgrades.title',
+  heart: 'heartwood.title',
   journal: 'journal.title',
   symbionts: 'symbionts.title',
   vault: 'vault.title',
@@ -176,6 +178,16 @@ export function App() {
   /** How close the tree is to being worth giving up, for the Vault's dock badge. */
   const maturity = useGameStore((s) => s.snapshot.prestige.progress);
   /**
+   * Points waiting to be spent on the Heartwood, both pools together, for its
+   * dock badge. A number rather than the wallet: the store is read on every
+   * frame, and a primitive is what keeps that from re-rendering the dock.
+   */
+  const passivePoints = useGameStore(
+    (s) =>
+      s.snapshot.prestige.passives.wallet.ring.available +
+      s.snapshot.prestige.passives.wallet.seed.available,
+  );
+  /**
    * The grow menu as the phone shows it — `null` on a wide screen, where the
    * dials on the canvas are the menu. Mirrored out of the renderer rather than
    * owned here: the renderer still decides which limb's menu is open, so one
@@ -226,6 +238,7 @@ export function App() {
   const toggleVault = useCallback(() => togglePanel('vault'), [togglePanel]);
   const toggleSettings = useCallback(() => togglePanel('settings'), [togglePanel]);
   const toggleGrow = useCallback(() => togglePanel('grow'), [togglePanel]);
+  const toggleHeart = useCallback(() => togglePanel('heart'), [togglePanel]);
 
   /** Hand the current save to the clipboard, compressed. */
   const handleExport = useCallback(async () => {
@@ -1064,6 +1077,10 @@ export function App() {
         toggleGrow();
         return;
       }
+      if (event.key === 'h' || event.key === 'H') {
+        toggleHeart();
+        return;
+      }
       if (event.key === 'j' || event.key === 'J') {
         toggleJournal();
         return;
@@ -1420,6 +1437,7 @@ export function App() {
     togglePrune,
     toggleGraft,
     toggleGrow,
+    toggleHeart,
     toggleJournal,
     toggleSymbionts,
     toggleVault,
@@ -1485,6 +1503,22 @@ export function App() {
     simRef.current?.buyHeirloom(id);
   }, []);
 
+  // The Heartwood map. All three go straight through to the simulation, which
+  // re-checks everything the panel already checked — the panel's copy of the
+  // rules decides what a button *looks* like, and the engine's decides what
+  // happens.
+  const handleAllocatePassive = useCallback((id: string) => {
+    simRef.current?.allocatePassive(id);
+  }, []);
+
+  const handleRefundPassive = useCallback((id: string) => {
+    simRef.current?.refundPassive(id);
+  }, []);
+
+  const handleRespecPassives = useCallback(() => {
+    simRef.current?.respecPassives();
+  }, []);
+
   const handleChooseBond = useCallback((id: string) => {
     simRef.current?.setBondSymbiont(id);
   }, []);
@@ -1530,6 +1564,20 @@ export function App() {
       hotkey: 'B',
       active: openPanel === 'grow',
       onSelect: toggleGrow,
+    },
+    {
+      id: 'heart',
+      glyph: '◎',
+      label: t('dock.heart'),
+      title: t('dock.heartTitle', { key: 'H' }),
+      hotkey: 'H',
+      active: openPanel === 'heart',
+      // The count of points waiting to be spent. It is the one number in the
+      // dock that means "there is something to do in here right now", and a
+      // passive map whose points pile up unnoticed is a passive map nobody
+      // opens.
+      badge: passivePoints > 0 ? String(passivePoints) : undefined,
+      onSelect: toggleHeart,
     },
     {
       id: 'prune',
@@ -1601,7 +1649,13 @@ export function App() {
   const panelTitle = openPanel ? t(PANEL_TITLES[openPanel]) : '';
 
   return (
-    <div className="app">
+    /*
+      `app--panel` is the one thing the stylesheets cannot work out for
+      themselves: whether a drawer is currently taking the right of the screen.
+      A landscape phone uses it to move the resource chips out from under the
+      panel while it is open, and to leave them the whole width when it is not.
+    */
+    <div className={`app${openPanel !== null ? ' app--panel' : ''}`}>
       {/*
         The tree is a control, not an illustration, so it sits in the tab order
         like one: `tabIndex` puts it there, the role and label say what it is,
@@ -1636,7 +1690,19 @@ export function App() {
         outside it.
       */}
       {openPanel !== null && (
-        <Panel key={openPanel} title={panelTitle} onClose={closePanel}>
+        <Panel
+          key={openPanel}
+          title={panelTitle}
+          variant={openPanel === 'heart' ? 'wide' : 'drawer'}
+          onClose={closePanel}
+        >
+          {openPanel === 'heart' && (
+            <Heartwood
+              onAllocate={handleAllocatePassive}
+              onRefund={handleRefundPassive}
+              onRespec={handleRespecPassives}
+            />
+          )}
           {openPanel === 'journal' && <Journal />}
           {openPanel === 'symbionts' && <Symbionts onUpgrade={handleSymbiontUpgrade} />}
           {openPanel === 'vault' && (

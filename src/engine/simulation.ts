@@ -53,6 +53,16 @@ import {
 } from './heirlooms';
 import { computeHydration, hydrationModifiers, HYDRATION_SOURCE } from './hydration';
 import {
+  allocationCheck,
+  initialPassives,
+  openNodes,
+  passiveModifiers,
+  passiveWallet,
+  refundCheck,
+  PASSIVE_SOURCE,
+  type PassiveWallet,
+} from './passives';
+import {
   canopyIndex,
   computeLeafExposures,
   daylightModifiers,
@@ -150,6 +160,7 @@ import {
   type LeafLight,
   type LitterSnapshot,
   type PrestigeReport,
+  type PassiveSnapshot,
   type PrestigeSnapshot,
   type ProgressionSnapshot,
   type Resources,
@@ -291,6 +302,7 @@ export class Simulation {
     // badges are *republished* here rather than re-earned: a prestige keeps the
     // set and throws the modifiers away with the old state.
     this.republishHeirlooms();
+    this.republishPassives();
     this.republishForest();
     this.republishAchievements();
     // Producers are rebuilt once the reach is known: a root tip that only finds
@@ -1502,6 +1514,81 @@ export class Simulation {
     }
   }
 
+  /* ------------------------------------------------------------ heartwood */
+
+  /**
+   * Republish what the Heartwood map is worth.
+   *
+   * One revocable source for sixty nodes, exactly as the Vault has one for
+   * twenty: every allocation and every refund revokes the whole set and grants
+   * it again, so an effect can never stack with its own previous instance and a
+   * respec is one `removeBySource` rather than sixty subtractions.
+   */
+  republishPassives(): void {
+    this.state.modifiers.removeBySource(PASSIVE_SOURCE);
+    for (const modifier of passiveModifiers(this.state.passives)) {
+      this.state.modifiers.add(modifier);
+    }
+  }
+
+  /**
+   * Both point pools, read from the record rather than from a stored total.
+   *
+   * Rings and badges are already counted elsewhere and Seeds keep their own
+   * lifetime figure, so there is no third number to keep in step — which is the
+   * only reason a save that predates the map loads with the right balance.
+   */
+  passiveWallet(): PassiveWallet {
+    return passiveWallet(
+      this.state.passives,
+      this.state.rings,
+      this.state.achievements.size,
+      this.state.resources.total('seeds'),
+    );
+  }
+
+  /**
+   * Take a node on the map. Returns whether it landed.
+   *
+   * Nothing is spent: a point is "spent" by the node being in the set, which is
+   * what makes a refund exact and a respec free. The wallet is a reading of the
+   * difference between what the record has earned and what the set has taken.
+   */
+  allocatePassive(id: string): boolean {
+    if (!allocationCheck(id, this.state.passives, this.passiveWallet()).ok) return false;
+
+    this.state.passives.add(id);
+    this.republishPassives();
+    // Prices and rates both move on a node: growth cost is a modifier, and so
+    // is everything a producer makes.
+    this.syncPartProducers();
+    return true;
+  }
+
+  /** Give one node back, if nothing further out depends on it. */
+  refundPassive(id: string): boolean {
+    if (!refundCheck(id, this.state.passives).ok) return false;
+
+    this.state.passives.delete(id);
+    this.republishPassives();
+    this.syncPartProducers();
+    return true;
+  }
+
+  /**
+   * Hand back the whole map at once.
+   *
+   * Free, and deliberately so. A respec that cost something would be a tax on
+   * finding out what the nodes do, in a game whose keystones are explicitly
+   * trades you are meant to try; and the points came from rings and badges,
+   * neither of which can be farmed.
+   */
+  respecPassives(): void {
+    this.state.passives = initialPassives();
+    this.republishPassives();
+    this.syncPartProducers();
+  }
+
   /** Republish what the trees standing behind this one are worth. */
   republishForest(): void {
     this.state.modifiers.removeBySource(FOREST_SOURCE);
@@ -1617,6 +1704,9 @@ export class Simulation {
     // the same reason: they are facts about the person, not about the tree.
     next.settings = old.settings;
     next.heirlooms = old.heirlooms;
+    // The Heartwood outlives the tree that paid for it: the points were rings
+    // and badges, and a reset takes back neither.
+    next.passives = old.passives;
     next.bondSymbiont = old.bondSymbiont;
     next.forest = [...old.forest, tree];
     next.memory = memory;
@@ -2086,6 +2176,14 @@ export class Simulation {
       };
     });
 
+    const passives: PassiveSnapshot = {
+      // Copied, because the engine mutates its set in place and a snapshot the
+      // UI holds across a frame must not change under it.
+      allocated: new Set(this.state.passives),
+      open: new Set(openNodes(this.state.passives)),
+      wallet: this.passiveWallet(),
+    };
+
     const ceremony = this.state.ceremony;
     const prestige: PrestigeSnapshot = {
       progress: this.prestigeProgress(),
@@ -2101,6 +2199,7 @@ export class Simulation {
       forest: [...this.state.forest],
       forestMultiplier: forestMultiplier(this.state.forest.length),
       heirlooms,
+      passives,
       bondSymbiont: this.state.bondSymbiont,
       bonded: bondLevel(heirloomLedger) > 0,
       offlineCapHours: offlineCapHours(heirloomLedger),

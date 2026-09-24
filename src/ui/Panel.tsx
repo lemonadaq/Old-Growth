@@ -26,10 +26,19 @@ export interface PanelProps {
   /** Accessible name — the panel's own title. */
   readonly title: string;
   readonly onClose: () => void;
+  /**
+   * `'drawer'` is the ordinary panel: a column of cards down one side.
+   *
+   * `'wide'` is for the one panel that is a *map* rather than a list. The
+   * Heartwood needs both axes — it is sixty-one nodes on a plane, and a 340px
+   * column would show a sixth of it at a legible zoom — so it takes as much of
+   * the window as it can while still leaving the tree visible behind it.
+   */
+  readonly variant?: 'drawer' | 'wide';
   readonly children: ReactNode;
 }
 
-export function Panel({ title, onClose, children }: PanelProps) {
+export function Panel({ title, onClose, variant = 'drawer', children }: PanelProps) {
   const ref = useRef<HTMLDivElement>(null);
   /** Whatever had focus when the panel opened, to give it back on the way out. */
   const opener = useRef<HTMLElement | null>(null);
@@ -55,7 +64,7 @@ export function Panel({ title, onClose, children }: PanelProps) {
 
   return (
     <aside
-      className="panel"
+      className={`panel${variant === 'wide' ? ' panel--wide' : ''}`}
       role="dialog"
       aria-label={title}
       ref={ref}

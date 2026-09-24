@@ -3,6 +3,7 @@ import { SEASON_LENGTH_SECONDS } from '../content/balance';
 import { GROWTH_RULE_BY_TYPE, type TreeNodeType } from '../content/growth';
 import { RESOURCE_IDS, type ResourceId } from '../content/resources';
 import { ACHIEVEMENT_BY_ID } from '../content/achievements';
+import { normalisePassives } from './passives';
 import { FEATURE_BY_ID, type FeatureId } from '../content/progression';
 import { ENGINE_VERSION, SAVE_VERSION } from '../content/save';
 import { DEFAULT_SETTINGS, normaliseSettings, type GameSettings } from '../content/settings';
@@ -159,6 +160,16 @@ export interface SaveData {
    * the player has already done.
    */
   readonly achievements: readonly string[];
+  /**
+   * Nodes taken on the Heartwood map, by id.
+   *
+   * Written, but read *defensively*: a file from before the map existed simply
+   * has no key, and `restoreState` opens it with the heartwood alone allocated,
+   * which is the correct reading of "this player has never spent a point". That
+   * is why the map did not need a save-version bump — exactly the precedent the
+   * `features` latch set when it was added.
+   */
+  readonly passives: readonly string[];
   /** Storms taken to a full brace, lifetime. */
   readonly stormsBraced: number;
   /** Seconds the offline calculator has paid out for, cumulatively. */
@@ -274,6 +285,7 @@ export function captureSave(state: GameState, now: number = Date.now()): SaveEnv
     prunes: state.prunes,
     grafts: state.grafts,
     achievements: [...state.achievements],
+    passives: [...state.passives],
     stormsBraced: state.stormsBraced,
     offlineSeconds: state.offlineSeconds,
     seedFragments: state.seedFragments,
@@ -606,6 +618,13 @@ export function restoreState(data: SaveData): GameState | null {
     array(raw.achievements)
       .filter((id): id is string => typeof id === 'string')
       .filter((id) => ACHIEVEMENT_BY_ID[id] !== undefined),
+  );
+  // Unknown node ids are dropped and the heartwood is forced back in, both
+  // inside `normalisePassives`. A save that names a node this build no longer
+  // has must open — losing one allocation is recoverable, refusing the file is
+  // not.
+  state.passives = normalisePassives(
+    array(raw.passives).filter((id): id is string => typeof id === 'string'),
   );
   state.stormsBraced = count(raw.stormsBraced);
   state.offlineSeconds = Math.max(0, num(raw.offlineSeconds, 0));

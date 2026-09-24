@@ -1,0 +1,317 @@
+/*
+ * The Heartwood map.
+ *
+ * Three rows in a column: a bar of what there is to spend, the map itself
+ * taking every pixel left over, and a card about whatever is selected. The
+ * middle row is the one that flexes, because the map is the screen and the
+ * other two are captions on it — and on a landscape phone, where the whole
+ * panel is 300px tall, that is the difference between a usable map and three
+ * cramped strips.
+ */
+.heartwood {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* Fills the panel shell rather than sizing to its contents: the canvas has no
+     intrinsic height, so something has to say how tall it is. */
+  height: 100%;
+  min-height: 0;
+}
+
+.heartwood__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.heartwood__pools {
+  display: flex;
+  gap: 6px;
+}
+
+.heartwood__pool {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  font-size: 12px;
+  color: var(--hud-muted);
+  background: rgba(10, 8, 6, 0.4);
+  border: 1px solid var(--hud-border);
+  border-left: 3px solid var(--hud-accent);
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+.heartwood__pool b {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  color: var(--hud-text);
+}
+
+/* Seeds buy keystones and nothing else, so the two pools are never the same
+   colour — a player must be able to tell at a glance which one is empty. */
+.heartwood__pool--seed {
+  border-left-color: #cba0e9;
+}
+
+.heartwood__search {
+  flex: 1 1 120px;
+  min-width: 0;
+  padding: 5px 9px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--hud-text);
+  background: rgba(10, 8, 6, 0.4);
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+}
+
+.heartwood__search::placeholder {
+  color: var(--hud-muted);
+}
+
+/*
+ * Map and card. A column everywhere except a landscape phone, where they turn
+ * into a row — see the bottom of this file.
+ */
+.heartwood__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* The map's own box. `position: relative` so the view controls can sit on it,
+   `min-height: 0` so it may actually shrink inside the flex column. */
+.heartwood__frame {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 140px;
+  border: 1px solid var(--hud-border);
+  border-radius: 10px;
+  background: radial-gradient(circle at 50% 50%, rgba(66, 46, 27, 0.55), rgba(16, 11, 7, 0.8));
+  overflow: hidden;
+}
+
+.heartwood__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* The map owns every gesture inside it: without this the browser pans the
+     page instead of the map, and pinch zooms the whole game. */
+  touch-action: none;
+  cursor: grab;
+}
+
+.heartwood__canvas:active {
+  cursor: grabbing;
+}
+
+.heartwood__canvas:focus-visible {
+  outline: 2px solid var(--hud-accent);
+  outline-offset: -2px;
+}
+
+.heartwood__view {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.heartwood__view button {
+  width: 34px;
+  height: 34px;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--hud-text);
+  background: rgba(28, 20, 12, 0.78);
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+}
+
+/*
+ * What the search found, across the top of the map.
+ *
+ * At the top and on its own backing rather than floating over the middle: the
+ * branch labels live at the map's edges, and a bare line of text at the bottom
+ * landed on `ROOTS`.
+ */
+.heartwood__found {
+  position: absolute;
+  inset: 6px 6px auto;
+  margin: 0;
+  padding: 3px 8px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--hud-text);
+  background: rgba(10, 8, 6, 0.72);
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+  backdrop-filter: blur(3px);
+  pointer-events: none;
+}
+
+/*
+ * The card. Its left edge takes the selected node's branch colour, which is the
+ * only place in the UI where the map's palette is restated — so a player can
+ * tell without reading that they are looking at a root node rather than a leaf.
+ */
+.heartwood__card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px;
+  background: rgba(10, 8, 6, 0.45);
+  border: 1px solid var(--hud-border);
+  border-left: 3px solid var(--hud-accent);
+  border-radius: 10px;
+}
+
+.heartwood__card--taken {
+  background: rgba(40, 60, 34, 0.35);
+}
+
+.heartwood__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 14px;
+  color: var(--hud-text);
+}
+
+.heartwood__branch {
+  font-size: 13px;
+}
+
+.heartwood__kind {
+  margin-left: auto;
+  padding: 1px 7px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hud-muted);
+  border: 1px solid var(--hud-border);
+  border-radius: 7px;
+}
+
+.heartwood__kind--notable {
+  color: var(--hud-accent);
+  border-color: rgba(255, 210, 122, 0.4);
+}
+
+.heartwood__kind--keystone {
+  color: #e9d5ff;
+  border-color: rgba(203, 160, 233, 0.55);
+  background: rgba(138, 88, 190, 0.2);
+}
+
+.heartwood__text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--hud-muted);
+}
+
+.heartwood__status {
+  margin: 0;
+  font-size: 11px;
+  color: var(--hud-accent);
+}
+
+.heartwood__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.heartwood__button {
+  /* 34px rather than 44: this row sits at the bottom of a panel on a phone,
+     where the dock already owns the very bottom edge, and a full-height button
+     here would push the map off the screen. The width carries the target. */
+  min-height: 34px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--hud-text);
+  background: rgba(46, 33, 20, 0.8);
+  border: 1px solid var(--hud-border);
+  border-radius: 8px;
+}
+
+.heartwood__button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.heartwood__button--take:not(:disabled) {
+  color: #2b1c0f;
+  background: var(--hud-accent);
+  border-color: var(--hud-accent);
+}
+
+.heartwood__button--respec {
+  margin-left: auto;
+  color: var(--hud-muted);
+  background: transparent;
+}
+
+/* The second press. Red, because it is the one button here that takes
+   something away — the same red the scissors use, and nothing else. */
+.heartwood__button--confirm {
+  color: #ffe2d8;
+  background: rgba(120, 34, 26, 0.7);
+  border-color: #ff8a72;
+}
+
+/*
+ * Landscape phone: wide and short, which is the opposite of what a column
+ * wants.
+ *
+ * The map and the card go side by side, so the map keeps every pixel of the
+ * little height there is and the card takes the width that a round map on a
+ * wide screen was wasting anyway. The bar's labels go too — the glyph and the
+ * number are the whole chip at that size.
+ */
+@media (max-height: 560px) {
+  .heartwood {
+    gap: 6px;
+  }
+
+  .heartwood__body {
+    flex-direction: row;
+    gap: 6px;
+  }
+
+  .heartwood__frame {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .heartwood__card {
+    flex: 0 0 min(46%, 290px);
+    overflow-y: auto;
+  }
+
+  .heartwood__pool-label {
+    display: none;
+  }
+
+  /* The respec button stops pushing the two real actions onto a second row. */
+  .heartwood__button--respec {
+    margin-left: 0;
+  }
+}

@@ -78,13 +78,26 @@ function ResourceRow({
   );
 }
 
-/** Resource totals + live per-second rates, driven by the content resource list. */
+/**
+ * Resource totals + live per-second rates, driven by the content resource list.
+ *
+ * A chip appears the first time its resource is *earned* and never leaves
+ * again. Seven chips from the first frame was a readout of a game the player
+ * has not been shown yet: Deadwood needs the scissors, Seeds need a whole run,
+ * and on a landscape phone those five zeroes were a row of the screen the tree
+ * could have had. Sap is the exception and is always there, because the first
+ * thing the game asks is that you tap for it.
+ *
+ * Lifetime totals rather than balances, so spending a resource back to nothing
+ * cannot take its chip away mid-purchase.
+ */
 function ResourceReadout({ tween }: { readonly tween: boolean }) {
   const resources = useGameStore((s) => s.snapshot.resources);
+  const totals = useGameStore((s) => s.snapshot.totals);
   const perSecond = useGameStore((s) => s.snapshot.perSecond);
   return (
     <div className="hud-resources" role="list" aria-label={t('hud.resources')}>
-      {RESOURCES.map((def) => (
+      {RESOURCES.filter((def) => def.id === 'sap' || totals[def.id].gt(0)).map((def) => (
         <ResourceRow
           key={def.id}
           def={def}

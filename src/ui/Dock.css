@@ -151,3 +151,39 @@
     display: none;
   }
 }
+
+/*
+ * Landscape phone: the dock keeps its shape and loses its height.
+ *
+ * It stays a floating row rather than becoming the full-width tab bar the
+ * portrait rule builds — there is width to spare here and height there is not,
+ * and a bar pinned across the bottom edge would also run under the drawer that
+ * `Panel.css` opens on the right. Every number below is the smallest one that
+ * still leaves a 40px-tall target, which is what a thumb needs.
+ */
+@media (max-height: 560px) {
+  .dock {
+    bottom: max(6px, env(safe-area-inset-bottom, 0px));
+    gap: 2px;
+    padding: 3px;
+    border-radius: 12px;
+  }
+
+  .dock__button {
+    min-width: 50px;
+    min-height: 40px;
+    padding: 3px 6px;
+  }
+
+  .dock__glyph {
+    font-size: 15px;
+  }
+
+  .dock__label {
+    font-size: 9px;
+  }
+
+  .dock__key {
+    display: none;
+  }
+}

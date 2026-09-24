@@ -4,6 +4,7 @@ import { SAVE_BACKUP_KEY, SAVE_KEY, SAVE_VERSION } from '../content/save';
 import { DEFAULT_SETTINGS, normaliseSettings } from '../content/settings';
 import { SYMBIONT_BY_ID } from '../content/symbionts';
 import { isNewerThanCurrent, migrateSave, MIGRATIONS } from './migrations';
+import { PASSIVE_START_ID, passiveNodeId } from '../content/passives';
 import { parseSaveText, validateEnvelope, type SaveEnvelope } from './save';
 import { Simulation } from './simulation';
 import {
@@ -393,6 +394,37 @@ describe('storage', () => {
 
     clearSave(store);
     expect(store.data.size).toBe(0);
+  });
+});
+
+describe('the Heartwood map', () => {
+  it('round-trips the nodes that were taken', () => {
+    const sim = playedGame();
+    sim.state.rings = 5;
+    sim.allocatePassive(passiveNodeId('bark', 'a'));
+    sim.allocatePassive(passiveNodeId('bark', 'b'));
+    sim.allocatePassive(passiveNodeId('bark', 'c'));
+
+    const loaded = new Simulation();
+    expect(loaded.load(sim.save())).toBe(true);
+    expect([...loaded.state.passives].sort()).toEqual([...sim.state.passives].sort());
+    expect(loaded.passiveWallet().ring.spent).toBe(3);
+  });
+
+  it('opens a save written before the map existed', () => {
+    // The precedent the `features` latch set: a missing key is not a broken
+    // file, it is a player who has never spent a point. No version bump, no
+    // migration, and nobody's twenty hours refused at the door.
+    const sim = playedGame();
+    const envelope = sim.save();
+    const withoutPassives = JSON.parse(JSON.stringify(envelope)) as {
+      data: Record<string, unknown>;
+    };
+    delete withoutPassives.data.passives;
+
+    const loaded = new Simulation();
+    expect(loaded.load(withoutPassives as unknown as SaveEnvelope)).toBe(true);
+    expect([...loaded.state.passives]).toEqual([PASSIVE_START_ID]);
   });
 });
 

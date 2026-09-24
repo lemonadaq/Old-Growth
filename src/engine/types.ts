@@ -9,6 +9,7 @@ import { createComboState, type ComboState } from './combo';
 import { dayCycle, type DayCycle } from './daylight';
 import type { Producer } from './economy';
 import { HeirloomLedger } from './heirlooms';
+import { initialPassives, type PassiveWallet } from './passives';
 import { computeHydration, type HydrationState } from './hydration';
 import { LitterGround } from './litter';
 import type { BeatStyle, FeatureId, HintAnchor } from '../content/progression';
@@ -116,6 +117,16 @@ export interface GameState {
   seedFragments: number;
   /** Heirlooms bought in the Seed Vault. The one ledger prestige carries over. */
   heirlooms: HeirloomLedger;
+  /**
+   * Nodes taken on the Heartwood map, by id, including the heartwood itself.
+   *
+   * A set and nothing else: a passive node is in or out, its effects are read
+   * from the content table, and the rules about *which* may be taken are pure
+   * functions over this set in `src/engine/passives.ts`. Carried across
+   * prestige, like the Vault and for the same reason — the points that paid for
+   * it were rings and badges, neither of which a reset takes back.
+   */
+  passives: Set<string>;
   /**
    * Heirloom levels this run has already been handed its run-start grants for.
    *
@@ -401,6 +412,8 @@ export interface PrestigeSnapshot {
   readonly forestMultiplier: number;
   /** Every heirloom in Vault order, owned or not. */
   readonly heirlooms: readonly HeirloomSnapshot[];
+  /** The Heartwood map: what is taken, what is open, and what is left to spend. */
+  readonly passives: PassiveSnapshot;
   /** Which creature the Bond heirloom would bring, or `null`. */
   readonly bondSymbiont: string | null;
   /** Whether a bond has been bought at all — the picker is dead without one. */
@@ -447,6 +460,24 @@ export interface ProgressionSnapshot {
   readonly beat: BeatSnapshot | null;
   /** The next unseen hint whose moment has come, or `null`. */
   readonly hint: HintSnapshot | null;
+}
+
+/**
+ * The Heartwood map as the UI reads it.
+ *
+ * Deliberately three cheap sets and a wallet rather than a resolved state per
+ * node: the map draws sixty-one nodes every frame it is open, and `allocated`
+ * plus `open` answers every question it asks of a node in a set lookup. What a
+ * node *costs* and whether the pool can cover it is the wallet, once, for all
+ * of them.
+ */
+export interface PassiveSnapshot {
+  /** Node ids taken, including the heartwood. */
+  readonly allocated: ReadonlySet<string>;
+  /** Node ids something allocated touches, and which are not taken yet. */
+  readonly open: ReadonlySet<string>;
+  /** Both point pools: earned, spent, available. */
+  readonly wallet: PassiveWallet;
 }
 
 /** One upgrade's purchase state, resolved against the player's balance. */
@@ -618,6 +649,7 @@ export function createInitialState(now: number = Date.now()): GameState {
     veinReach: 1,
     seedFragments: 0,
     heirlooms: new HeirloomLedger(),
+    passives: initialPassives(),
     runStartLevels: {},
     forest: [],
     memory: null,

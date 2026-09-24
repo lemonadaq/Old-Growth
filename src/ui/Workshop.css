@@ -1,20 +1,18 @@
-/* STEP 9's Deadwood sink. The final HUD (STEP 18) folds this into the dock. */
+/*
+ * Contents of the panel shell, not a panel.
+ *
+ * This used to frame itself — `position: absolute`, a width, a background and a
+ * rounded border — back when it floated over the canvas on its own. STEP 18 put
+ * it inside `Panel`, which owns all of that now, and the leftover framing was
+ * fighting the shell: an absolutely positioned child escapes the shell's scroll
+ * box, so the Grow panel's two children were drawn on top of each other and
+ * over the panel's own edge. What is left here is layout *inside* the shell.
+ */
 .workshop {
-  pointer-events: auto; /* the HUD ignores pointer events by default */
-  position: absolute;
-  top: 56px;
-  left: 12px;
-  width: 224px;
-  max-height: calc(100% - 160px);
-  overflow-y: auto;
+  pointer-events: auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px;
-  background: var(--hud-bg);
-  border: 1px solid var(--hud-border);
-  border-radius: 10px;
-  backdrop-filter: blur(4px);
 }
 
 .workshop__title {

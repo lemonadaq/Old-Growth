@@ -15,6 +15,117 @@ Do not refactor unrelated code.
 
 ## Changelog
 
+### 2026-09-24 — The Heartwood, and a phone that can be played on
+
+Played on an actual phone for the first time, and two things were wrong. The
+landscape layout was broken in a way no test could have caught, and twenty
+steps of systems had given the player almost nothing to _decide_ — every
+upgrade in the game was a list of four buttons you press when you can afford
+them. This adds the decision, and fixes the phone.
+
+**The map.** `src/content/passives.ts` is a sixty-one node passive tree, read as
+a trunk in cross-section: a heartwood at the centre and six branches — Canopy,
+Bark, Heartwood, Roots, Symbiosis, Season — radiating out through two notables
+to a keystone each. One rule carries the whole design: **a node opens when
+something already allocated touches it**, so a build is a route rather than a
+shopping list, and the long way round to a keystone is a real cost. Each
+branch's outer minor reaches around to its neighbour's, so the rim is
+traversable and a build can be _re-routed_ rather than only unwound.
+
+- **Two pools, earned by playing two different ways.** Ring points buy minors
+  and notables: one for the sapling, one per ring the trunk lays down, one per
+  badge. Seed points buy keystones alone: one per Seed ever earned, counted from
+  the lifetime total so spending in the Vault never costs one. Neither is stored
+  anywhere — `passivePointsEarned` is a _reading_ of rings, badges and lifetime
+  Seeds, which is the only reason a save written before the map existed opens
+  with exactly the right balance.
+- **The badges finally pay for something.** Thirty achievements were worth `+1%`
+  each and nothing else; they are now a point apiece, which turns the Journal
+  from a record into a route.
+- **Six keystones, each a real trade** — the only nodes in the game that take
+  something away. Splitbark quadruples the tap and kills the combo meter;
+  Mycelial Net doubles everything underground and costs the canopy nearly half;
+  Evergreen halves growth costs and takes 15% off everything the tree makes.
+- **Every effect lands on a target the engine actually reads.** That is not
+  automatic: Sap from a tap, Leaf Litter from a pile and Deadwood from a cut are
+  credited _directly_ rather than through a producer, so a `resource: 'sap'`
+  multiplier would have been a node that quietly does nothing. Taps move through
+  the click stats instead, and a test walks the whole table asserting it.
+- **Refunds are exact rather than forbidden.** A node may be given back only if
+  everything still allocated can still be reached from the heartwood without it;
+  the panel says which, because silently un-allocating whatever got stranded
+  would refund a dozen nodes for one mis-tap. Respec is free and always will be:
+  the keystones are explicitly trades you are meant to _try_, and charging for
+  that is a tax on finding out what the game does.
+- **`src/ui/Heartwood.tsx` + `src/render/passiveMap.ts`** — a canvas with a
+  camera, because sixty-one nodes and seventy edges is not a thing the DOM lays
+  out and because drag-and-pinch is what a map wants on a phone. One finger
+  pans, a press that travels less than 7px is a tap instead (which is what makes
+  a 7px node selectable with a thumb), two fingers pinch around their midpoint,
+  the wheel zooms on the pointer, and arrow keys walk the edges the way the main
+  tree already does. Everything _about_ a node stays DOM, in the card, so the
+  part with the words in it is selectable and readable aloud.
+
+**The phone.** The landscape layout was broken because the breakpoint measured
+the wrong axis: a phone on its side is ~800×370, so `max-width: 620px` never
+fired and a 370px-tall screen got the desktop HUD — full resource chips, four
+rows of them, and `padding-right: 364px` reserving room for a panel. Now
+`(max-height: 560px)` is a first-class case: compact chips, no title, the panel
+becomes a right-hand drawer rather than a bottom sheet that would leave both
+halves useless, and the Heartwood puts its card _beside_ the map instead of
+under it.
+
+- **A bug that was live on desktop too, for three steps.** Every panel child —
+  Upgrades, Workshop, Journal, Vault, Symbionts, Settings — still framed itself
+  with `position: absolute` from before STEP 18 folded them into the panel
+  shell. The shell's reset tied with them on specificity, so which one won was
+  decided by bundler order: the Grow panel drew its two children _on top of each
+  other_ and over the panel's own edge. The six were reframed as what they are —
+  contents — and the reset now outranks them rather than tying.
+- **Resource chips appear as they are earned.** Seven chips from the first frame
+  was a readout of a game the player has not been shown yet; five of them were
+  zeroes, and on a landscape phone that was a row of the screen the tree could
+  have had.
+- Safe-area insets on the horizontal axis, which is where a notch is when the
+  phone is on its side; a compact dock; and a focus ring drawn inside the
+  panel's border rather than tracing the whole sheet, because on a phone opening
+  a panel is the most common thing anyone does and it read as an alarm.
+
+**The canvas bug worth remembering.** The map painted nothing at first. Resizing
+a canvas _clears_ it — assigning `width` or `height` is a reset, not a resize —
+and the `ResizeObserver` doing the sizing fires outside React, so it was wiping
+whatever the draw effect had just painted and nothing restored it until React
+happened to render again. The draw inputs now live in a ref and both callers
+paint through one function; the observer also skips assigning a size it already
+has, since sub-pixel layout settling fires it constantly.
+
+Tests: `passives.test.ts` (32) covers the table's integrity — every link
+resolves, every node is reachable from the heartwood, every branch has exactly
+one keystone, the mirrored click-stat tags equal the engine's — plus points,
+allocation, stranded refunds, modifier expansion and the whole thing through the
+simulation. `save.test.ts` gains a round-trip and the no-`passives`-key case.
+**1293 tests pass**; lint, build and `npm run sim` are clean, and the balance
+targets are all still met.
+
+**Open TODOs**
+
+- [ ] **The simulation does not model the map.** All six balance targets still
+      pass, but they pass because the bots never spend a point — the tree's
+      power is unmeasured. A seventh bot that allocates greedily down one branch
+      is what would say whether the keystones are trades or traps.
+- [ ] Ring points come in slowly on purpose, but a year is ~10.7 hours of engine
+      time, so rings are the _slow_ pool by a long way and the badges do most of
+      the early work. Worth re-checking once someone has played a full week.
+- [ ] The map draws on every store snapshot, which is every frame while it is
+      open. It is 61 circles and costs nothing measurable, but the repaint is
+      driven by object identity rather than by anything having changed.
+- [ ] No keyboard path to _pan_ the map — arrows move the selection, which
+      re-centres, so it works, but there is no "drag" without a pointer.
+- [ ] The Heartwood is not feature-gated: it is in the dock from the first
+      frame, with one point to spend. That is deliberate (a map you cannot open
+      teaches nothing) but it does mean an eighth dock button on a 390px phone,
+      where the labels now ellipsise.
+
 ### 2026-09-02 — STEP 20: Release build and deployment
 
 Nineteen steps of game, and no way for anyone to play it. This one turns the

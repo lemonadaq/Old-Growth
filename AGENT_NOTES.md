@@ -107,6 +107,19 @@ simulation. `save.test.ts` gains a round-trip and the no-`passives`-key case.
 **1293 tests pass**; lint, build and `npm run sim` are clean, and the balance
 targets are all still met.
 
+**The deploy had been broken for three weeks, by STEP 20.** The live site was
+still serving a build from before STEP 20, and the reason was not the Vercel
+project's wiring: it fires on every push and had been _failing_ on every push
+since 2 September. `vercel.json` carried `"//"` comment keys inside two of its
+`headers` entries. JSON has no comments, the published schema sets
+`additionalProperties: false` on those entries, and Vercel rejects the whole
+file — which fails the deployment rather than the build, so nothing in this repo
+ever went red. STEP 20's note said `deploy:vercel` was untested; it was worse
+than untested, it was actively breaking the auto-deploy that already worked.
+The keys are gone, the file validates against the published schema with zero
+errors, and `scripts/lib/release.test.mjs` now asserts the shape offline so the
+next comment-in-JSON is caught here instead of three weeks later.
+
 **Open TODOs**
 
 - [ ] **The simulation does not model the map.** All six balance targets still

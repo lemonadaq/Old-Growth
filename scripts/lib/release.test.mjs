@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { crc32 } from './crc32.mjs';
@@ -167,5 +170,64 @@ describe('bundle budget', () => {
     expect(formatBytes(512)).toBe('512 B');
     expect(formatBytes(2048)).toBe('2.0 KB');
     expect(formatBytes(3 * 1024 * 1024)).toBe('3.00 MB');
+  });
+});
+
+/**
+ * `vercel.json` is schema-validated by Vercel, strictly, and a file it rejects
+ * fails the *deployment* rather than the build — silently, as far as the repo
+ * is concerned. Every push between STEP 20 and this test failed to deploy for
+ * three weeks because two header entries carried a `"//"` comment key, which
+ * JSON has no concept of and Vercel's `additionalProperties: false` forbids.
+ *
+ * This asserts the shape offline, so nobody has to remember. It is not the full
+ * schema — it is the part that has already gone wrong once.
+ */
+describe('vercel.json', () => {
+  const config = JSON.parse(
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'vercel.json'), 'utf8'),
+  );
+
+  /** What a routing entry may carry. Anything else is rejected at deploy time. */
+  const HEADER_KEYS = new Set(['source', 'headers', 'has', 'missing']);
+  const REWRITE_KEYS = new Set([
+    'source',
+    'destination',
+    'has',
+    'missing',
+    'statusCode',
+    'env',
+    'transforms',
+    'respectOriginCacheControl',
+  ]);
+
+  it('carries no comment keys, which JSON has no concept of', () => {
+    const commented = JSON.stringify(config).includes('"//"');
+    expect(commented).toBe(false);
+  });
+
+  it('gives every header entry only the fields the schema allows', () => {
+    for (const entry of config.headers ?? []) {
+      for (const key of Object.keys(entry)) {
+        expect(HEADER_KEYS.has(key), `headers[].${key}`).toBe(true);
+      }
+      expect(Array.isArray(entry.headers)).toBe(true);
+      for (const header of entry.headers) {
+        expect(Object.keys(header).sort()).toEqual(['key', 'value']);
+      }
+    }
+  });
+
+  it('gives every rewrite only the fields the schema allows', () => {
+    for (const entry of config.rewrites ?? []) {
+      for (const key of Object.keys(entry)) {
+        expect(REWRITE_KEYS.has(key), `rewrites[].${key}`).toBe(true);
+      }
+    }
+  });
+
+  it('still points at the build this repo actually produces', () => {
+    expect(config.buildCommand).toBe('npm run build');
+    expect(config.outputDirectory).toBe('dist');
   });
 });
